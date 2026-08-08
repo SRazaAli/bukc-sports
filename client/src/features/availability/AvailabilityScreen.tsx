@@ -45,7 +45,10 @@ export default function AvailabilityScreen() {
     }
   }, []);
 
-  useEffect(() => { void loadInitial(); }, [loadInitial]);
+  useEffect(() => {
+    if (loading || !user) return;
+    void loadInitial();
+  }, [loading, user, loadInitial]);
 
   // Live updates via SSE
   useEffect(() => {

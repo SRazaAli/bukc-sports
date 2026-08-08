@@ -35,7 +35,10 @@ export default function ProfileScreen() {
       setAccount(res.account);
     } catch (e) { setError(errMsg(e)); }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (authLoading || !user) return;
+    void load();
+  }, [authLoading, user, load]);
 
   if (authLoading || !user) return <PortalShell title="Profile"><p /></PortalShell>;
 
