@@ -275,7 +275,6 @@ const STATE_LABEL: Record<string, string> = {
 };
 
 function ArticleLifecycleTab() {
-  // All articles for the search/select
   const [allArticles, setAllArticles] = useState<Article[]>([]);
   const [articlesLoading, setArticlesLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -285,7 +284,11 @@ function ArticleLifecycleTab() {
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'timeline' | 'scans' | 'flags' | 'pairs'>('timeline');
 
-  // Load all non-decommissioned articles once
+  // Browsable list pagination
+  const LIST_PAGE = 20;
+  const [listPage, setListPage] = useState(0);
+
+  // Load all active articles once
   useEffect(() => {
     listArticles()
       .then((r) => setAllArticles(r.articles))
@@ -293,16 +296,31 @@ function ArticleLifecycleTab() {
       .finally(() => setArticlesLoading(false));
   }, []);
 
-  // Fuse search over barcode + equipment name
+  // Fuse for both dropdown and filtered list
   const fuse = useMemo(() => new Fuse(allArticles, {
     keys: ['barcode', 'equipment_type_name'],
     threshold: 0.3, ignoreLocation: true,
   }), [allArticles]);
-  const results = search.trim().length >= 2
-    ? fuse.search(search.trim()).slice(0, 12).map((r) => r.item)
-    : allArticles.slice(0, 12);
 
-  // Load lifecycle when selection changes
+  // Dropdown: quick picks while typing
+  const dropdownResults = search.trim().length >= 1
+    ? fuse.search(search.trim()).slice(0, 10).map((r) => r.item)
+    : [];
+
+  // List: full filtered set (or all when search empty)
+  const listResults = useMemo(() =>
+    search.trim() && !selectedId
+      ? fuse.search(search.trim()).map((r) => r.item)
+      : allArticles,
+  [search, selectedId, allArticles, fuse]);
+
+  // Reset list page on search change
+  useEffect(() => { setListPage(0); }, [search]);
+
+  const listTotalPages = Math.ceil(listResults.length / LIST_PAGE);
+  const listPageItems = listResults.slice(listPage * LIST_PAGE, (listPage + 1) * LIST_PAGE);
+
+  // Load lifecycle when an article is selected
   useEffect(() => {
     if (!selectedId) { setLifecycle(null); return; }
     setLifecycleLoading(true);
@@ -318,25 +336,26 @@ function ArticleLifecycleTab() {
     setSelectedId(a.article_id);
     setSearch(`${a.barcode} — ${a.equipment_type_name}`);
   }
+  function clearSelection() { setSearch(''); setSelectedId(null); setLifecycle(null); }
 
-  const showDropdown = search.trim().length >= 1 && !selectedId;
+  const showDropdown = search.trim().length >= 1 && !selectedId && dropdownResults.length > 0;
 
   const stateBadgeStyle = (s: string): React.CSSProperties =>
-    s === 'AVAILABLE' ? { background: '#e6f4ec', color: '#1f7a45' } :
-    s === 'DAMAGED' ? { background: '#fdecec', color: '#b3352b' } :
+    s === 'AVAILABLE'      ? { background: '#e6f4ec', color: '#1f7a45' } :
+    s === 'DAMAGED'        ? { background: '#fdecec', color: '#b3352b' } :
     s === 'DECOMMISSIONED' ? { background: '#f4f5f6', color: '#5c6773' } :
-    { background: '#e3f2ff', color: '#1565c0' };
+                             { background: '#e3f2ff', color: '#1565c0' };
 
   const condBadgeStyle = (c: string): React.CSSProperties =>
     c === 'GOOD' ? { background: '#e6f4ec', color: '#1f7a45' } :
     c === 'WORN' ? { background: '#fdf1e3', color: '#9a6412' } :
-    { background: '#fdecec', color: '#b3352b' };
+                   { background: '#fdecec', color: '#b3352b' };
 
   return (
     <div>
-      {/* ── Search / select article ── */}
+      {/* ── Search bar ── */}
       <div style={filterPanel}>
-        <label style={lbl}>Search article by barcode or equipment name</label>
+        <label style={lbl}>Search by barcode or equipment name</label>
         <div style={{ position: 'relative', marginTop: 6 }}>
           <input
             type="search"
@@ -345,23 +364,20 @@ function ArticleLifecycleTab() {
             value={search}
             onChange={(e) => { setSearch(e.target.value); setSelectedId(null); setLifecycle(null); }}
           />
-          {/* Search icon */}
           <svg style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
             width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a949f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
           {selectedId && (
-            <button onClick={() => { setSearch(''); setSelectedId(null); setLifecycle(null); }}
+            <button onClick={clearSelection}
               style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#8a949f', fontSize: 18, lineHeight: 1 }}>
               ×
             </button>
           )}
-          {/* Dropdown results */}
-          {showDropdown && !articlesLoading && (
+          {/* Dropdown — quick picks while typing (collapses when article selected) */}
+          {showDropdown && (
             <div style={dropdown}>
-              {results.length === 0 ? (
-                <div style={dropItem}>No articles match</div>
-              ) : results.map((a) => (
+              {dropdownResults.map((a) => (
                 <button key={a.article_id} style={dropItemBtn} onClick={() => selectArticle(a)}>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{a.barcode}</span>
                   <span style={{ color: '#5c6773', marginLeft: 8, fontSize: 13 }}>{a.equipment_type_name}</span>
@@ -372,27 +388,27 @@ function ArticleLifecycleTab() {
               ))}
             </div>
           )}
-          {articlesLoading && showDropdown && <div style={dropdown}><div style={dropItem}>Loading articles…</div></div>}
         </div>
-        {!selectedId && !search && (
+        {!articlesLoading && !selectedId && (
           <p style={{ ...muted, marginTop: 8 }}>
-            Start typing to search across {allArticles.length} active article{allArticles.length !== 1 ? 's' : ''}.
+            {search.trim()
+              ? `${listResults.length} article${listResults.length !== 1 ? 's' : ''} matching "${search.trim()}" — click any row to view history.`
+              : `${allArticles.length} active article${allArticles.length !== 1 ? 's' : ''} — click any row to view full lifecycle history, or search above.`}
           </p>
         )}
       </div>
 
-      {/* ── Lifecycle detail ── */}
+      {/* ── Lifecycle detail (replaces list when an article is selected) ── */}
       {lifecycleLoading && (
         <div style={detailCard}>
-          <p style={muted}>Loading article history…</p>
+          <div style={{ padding: '32px 24px' }}><p style={muted}>Loading article history…</p></div>
         </div>
       )}
-
       {lifecycleError && <div style={errBox}>{lifecycleError}</div>}
 
       {lifecycle && !lifecycleLoading && (
         <div style={detailCard}>
-          {/* Article summary header */}
+          {/* Article header */}
           <div style={articleHeader}>
             <div style={articleHeaderLeft}>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: '#26485f', letterSpacing: '0.04em' }}>
@@ -423,16 +439,16 @@ function ArticleLifecycleTab() {
             </div>
           </div>
 
-          {/* Quick stats row */}
+          {/* Stats row */}
           <div style={statsRow}>
             {[
               { label: 'Audit Entries', value: lifecycle.auditLog.length, color: '#26485f' },
-              { label: 'Health Scans', value: lifecycle.scans.length, color: '#1565c0' },
-              { label: 'Damage Flags', value: lifecycle.flags.length, color: lifecycle.flags.some((f) => !f.cleared_at) ? '#b3352b' : '#1f7a45' },
-              { label: 'Pair Records', value: lifecycle.pairs.length, color: '#6b21a8' },
+              { label: 'Health Scans',  value: lifecycle.scans.length,    color: '#1565c0' },
+              { label: 'Damage Flags',  value: lifecycle.flags.length,    color: lifecycle.flags.some((f) => !f.cleared_at) ? '#b3352b' : '#1f7a45' },
+              { label: 'Pair Records',  value: lifecycle.pairs.length,    color: '#6b21a8' },
             ].map((s) => (
               <div key={s.label} style={statCard}>
-                <div style={{ font: `700 24px var(--font-body)`, color: s.color }}>{s.value}</div>
+                <div style={{ font: '700 24px var(--font-body)', color: s.color }}>{s.value}</div>
                 <div style={{ font: '11px var(--font-body)', color: '#8a949f', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 2 }}>{s.label}</div>
               </div>
             ))}
@@ -441,21 +457,18 @@ function ArticleLifecycleTab() {
           {/* Detail tab strip */}
           <div style={detailTabRow}>
             {(['timeline', 'scans', 'flags', 'pairs'] as const).map((t) => (
-              <button key={t} style={{ ...detailTabBtn, ...(detailTab === t ? detailTabActive : {}) }}
-                onClick={() => setDetailTab(t)}>
+              <button key={t} style={{ ...detailTabBtn, ...(detailTab === t ? detailTabActive : {}) }} onClick={() => setDetailTab(t)}>
                 {t === 'timeline' ? 'Audit Log' : t === 'scans' ? 'Health Scans' : t === 'flags' ? 'Damage Flags' : 'Pair History'}
               </button>
             ))}
           </div>
 
-          {/* Timeline */}
+          {/* Audit log timeline */}
           {detailTab === 'timeline' && (
             <div style={detailBody}>
-              {lifecycle.auditLog.length === 0
-                ? <p style={muted}>No audit entries recorded yet.</p>
+              {lifecycle.auditLog.length === 0 ? <p style={muted}>No audit entries recorded yet.</p>
                 : lifecycle.auditLog.map((entry, i) => (
                   <div key={entry.log_id} style={{ display: 'flex', gap: 14, paddingBottom: 16, marginBottom: i < lifecycle.auditLog.length - 1 ? 16 : 0, borderBottom: i < lifecycle.auditLog.length - 1 ? '1px solid #f0f0f0' : 'none' }}>
-                    {/* Icon chip */}
                     <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 8, background: ACTION_BG[entry.action] ?? '#f4f5f6', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
                       <div style={{ width: 10, height: 10, borderRadius: '50%', background: ACTION_COLOR[entry.action] ?? '#5c6773' }} />
                     </div>
@@ -481,147 +494,163 @@ function ArticleLifecycleTab() {
           {/* Health scans */}
           {detailTab === 'scans' && (
             <div style={detailBody}>
-              {lifecycle.scans.length === 0
-                ? <p style={muted}>No health scans recorded.</p>
-                : (
-                  <table style={tbl}>
-                    <thead>
-                      <tr>
-                        <th style={th}>Date & Time</th>
-                        <th style={th}>Kind</th>
-                        <th style={th}>Score</th>
-                        <th style={th}>Condition</th>
-                        <th style={th}>Performed By</th>
+              {lifecycle.scans.length === 0 ? <p style={muted}>No health scans recorded.</p> : (
+                <table style={tbl}>
+                  <thead><tr><th style={th}>Date & Time</th><th style={th}>Kind</th><th style={th}>Score</th><th style={th}>Condition</th><th style={th}>Performed By</th></tr></thead>
+                  <tbody>
+                    {lifecycle.scans.map((s) => (
+                      <tr key={s.scan_id}>
+                        <td style={td}>{fmtDateTime(s.scanned_at as unknown as string)}</td>
+                        <td style={td}>
+                          <span style={{ ...badge, background: s.kind === 'ENTRY' ? '#e3f2ff' : s.kind === 'SCHEDULED' ? '#f3e8ff' : '#f4f5f6', color: s.kind === 'ENTRY' ? '#1565c0' : s.kind === 'SCHEDULED' ? '#6b21a8' : '#5c6773' }}>
+                            {s.kind === 'ENTRY' ? 'Entry' : s.kind === 'SCHEDULED' ? 'Scheduled' : 'Ad-hoc'}
+                          </span>
+                        </td>
+                        <td style={td}>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 15 }}>{Number(s.health_score).toFixed(0)}</span>
+                          <span style={{ color: '#8a949f', fontSize: 12 }}>/100</span>
+                        </td>
+                        <td style={td}><span style={{ ...badge, ...condBadgeStyle(s.resulting_label) }}>{s.resulting_label}</span></td>
+                        <td style={td}>{s.scanned_by_name}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {lifecycle.scans.map((s) => (
-                        <tr key={s.scan_id}>
-                          <td style={td}>{fmtDateTime(s.scanned_at as unknown as string)}</td>
-                          <td style={td}>
-                            <span style={{ ...badge, background: s.kind === 'ENTRY' ? '#e3f2ff' : s.kind === 'SCHEDULED' ? '#f3e8ff' : '#f4f5f6', color: s.kind === 'ENTRY' ? '#1565c0' : s.kind === 'SCHEDULED' ? '#6b21a8' : '#5c6773' }}>
-                              {s.kind === 'ENTRY' ? 'Entry' : s.kind === 'SCHEDULED' ? 'Scheduled' : 'Ad-hoc'}
-                            </span>
-                          </td>
-                          <td style={td}>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 15 }}>{Number(s.health_score).toFixed(0)}</span>
-                            <span style={{ color: '#8a949f', fontSize: 12 }}>/100</span>
-                          </td>
-                          <td style={td}>
-                            <span style={{ ...badge, ...condBadgeStyle(s.resulting_label) }}>{s.resulting_label}</span>
-                          </td>
-                          <td style={td}>{s.scanned_by_name}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )
-              }
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
 
           {/* Damage flags */}
           {detailTab === 'flags' && (
             <div style={detailBody}>
-              {lifecycle.flags.length === 0
-                ? <p style={muted}>No damage flags on record for this article.</p>
-                : (
-                  <table style={tbl}>
-                    <thead>
-                      <tr>
-                        <th style={th}>Raised</th>
-                        <th style={th}>Raised By</th>
-                        <th style={th}>Status</th>
-                        <th style={th}>Cleared</th>
-                        <th style={th}>Cleared By</th>
-                        <th style={th}>Final Condition</th>
+              {lifecycle.flags.length === 0 ? <p style={muted}>No damage flags on record.</p> : (
+                <table style={tbl}>
+                  <thead><tr><th style={th}>Raised</th><th style={th}>Raised By</th><th style={th}>Status</th><th style={th}>Cleared</th><th style={th}>Cleared By</th><th style={th}>Final Condition</th></tr></thead>
+                  <tbody>
+                    {lifecycle.flags.map((f) => (
+                      <tr key={f.flag_id}>
+                        <td style={td}>{fmtDateTime(f.raised_at as unknown as string)}</td>
+                        <td style={td}>{f.raised_by_system ? <span style={{ color: '#5c6773' }}>System (auto)</span> : (f.raised_by_name ?? '—')}</td>
+                        <td style={td}>
+                          {f.cleared_at
+                            ? <span style={{ ...badge, background: '#e6f4ec', color: '#1f7a45' }}>Cleared</span>
+                            : <span style={{ ...badge, background: '#fdecec', color: '#b3352b' }}>Open</span>}
+                        </td>
+                        <td style={td}>{f.cleared_at ? fmtDateTime(f.cleared_at as unknown as string) : '—'}</td>
+                        <td style={td}>{f.cleared_by_name ?? '—'}</td>
+                        <td style={td}>{f.cleared_with_label ? <span style={{ ...badge, ...condBadgeStyle(f.cleared_with_label) }}>{f.cleared_with_label}</span> : '—'}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {lifecycle.flags.map((f) => (
-                        <tr key={f.flag_id}>
-                          <td style={td}>{fmtDateTime(f.raised_at as unknown as string)}</td>
-                          <td style={td}>{f.raised_by_system ? <span style={{ color: '#5c6773' }}>System (auto)</span> : (f.raised_by_name ?? '—')}</td>
-                          <td style={td}>
-                            {f.cleared_at
-                              ? <span style={{ ...badge, background: '#e6f4ec', color: '#1f7a45' }}>Cleared</span>
-                              : <span style={{ ...badge, background: '#fdecec', color: '#b3352b' }}>Open</span>
-                            }
-                          </td>
-                          <td style={td}>{f.cleared_at ? fmtDateTime(f.cleared_at as unknown as string) : '—'}</td>
-                          <td style={td}>{f.cleared_by_name ?? '—'}</td>
-                          <td style={td}>{f.cleared_with_label ? <span style={{ ...badge, ...condBadgeStyle(f.cleared_with_label) }}>{f.cleared_with_label}</span> : '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )
-              }
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
 
           {/* Pair history */}
           {detailTab === 'pairs' && (
             <div style={detailBody}>
-              {lifecycle.pairs.length === 0
-                ? <p style={muted}>No pair history for this article.</p>
-                : (
-                  <table style={tbl}>
-                    <thead>
-                      <tr>
-                        <th style={th}>Partner Barcode</th>
-                        <th style={th}>Paired On</th>
-                        <th style={th}>Paired By</th>
-                        <th style={th}>Status</th>
-                        <th style={th}>Dissolved</th>
-                        <th style={th}>Reason</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lifecycle.pairs.map((p) => {
-                        const partnerId = p.article_a_id === lifecycle.article.article_id ? p.article_b_id : p.article_a_id;
-                        const isActive = !p.dissolved_at;
-                        return (
-                          <tr key={p.pair_id}>
-                            <td style={{ ...td, fontFamily: 'var(--font-mono)', fontSize: 13 }}>{partnerId.slice(0, 8)}…</td>
-                            <td style={td}>{fmtDateTime(p.formed_at as unknown as string)}</td>
-                            <td style={td}>{p.formed_by_name ?? '—'}</td>
-                            <td style={td}>
-                              {isActive
-                                ? <span style={{ ...badge, background: '#e6f4ec', color: '#1f7a45' }}>Active</span>
-                                : <span style={{ ...badge, background: '#f4f5f6', color: '#5c6773' }}>Dissolved</span>
-                              }
-                            </td>
-                            <td style={td}>{p.dissolved_at ? fmtDateTime(p.dissolved_at as unknown as string) : '—'}</td>
-                            <td style={td}>{p.dissolution_reason ?? '—'}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )
-              }
+              {lifecycle.pairs.length === 0 ? <p style={muted}>No pair history for this article.</p> : (
+                <table style={tbl}>
+                  <thead><tr><th style={th}>Partner</th><th style={th}>Paired On</th><th style={th}>Paired By</th><th style={th}>Status</th><th style={th}>Dissolved</th><th style={th}>Reason</th></tr></thead>
+                  <tbody>
+                    {lifecycle.pairs.map((p) => {
+                      const partnerId = p.article_a_id === lifecycle.article.article_id ? p.article_b_id : p.article_a_id;
+                      return (
+                        <tr key={p.pair_id}>
+                          <td style={{ ...td, fontFamily: 'var(--font-mono)', fontSize: 13 }}>{partnerId.slice(0, 8)}…</td>
+                          <td style={td}>{fmtDateTime(p.formed_at as unknown as string)}</td>
+                          <td style={td}>{p.formed_by_name ?? '—'}</td>
+                          <td style={td}>
+                            {!p.dissolved_at
+                              ? <span style={{ ...badge, background: '#e6f4ec', color: '#1f7a45' }}>Active</span>
+                              : <span style={{ ...badge, background: '#f4f5f6', color: '#5c6773' }}>Dissolved</span>}
+                          </td>
+                          <td style={td}>{p.dissolved_at ? fmtDateTime(p.dissolved_at as unknown as string) : '—'}</td>
+                          <td style={td}>{p.dissolution_reason ?? '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* Empty state when nothing selected */}
-      {!selectedId && !search && (
-        <div style={{ textAlign: 'center', padding: '48px 24px', color: '#8a949f' }}>
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 12, opacity: 0.5 }}>
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" />
-            <polyline points="10 9 9 9 8 9" />
-          </svg>
-          <p style={{ font: '500 15px var(--font-body)', margin: 0 }}>Search for an article above to view its full lifecycle history.</p>
-          <p style={{ font: '13px var(--font-body)', margin: '6px 0 0', opacity: 0.8 }}>Enter a barcode or equipment name to get started.</p>
+      {/* ── Browsable article list (shown whenever no article is selected) ── */}
+      {!selectedId && (
+        <div>
+          {/* Count + top pagination */}
+          {!articlesLoading && listResults.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <span style={countRow}>
+                {search.trim()
+                  ? `${listResults.length} result${listResults.length !== 1 ? 's' : ''}`
+                  : `${allArticles.length} article${allArticles.length !== 1 ? 's' : ''}`}
+              </span>
+              {listTotalPages > 1 && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button style={{ ...btnSecondary, padding: '5px 12px', fontSize: 12 }} disabled={listPage === 0} onClick={() => setListPage((p) => p - 1)}>← Prev</button>
+                  <span style={{ font: '12px var(--font-body)', color: '#666' }}>{listPage + 1} / {listTotalPages}</span>
+                  <button style={{ ...btnSecondary, padding: '5px 12px', fontSize: 12 }} disabled={listPage >= listTotalPages - 1} onClick={() => setListPage((p) => p + 1)}>Next →</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {articlesLoading && <p style={muted}>Loading articles…</p>}
+
+          {!articlesLoading && listResults.length === 0 && search.trim() && (
+            <p style={muted}>No articles match "{search.trim()}".</p>
+          )}
+
+          {!articlesLoading && listPageItems.length > 0 && (
+            <table style={tbl}>
+              <thead>
+                <tr>
+                  <th style={th}>Barcode</th>
+                  <th style={th}>Equipment Type</th>
+                  <th style={th}>Unit</th>
+                  <th style={th}>Condition</th>
+                  <th style={th}>State</th>
+                  <th style={th}>Added</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listPageItems.map((a) => (
+                  <tr key={a.article_id} style={articleListRow} onClick={() => selectArticle(a)} title="Click to view full history">
+                    <td style={{ ...td, fontFamily: 'var(--font-mono)', fontWeight: 600, letterSpacing: '0.03em' }}>{a.barcode}</td>
+                    <td style={td}>{a.equipment_type_name}</td>
+                    <td style={td}>
+                      <span style={{ ...badge, background: '#f4f5f6', color: '#5c6773' }}>
+                        {a.lending_unit === 'PAIR' ? 'Pair' : 'Single'}
+                      </span>
+                    </td>
+                    <td style={td}><span style={{ ...badge, ...condBadgeStyle(a.current_condition_label) }}>{a.current_condition_label}</span></td>
+                    <td style={td}><span style={{ ...badge, ...stateBadgeStyle(a.state) }}>{STATE_LABEL[a.state] ?? a.state}</span></td>
+                    <td style={{ ...td, color: '#8a949f', fontSize: 13 }}>{fmtDate(a.entered_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* Bottom pagination */}
+          {!articlesLoading && listTotalPages > 1 && (
+            <div style={{ ...pagination, marginTop: 14 }}>
+              <button style={btnSecondary} disabled={listPage === 0} onClick={() => setListPage((p) => p - 1)}>← Prev</button>
+              <span style={{ font: '13px var(--font-body)', color: '#666' }}>Page {listPage + 1} of {listTotalPages}</span>
+              <button style={btnSecondary} disabled={listPage >= listTotalPages - 1} onClick={() => setListPage((p) => p + 1)}>Next →</button>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -695,3 +724,8 @@ const detailTabBtn: React.CSSProperties = {
 };
 const detailTabActive: React.CSSProperties = { color: '#26485f', borderBottomColor: '#26485f', fontWeight: 600, background: '#fff' };
 const detailBody: React.CSSProperties = { padding: '20px 24px' };
+
+const articleListRow: React.CSSProperties = {
+  cursor: 'pointer',
+  transition: 'background 0.1s',
+};
