@@ -9,6 +9,7 @@ import { requireAuth, requireAuthSSE } from '../../middleware/auth.js';
 import { badRequest } from '../../middleware/errors.js';
 import { addSseClient, removeSseClient } from '../../lib/sse.js';
 import * as svc from './service.js';
+import { getKitPack } from './kitPackService.js';
 import { availabilityFilterSchema } from './validators.js';
 
 export const availabilityRouter = Router();
@@ -19,6 +20,16 @@ availabilityRouter.get('/status', requireAuth, asyncHandler(async (req, res) => 
   if (!parsed.success) throw badRequest('Invalid filter parameters.');
   const rows = await svc.listAvailability(parsed.data, req.user!.role);
   res.json({ status: rows });
+}));
+
+// Kit pack — virtual bundle of all equipment types for a sport category.
+// Open to every authenticated role (read-only, same access level as /status).
+availabilityRouter.get('/kit-pack/:sportCategoryId', requireAuth, asyncHandler(async (req, res) => {
+  const id = Number(req.params.sportCategoryId);
+  if (!id || Number.isNaN(id)) throw badRequest('Invalid sport category ID.');
+  const pack = await getKitPack(id);
+  if (!pack) return res.status(404).json({ error: 'No kit pack found for this sport.' });
+  return res.json({ kitPack: pack });
 }));
 
 // EQUIP-AVAIL-07: SSE stream. Token via query param (see requireAuthSSE) since
