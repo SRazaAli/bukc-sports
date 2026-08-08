@@ -46,7 +46,19 @@ venueRouter.get('/venues', requireAuth, asyncHandler(async (_req, res) => {
 }));
 venueRouter.post('/venues', ...superAdminOnly, asyncHandler(async (req, res) => {
   const input = parse(v.createVenueSchema, req.body);
-  res.status(201).json({ venue: await svc.createVenue(input) });
+  res.status(201).json({ venue: await svc.createVenue({ ...input, sportCategoryIds: input.sportCategoryIds ?? [] }) });
+}));
+venueRouter.patch('/venues/:id', ...superAdminOnly, asyncHandler(async (req, res) => {
+  const input = parse(v.updateVenueSchema, req.body);
+  await svc.updateVenue(Number(reqId(req)), {
+    ...input,
+    surfaceType: input.surfaceType === null ? undefined : input.surfaceType,
+  });
+  res.json({ message: 'Venue updated.' });
+}));
+venueRouter.delete('/venues/:id', ...superAdminOnly, asyncHandler(async (req, res) => {
+  const result = await svc.deleteVenue(Number(reqId(req)));
+  res.json({ message: result.deleted === 'hard' ? 'Venue deleted.' : 'Venue deactivated (historical bookings retained).' });
 }));
 
 // ── requester ──

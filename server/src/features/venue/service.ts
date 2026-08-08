@@ -65,20 +65,150 @@ async function notifyRequester(type: import('../../db/index.js').NotificationTyp
 }
 
 // ── venues ──
-export async function listVenues() {
-  return db.selectFrom('venue as v')
-    .leftJoin('sport_category as sc', 'sc.sport_category_id', 'v.sport_category_id')
-    .select(['v.venue_id', 'v.name', 'v.capacity', 'v.is_indoor', 'v.is_active', 'sc.name as sport_category_name'])
-    .where('v.is_active', '=', true).orderBy('v.name').execute();
+export async function listVenues(includeInactive = false) {
+  const rows = await db.selectFrom('venue as v')
+    .select([
+      'v.venue_id', 'v.name', 'v.capacity', 'v.is_indoor', 'v.is_active',
+      'v.availability_status', 'v.description', 'v.location', 'v.surface_type', 'v.photos',
+    ])
+    .$if(!includeInactive, (q) => q.where('v.is_active', '=', true))
+    .orderBy('v.name').execute();
+
+  // Attach sport categories for each venue
+  const venueIds = rows.map((r) => r.venue_id);
+  const sports = venueIds.length > 0
+    ? await db.selectFrom('venue_sport as vs')
+        .innerJoin('sport_category as sc', 'sc.sport_category_id', 'vs.sport_category_id')
+        .select(['vs.venue_id', 'vs.sport_category_id', 'sc.name as sport_name'])
+        .where('vs.venue_id', 'in', venueIds)
+        .execute()
+    : [];
+
+  return rows.map((r) => ({
+    ...r,
+    photos: (typeof r.photos === 'string' ? JSON.parse(r.photos) : r.photos) as string[],
+    sports: sports
+      .filter((s) => s.venue_id === r.venue_id)
+      .map((s) => ({ sport_category_id: s.sport_category_id, sport_name: s.sport_name })),
+  }));
 }
-export async function createVenue(input: { name: string; sportCategoryId?: number; capacity: number; isIndoor: boolean }) {
+
+export type VenueInput = {
+  name: string;
+  capacity: number;
+  isIndoor: boolean;
+  sportCategoryIds: number[];
+  description?: string;
+  location?: string;
+  surfaceType?: string;
+  photos?: string[];
+};
+
+export async function createVenue(input: VenueInput) {
   try {
-    return await db.insertInto('venue').values({
-      name: input.name, sport_category_id: input.sportCategoryId ?? null,
-      capacity: input.capacity, is_indoor: input.isIndoor,
-    }).returning(['venue_id', 'name']).executeTakeFirstOrThrow();
-  } catch (e) { throw mapDbError(e); }
+    return await db.transaction().execute(async (trx) => {
+      const row = await trx.insertInto('venue').values({
+        name: input.name,
+        capacity: input.capacity,
+        is_indoor: input.isIndoor,
+        description: input.description ?? null,
+        location: input.location ?? null,
+        surface_type: input.surfaceType ?? null,
+        photos: JSON.stringify(input.photos ?? []),
+      }).returning(['venue_id', 'name']).executeTakeFirstOrThrow();
+
+      if (input.sportCategoryIds.length > 0) {
+        await trx.insertInto('venue_sport').values(
+          input.sportCategoryIds.map((scId) => ({ venue_id: row.venue_id, sport_category_id: scId })),
+        ).execute();
+      }
+
+      return row;
+    });
+  } catch (e) {
+    if (isPgError(e) && e.code === '23505') throw conflict('A venue with that name already exists.', 'DUPLICATE_NAME');
+    throw mapDbError(e);
+  }
 }
+
+export async function updateVenue(venueId: number, input: Partial<VenueInput> & {
+  availabilityStatus?: import('../../db/index.js').VenueAvailabilityStatus;
+}) {
+  try {
+    await db.transaction().execute(async (trx) => {
+      const patch: Record<string, unknown> = {};
+      if (input.name !== undefined) patch.name = input.name;
+      if (input.capacity !== undefined) patch.capacity = input.capacity;
+      if (input.isIndoor !== undefined) patch.is_indoor = input.isIndoor;
+      if (input.description !== undefined) patch.description = input.description || null;
+      if (input.location !== undefined) patch.location = input.location || null;
+      if (input.surfaceType !== undefined) patch.surface_type = input.surfaceType || null;
+      if (input.photos !== undefined) patch.photos = JSON.stringify(input.photos);
+      if (input.availabilityStatus !== undefined) patch.availability_status = input.availabilityStatus;
+
+      if (Object.keys(patch).length > 0) {
+        const res = await trx.updateTable('venue').set(patch)
+          .where('venue_id', '=', venueId).executeTakeFirst();
+        if (!res.numUpdatedRows) throw notFound('Venue not found.');
+      }
+
+      if (input.sportCategoryIds !== undefined) {
+        await trx.deleteFrom('venue_sport').where('venue_id', '=', venueId).execute();
+        if (input.sportCategoryIds.length > 0) {
+          await trx.insertInto('venue_sport').values(
+            input.sportCategoryIds.map((scId) => ({ venue_id: venueId, sport_category_id: scId })),
+          ).execute();
+        }
+      }
+    });
+  } catch (e) {
+    if (isPgError(e) && e.code === '23505') throw conflict('A venue with that name already exists.', 'DUPLICATE_NAME');
+    throw mapDbError(e);
+  }
+}
+
+export async function deleteVenue(venueId: number) {
+  // Check for any bookings — if present, soft-delete only (is_active = false)
+  const hasBookings = await db.selectFrom('booking')
+    .select('booking_id')
+    .where('venue_id', '=', venueId)
+    .executeTakeFirst();
+
+  if (hasBookings) {
+    // Active bookings in non-terminal states block deletion entirely
+    const activeBookings = await db.selectFrom('booking')
+      .select(db.fn.countAll().as('n'))
+      .where('venue_id', '=', venueId)
+      .where('status', 'in', ['PENDING', 'FORWARDED', 'APPROVED'])
+      .executeTakeFirst();
+    if (Number(activeBookings?.n ?? 0) > 0) {
+      throw conflict(
+        'This venue has active booking requests. Cancel or complete them before deleting.',
+        'HAS_ACTIVE_BOOKINGS',
+      );
+    }
+    // Historical bookings exist — soft-delete
+    const res = await db.updateTable('venue').set({ is_active: false })
+      .where('venue_id', '=', venueId).executeTakeFirst();
+    if (!res.numUpdatedRows) throw notFound('Venue not found.');
+    return { deleted: 'soft' as const };
+  }
+
+  // No bookings at all — hard delete
+  try {
+    const res = await db.deleteFrom('venue').where('venue_id', '=', venueId).executeTakeFirst();
+    if (!res.numDeletedRows) throw notFound('Venue not found.');
+    return { deleted: 'hard' as const };
+  } catch (e) {
+    if (isPgError(e) && e.code === '23503') {
+      // Unexpected FK reference — fall back to soft-delete
+      await db.updateTable('venue').set({ is_active: false }).where('venue_id', '=', venueId).execute();
+      return { deleted: 'soft' as const };
+    }
+    throw mapDbError(e);
+  }
+}
+
 
 // Per-session overlap check (CONF-09/12). Returns the session numbers (from
 // the caller's proposed list) that collide with an existing SCHEDULED session.
@@ -478,11 +608,12 @@ export async function completeSession(sessionId: string, staffId: string) {
     if (row.status === 'CANCELLED') throw conflict('Session is CANCELLED — cannot complete.');
     if (row.status === 'NEEDS_RESCHEDULING') throw conflict('Session needs rescheduling — resolve it before completing.');
 
-    // Fetch venue sport_category_id separately (booking doesn't carry it directly)
-    const venue = await db
-      .selectFrom('venue')
+    // Fetch first sport category for venue via the junction table
+    const venueSport = await db
+      .selectFrom('venue_sport')
       .select('sport_category_id')
       .where('venue_id', '=', row.venue_id)
+      .limit(1)
       .executeTakeFirst();
 
     await db.transaction().execute(async (trx) => {
@@ -503,7 +634,7 @@ export async function completeSession(sessionId: string, staffId: string) {
           session_id: sessionId,
           actor_user_id: row.requested_by ?? null,
           venue_id: row.venue_id,
-          sport_category_id: venue?.sport_category_id ?? null,
+          sport_category_id: venueSport?.sport_category_id ?? null,
           outcome: 'COMPLETED',
           snapshot: JSON.stringify({ completedBy: staffId }),
         })
@@ -527,10 +658,11 @@ export async function cancelSession(sessionId: string, staffId: string, reason: 
     if (row.status === 'CANCELLED') throw conflict('Session is already CANCELLED.');
     if (row.status === 'COMPLETED') throw conflict('Session is already COMPLETED — cannot cancel.');
 
-    const venue = await db
-      .selectFrom('venue')
+    const venueSport = await db
+      .selectFrom('venue_sport')
       .select('sport_category_id')
       .where('venue_id', '=', row.venue_id)
+      .limit(1)
       .executeTakeFirst();
 
     await db.transaction().execute(async (trx) => {
@@ -549,7 +681,7 @@ export async function cancelSession(sessionId: string, staffId: string, reason: 
           session_id: sessionId,
           actor_user_id: row.requested_by ?? null,
           venue_id: row.venue_id,
-          sport_category_id: venue?.sport_category_id ?? null,
+          sport_category_id: venueSport?.sport_category_id ?? null,
           outcome: 'CANCELLED',
           snapshot: JSON.stringify({ cancelledBy: staffId, reason }),
         })

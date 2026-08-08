@@ -1,6 +1,35 @@
 import { api } from '../../lib/api.js';
 
-export interface Venue { venue_id: number; name: string; capacity: number; is_indoor: boolean; is_active: boolean; sport_category_name: string | null }
+export type VenueAvailabilityStatus = 'AVAILABLE' | 'UNDER_MAINTENANCE' | 'CLOSED';
+export const SURFACE_TYPES = ['Hardwood', 'Synthetic', 'Grass', 'Concrete', 'Artificial Turf', 'Clay', 'Other'] as const;
+export type SurfaceType = typeof SURFACE_TYPES[number];
+
+export interface VenueSport { sport_category_id: number; sport_name: string }
+
+export interface Venue {
+  venue_id: number;
+  name: string;
+  capacity: number;
+  is_indoor: boolean;
+  is_active: boolean;
+  availability_status: VenueAvailabilityStatus;
+  description: string | null;
+  location: string | null;
+  surface_type: string | null;
+  photos: string[];
+  sports: VenueSport[];
+}
+
+export interface VenueFormInput {
+  name: string;
+  capacity: number;
+  isIndoor: boolean;
+  sportCategoryIds: number[];
+  description?: string;
+  location?: string;
+  surfaceType?: string;
+  photos?: string[];
+}
 
 export interface SessionInput {
   sessionNo: number; requestedStartAt: string; requestedEndAt: string;
@@ -52,8 +81,12 @@ export interface ApprovedSession {
 }
 
 export const listVenues = () => api<{ venues: Venue[] }>('/api/venue/venues');
-export const createVenue = (input: { name: string; sportCategoryId?: number; capacity: number; isIndoor: boolean }) =>
+export const createVenue = (input: VenueFormInput) =>
   api<{ venue: { venue_id: number; name: string } }>('/api/venue/venues', { method: 'POST', body: input });
+export const updateVenue = (id: number, input: Partial<VenueFormInput> & { availabilityStatus?: VenueAvailabilityStatus }) =>
+  api<{ message: string }>(`/api/venue/venues/${id}`, { method: 'PATCH', body: input });
+export const deleteVenue = (id: number) =>
+  api<{ message: string }>(`/api/venue/venues/${id}`, { method: 'DELETE' });
 
 // VENUE-06/35/36: submit one or more sessions (max 30) as one package.
 export const submitBooking = (input: {

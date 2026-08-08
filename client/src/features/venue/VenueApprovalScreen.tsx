@@ -1,18 +1,34 @@
 /**
- * Super Admin — Venue Approvals (VENUE-18..27, CONF-08/15). Final decision on
- * forwarded bookings: approve (subject to the exclusion constraint), reject,
- * or return to the Coordinator for re-evaluation (VENUE-22). Also basic venue
- * management, since something has to create the rows this feature depends on.
+ * Super Admin — Venue Approvals (VENUE-18..27, CONF-08/15) + Venue Management.
+ *
+ * Two panels:
+ *   1. Forwarded queue — approve / reject / return to Coordinator
+ *   2. Venues — full CRUD: create, edit (all fields), delete, availability status
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
-import { listAdminQueue, approveBooking, rejectBooking, returnForReeval, listVenues, createVenue, type AdminQueueBooking, type Venue } from './api.js';
+import {
+  listAdminQueue, approveBooking, rejectBooking, returnForReeval,
+  listVenues, createVenue, updateVenue, deleteVenue,
+  type AdminQueueBooking, type Venue, type VenueAvailabilityStatus, SURFACE_TYPES,
+} from './api.js';
 import { listSportCategories, type SportCategory } from '../inventory/api.js';
 import { ApiRequestError } from '../../lib/api.js';
 
 function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
+
+const AVAIL_LABEL: Record<VenueAvailabilityStatus, string> = {
+  AVAILABLE: 'Available',
+  UNDER_MAINTENANCE: 'Under Maintenance',
+  CLOSED: 'Closed',
+};
+const AVAIL_STYLE: Record<VenueAvailabilityStatus, React.CSSProperties> = {
+  AVAILABLE: { background: '#e6f4ec', color: '#1f7a45' },
+  UNDER_MAINTENANCE: { background: '#fdf1e3', color: '#9a6412' },
+  CLOSED: { background: '#fdecec', color: '#8f2323' },
+};
 
 export default function VenueApprovalScreen() {
   const { user, loading } = useAuth();
@@ -20,7 +36,9 @@ export default function VenueApprovalScreen() {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [cats, setCats] = useState<SportCategory[]>([]);
   const [selected, setSelected] = useState<AdminQueueBooking | null>(null);
-  const [showVenueForm, setShowVenueForm] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -36,7 +54,22 @@ export default function VenueApprovalScreen() {
   if (!user) return <Navigate to="/" replace />;
   if (user.role !== 'SUPER_ADMIN') return <Navigate to="/home" replace />;
 
-  const flash = { ok: (m: string) => { setNotice(m); setError(null); }, err: (m: string) => { setError(m); setNotice(null); } };
+  const flash = {
+    ok: (m: string) => { setNotice(m); setError(null); },
+    err: (m: string) => { setError(m); setNotice(null); },
+  };
+
+  async function confirmDelete() {
+    if (!deletingId) return;
+    try {
+      const res = await deleteVenue(deletingId);
+      flash.ok(res.message);
+      setDeletingId(null);
+      void load();
+    } catch (e) { flash.err(errMsg(e)); setDeletingId(null); }
+  }
+
+  const deletingVenue = venues.find((v) => v.venue_id === deletingId);
 
   return (
     <PortalShell title="Venue Approvals" tint="navy">
@@ -49,6 +82,7 @@ export default function VenueApprovalScreen() {
             onDone={(m) => { flash.ok(m); setSelected(null); void load(); }} onError={flash.err} />
         ) : (
           <>
+            {/* ── Approval queue ── */}
             <Panel title="Forwarded — Awaiting Your Decision">
               {queue === null ? <p style={muted}>Loading…</p> : queue.length === 0 ? (
                 <p style={muted}>Nothing forwarded right now.</p>
@@ -69,27 +103,117 @@ export default function VenueApprovalScreen() {
               )}
             </Panel>
 
-            <Panel title="Venues" action={<button style={ghostBtn} onClick={() => setShowVenueForm((v) => !v)}>{showVenueForm ? 'Close' : 'Add Venue'}</button>}>
-              {showVenueForm && <VenueForm cats={cats} onDone={() => { flash.ok('Venue added.'); setShowVenueForm(false); void load(); }} onError={flash.err} />}
-              <table style={table}>
-                <thead><tr><th style={th}>Name</th><th style={th}>Sport</th><th style={th}>Capacity</th><th style={th}>Setting</th></tr></thead>
-                <tbody>
-                  {venues.map((v) => (
-                    <tr key={v.venue_id}>
-                      <td style={td}>{v.name}</td><td style={td}>{v.sport_category_name ?? '—'}</td>
-                      <td style={td}>{v.capacity}</td><td style={td}>{v.is_indoor ? 'Indoor' : 'Outdoor'}</td>
+            {/* ── Venues ── */}
+            <Panel title="Venues" action={
+              <button style={ghostBtn} onClick={() => { setShowForm((v) => !v); setEditingId(null); }}>
+                {showForm ? 'Close' : 'Add Venue'}
+              </button>
+            }>
+              {showForm && (
+                <div style={{ marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid #e5e5e5' }}>
+                  <VenueForm cats={cats}
+                    onDone={(m) => { flash.ok(m); setShowForm(false); void load(); }}
+                    onError={flash.err} />
+                </div>
+              )}
+
+              {venues.length === 0 ? <p style={muted}>No venues yet.</p> : (
+                <table style={table}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Name</th>
+                      <th style={th}>Sports</th>
+                      <th style={th}>Cap.</th>
+                      <th style={th}>Setting</th>
+                      <th style={th}>Status</th>
+                      <th style={th} />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {venues.map((v) => (
+                      <Fragment key={v.venue_id}>
+                        <tr>
+                          <td style={td}>
+                            <div style={{ fontWeight: 600 }}>{v.name}</div>
+                            {v.location && <div style={{ fontSize: 12, color: '#5c6773', marginTop: 2 }}>{v.location}</div>}
+                          </td>
+                          <td style={td}>
+                            {v.sports.length === 0 ? <span style={{ color: '#8a949f' }}>—</span>
+                              : v.sports.map((s) => s.sport_name).join(', ')}
+                          </td>
+                          <td style={td}>{v.capacity}</td>
+                          <td style={td}>{v.is_indoor ? 'Indoor' : 'Outdoor'}</td>
+                          <td style={td}>
+                            <span style={{ ...badge, ...AVAIL_STYLE[v.availability_status] }}>
+                              {AVAIL_LABEL[v.availability_status]}
+                            </span>
+                          </td>
+                          <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <button style={linkBtn} onClick={() => setEditingId(editingId === v.venue_id ? null : v.venue_id)}>
+                              {editingId === v.venue_id ? 'Cancel' : 'Edit'}
+                            </button>
+                            <button style={{ ...linkBtn, color: 'var(--danger, #c0392b)' }} onClick={() => setDeletingId(v.venue_id)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+
+                        {/* Photos row */}
+                        {v.photos.length > 0 && editingId !== v.venue_id && (
+                          <tr>
+                            <td colSpan={6} style={{ ...td, paddingTop: 0, paddingBottom: 10 }}>
+                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                {v.photos.map((p, i) => (
+                                  <img key={i} src={p} alt={`${v.name} photo ${i + 1}`}
+                                    style={{ width: 80, height: 56, objectFit: 'cover', borderRadius: 4, border: '1px solid #e5e5e5' }} />
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* Inline edit form */}
+                        {editingId === v.venue_id && (
+                          <tr>
+                            <td colSpan={6} style={{ ...td, background: '#f8f9fa' }}>
+                              <VenueForm cats={cats} editing={v}
+                                onDone={(m) => { flash.ok(m); setEditingId(null); void load(); }}
+                                onError={flash.err}
+                                onCancel={() => setEditingId(null)} />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </Panel>
           </>
+        )}
+
+        {/* Delete confirmation */}
+        {deletingId != null && (
+          <div style={overlay}>
+            <div style={dialog}>
+              <h3 style={{ margin: '0 0 10px', fontSize: 17 }}>Delete Venue</h3>
+              <p style={{ margin: '0 0 16px', fontSize: 14, color: '#555' }}>
+                Delete <strong>{deletingVenue?.name}</strong>?
+                {' '}If it has historical bookings it will be deactivated rather than removed.
+              </p>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button style={rejectBtn} onClick={confirmDelete}>Delete</button>
+                <button style={ghostBtn} onClick={() => setDeletingId(null)}>Cancel</button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </PortalShell>
   );
 }
 
+// ── Decision panel ──
 function DecisionPanel({ item, onBack, onDone, onError }: {
   item: AdminQueueBooking; onBack: () => void; onDone: (m: string) => void; onError: (m: string) => void;
 }) {
@@ -104,12 +228,12 @@ function DecisionPanel({ item, onBack, onDone, onError }: {
   }
   async function reject() {
     setBusy(true);
-    try { await rejectBooking(item.booking_id, text); onDone(`Booking rejected.`); }
+    try { await rejectBooking(item.booking_id, text); onDone('Booking rejected.'); }
     catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
   async function returnIt() {
     setBusy(true);
-    try { await returnForReeval(item.booking_id, text); onDone(`Returned to the Coordinator.`); }
+    try { await returnForReeval(item.booking_id, text); onDone('Returned to the Coordinator.'); }
     catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
 
@@ -119,7 +243,6 @@ function DecisionPanel({ item, onBack, onDone, onError }: {
       <Row label="Purpose" value={item.purpose} />
       <Row label="Sessions" value={`${item.sessionCount} session${item.sessionCount !== 1 ? 's' : ''}${item.firstStart ? ` from ${new Date(item.firstStart).toLocaleDateString()}` : ''}`} />
       <Row label="Coordinator's note" value={item.feasibility_note ?? '—'} />
-
       {mode === 'none' && (
         <div style={actionRow}>
           <button style={acceptBtn} disabled={busy} onClick={approve}>Approve</button>
@@ -145,57 +268,198 @@ function DecisionPanel({ item, onBack, onDone, onError }: {
   );
 }
 
-function VenueForm({ cats, onDone, onError }: { cats: SportCategory[]; onDone: () => void; onError: (m: string) => void }) {
-  const [name, setName] = useState('');
-  const [sportCategoryId, setSport] = useState(0);
-  const [capacity, setCapacity] = useState(30);
-  const [isIndoor, setIndoor] = useState(true);
+// ── Venue form (create + edit) ──
+function VenueForm({ cats, editing, onDone, onError, onCancel }: {
+  cats: SportCategory[];
+  editing?: Venue;
+  onDone: (m: string) => void;
+  onError: (m: string) => void;
+  onCancel?: () => void;
+}) {
+  const isEdit = Boolean(editing);
+  const [name, setName] = useState(editing?.name ?? '');
+  const [capacity, setCapacity] = useState(editing?.capacity ?? 30);
+  const [isIndoor, setIndoor] = useState(editing?.is_indoor ?? true);
+  const [sportCategoryIds, setSports] = useState<number[]>(editing?.sports.map((s) => s.sport_category_id) ?? []);
+  const [description, setDescription] = useState(editing?.description ?? '');
+  const [location, setLocation] = useState(editing?.location ?? '');
+  const [surfaceType, setSurface] = useState(editing?.surface_type ?? '');
+  const [availabilityStatus, setAvailStatus] = useState<VenueAvailabilityStatus>(editing?.availability_status ?? 'AVAILABLE');
+  const [photos, setPhotos] = useState<string[]>(editing?.photos ?? []);
   const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function toggleSport(id: number) {
+    setSports((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+
+  function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    const remaining = 3 - photos.length;
+    if (remaining <= 0) { onError('Maximum 3 photos per venue.'); return; }
+    files.slice(0, remaining).forEach((file) => {
+      if (!file.type.startsWith('image/')) { onError('Only image files are accepted.'); return; }
+      if (file.size > 400_000) { onError(`${file.name} is too large — max 400 KB per photo.`); return; }
+      const reader = new FileReader();
+      reader.onload = () => setPhotos((prev) => [...prev, reader.result as string].slice(0, 3));
+      reader.readAsDataURL(file);
+    });
+    if (fileRef.current) fileRef.current.value = '';
+  }
 
   async function submit(e: React.FormEvent) {
-    e.preventDefault(); setBusy(true);
-    try { await createVenue({ name, sportCategoryId: sportCategoryId || undefined, capacity, isIndoor }); onDone(); }
-    catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const payload = {
+        name: name.trim(), capacity, isIndoor, sportCategoryIds,
+        description: description.trim() || undefined,
+        location: location.trim() || undefined,
+        surfaceType: surfaceType || undefined,
+        photos,
+      };
+      if (isEdit && editing) {
+        await updateVenue(editing.venue_id, { ...payload, availabilityStatus });
+        onDone('Venue updated.');
+      } else {
+        await createVenue(payload);
+        onDone('Venue added.');
+      }
+    } catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
 
   return (
-    <form onSubmit={submit} style={{ ...formGrid, marginBottom: 18 }}>
-      <L label="Name"><input style={inp} value={name} onChange={(e) => setName(e.target.value)} required /></L>
-      <L label="Sport (optional)"><select style={inp} value={sportCategoryId} onChange={(e) => setSport(Number(e.target.value))}>
-        <option value={0}>Any</option>
-        {cats.map((c) => <option key={c.sport_category_id} value={c.sport_category_id}>{c.name}</option>)}
-      </select></L>
-      <L label="Capacity"><input type="number" min={1} style={inp} value={capacity} onChange={(e) => setCapacity(Number(e.target.value))} /></L>
-      <L label="Setting"><select style={inp} value={isIndoor ? '1' : '0'} onChange={(e) => setIndoor(e.target.value === '1')}>
-        <option value="1">Indoor</option><option value="0">Outdoor</option>
-      </select></L>
-      <div style={{ gridColumn: '1 / -1' }}><button style={acceptBtn} disabled={busy}>{busy ? 'Adding…' : 'Add Venue'}</button></div>
+    <form onSubmit={submit}>
+      <div style={formGrid}>
+        {/* Name */}
+        <L label="Venue name *">
+          <input style={inp} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Main Sports Hall" required />
+        </L>
+
+        {/* Location */}
+        <L label="Building / Location">
+          <input style={inp} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Sports Block, Ground Floor" />
+        </L>
+
+        {/* Capacity */}
+        <L label="Capacity *">
+          <input type="number" min={1} style={inp} value={capacity} onChange={(e) => setCapacity(Number(e.target.value))} required />
+        </L>
+
+        {/* Setting */}
+        <L label="Setting *">
+          <select style={inp} value={isIndoor ? '1' : '0'} onChange={(e) => setIndoor(e.target.value === '1')}>
+            <option value="1">Indoor</option>
+            <option value="0">Outdoor</option>
+          </select>
+        </L>
+
+        {/* Surface type */}
+        <L label="Surface type">
+          <select style={inp} value={surfaceType} onChange={(e) => setSurface(e.target.value)}>
+            <option value="">— Not specified —</option>
+            {SURFACE_TYPES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </L>
+
+        {/* Availability status (edit only) */}
+        {isEdit && (
+          <L label="Availability status">
+            <select style={inp} value={availabilityStatus} onChange={(e) => setAvailStatus(e.target.value as VenueAvailabilityStatus)}>
+              <option value="AVAILABLE">Available</option>
+              <option value="UNDER_MAINTENANCE">Under Maintenance</option>
+              <option value="CLOSED">Closed</option>
+            </select>
+          </L>
+        )}
+
+        {/* Description — full width */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <L label="Description">
+            <textarea style={{ ...inp, resize: 'vertical', minHeight: 64 }} value={description}
+              onChange={(e) => setDescription(e.target.value)} placeholder="Optional notes — surface condition, markings, facilities…" maxLength={500} />
+            <span style={{ fontSize: 11, color: '#8a949f' }}>{description.length}/500</span>
+          </L>
+        </div>
+
+        {/* Sports (multi-select checkboxes) — full width */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <span style={lbl}>Sports (select all that apply)</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', marginTop: 6 }}>
+            {cats.map((c) => (
+              <label key={c.sport_category_id} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 14 }}>
+                <input type="checkbox" checked={sportCategoryIds.includes(c.sport_category_id)}
+                  onChange={() => toggleSport(c.sport_category_id)} />
+                {c.name}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Photos — full width */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <span style={lbl}>Photos (up to 3, max 400 KB each)</span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, alignItems: 'flex-start' }}>
+            {photos.map((p, i) => (
+              <div key={i} style={{ position: 'relative' }}>
+                <img src={p} alt={`Photo ${i + 1}`} style={{ width: 100, height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #ddd', display: 'block' }} />
+                <button type="button"
+                  style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: '#c0392b', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  onClick={() => setPhotos((prev) => prev.filter((_, j) => j !== i))}>×</button>
+              </div>
+            ))}
+            {photos.length < 3 && (
+              <button type="button" onClick={() => fileRef.current?.click()}
+                style={{ width: 100, height: 70, border: '2px dashed #ccc', borderRadius: 6, background: '#f8f9fa', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: '#8a949f', fontSize: 12 }}>
+                <span style={{ fontSize: 22 }}>+</span>
+                Add photo
+              </button>
+            )}
+            <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handlePhotoUpload} />
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, marginTop: 4 }}>
+          <button style={acceptBtn} disabled={busy}>{busy ? (isEdit ? 'Saving…' : 'Adding…') : (isEdit ? 'Save Changes' : 'Add Venue')}</button>
+          {onCancel && <button type="button" style={ghostBtn} onClick={onCancel}>Cancel</button>}
+        </div>
+      </div>
     </form>
   );
 }
 
+// ── Shared components ──
 function Row({ label, value }: { label: string; value: string }) {
   return <div style={detailRow}><div style={detailLabel}>{label}</div><div>{value}</div></div>;
 }
 function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return <section style={panel}><div style={panelHead}><span>{title}</span>{action}</div><div style={panelBody}>{children}</div></section>;
+  return (
+    <section style={panel}>
+      <div style={panelHead}><span>{title}</span>{action}</div>
+      <div style={panelBody}>{children}</div>
+    </section>
+  );
 }
 function L({ label, children }: { label: string; children: React.ReactNode }) {
   return <label style={{ display: 'block' }}><span style={lbl}>{label}</span>{children}</label>;
 }
 
-const wrap: React.CSSProperties = { maxWidth: 860, margin: '0 auto' };
-const panel: React.CSSProperties = { background: '#fff', border: '1px solid #ddd', borderRadius: 4, marginBottom: 18, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' };
-const panelHead: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid #e5e5e5', font: '600 15px var(--font-body)', color: '#333', background: 'linear-gradient(#fff,#f7f7f7)' };
+// ── Styles ──
+const wrap: React.CSSProperties = { maxWidth: 920, margin: '0 auto' };
+const panel: React.CSSProperties = { background: '#fff', border: '1px solid #ddd', borderRadius: 6, marginBottom: 18, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' };
+const panelHead: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid #e5e5e5', font: '600 15px var(--font-body)', color: '#333', background: 'linear-gradient(#fff,#f7f7f7)', borderRadius: '6px 6px 0 0' };
 const panelBody: React.CSSProperties = { padding: 18 };
 const table: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 14 };
 const th: React.CSSProperties = { textAlign: 'left', font: '600 11px var(--font-body)', color: '#888', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '0 8px 8px', borderBottom: '1px solid #e5e5e5' };
-const td: React.CSSProperties = { padding: '10px 8px', borderBottom: '1px solid #eee', color: '#333' };
+const td: React.CSSProperties = { padding: '11px 8px', borderBottom: '1px solid #eee', color: '#333', verticalAlign: 'top' };
 const muted: React.CSSProperties = { color: '#5c6773', fontSize: 14.5, margin: 0 };
 const lbl: React.CSSProperties = { display: 'block', font: '500 12px var(--font-body)', color: '#26485f', marginBottom: 5 };
-const inp: React.CSSProperties = { width: '100%', font: '14px var(--font-body)', padding: '8px 10px', border: '1px solid #ccc', borderRadius: 4 };
-const textarea: React.CSSProperties = { width: '100%', font: '14px var(--font-body)', padding: '8px 10px', border: '1px solid #ccc', borderRadius: 4, resize: 'vertical', maxWidth: 480 };
-const formGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, maxWidth: 560 };
+const inp: React.CSSProperties = { width: '100%', font: '14px var(--font-body)', padding: '8px 10px', border: '1px solid #ccc', borderRadius: 4, boxSizing: 'border-box' };
+const textarea: React.CSSProperties = { width: '100%', font: '14px var(--font-body)', padding: '8px 10px', border: '1px solid #ccc', borderRadius: 4, boxSizing: 'border-box' };
+const formGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14, maxWidth: 680 };
+const badge: React.CSSProperties = { display: 'inline-block', font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4 };
+const linkBtn: React.CSSProperties = { background: 'none', border: 'none', font: '500 13px var(--font-body)', color: '#0a6ebd', cursor: 'pointer', padding: '4px 8px' };
 const reviewBtn: React.CSSProperties = { background: '#0a6ebd', color: '#fff', border: 'none', borderRadius: 4, padding: '7px 16px', fontSize: 14, cursor: 'pointer' };
 const ghostBtn: React.CSSProperties = { background: '#fff', color: '#555', border: '1px solid #ccc', borderRadius: 4, padding: '9px 18px', fontSize: 14.5, cursor: 'pointer' };
 const acceptBtn: React.CSSProperties = { background: '#1f8a4c', color: '#fff', border: 'none', borderRadius: 4, padding: '9px 18px', fontSize: 14.5, cursor: 'pointer' };
@@ -207,3 +471,5 @@ const box = {
   err: { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 4, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
   ok: { background: '#eaf6ee', color: '#1e6b3a', border: '1px solid #c2e6cd', borderRadius: 4, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
 };
+const overlay: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
+const dialog: React.CSSProperties = { background: '#fff', borderRadius: 8, padding: '24px 28px', maxWidth: 420, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' };

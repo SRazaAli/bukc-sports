@@ -6,12 +6,36 @@ import { z } from 'zod';
 export const INDOOR_THRESHOLD = 6;
 export const OUTDOOR_THRESHOLD = 10;
 
+const SURFACE_TYPES = ['Hardwood', 'Synthetic', 'Grass', 'Concrete', 'Artificial Turf', 'Clay', 'Other'] as const;
+
+// Photos: base64 data URIs, max 3, max 400 KB each
+const photosSchema = z.array(
+  z.string().max(550_000, 'Each photo must be under 400 KB'),
+).max(3, 'Maximum 3 photos per venue').default([]);
+
 export const createVenueSchema = z.object({
   name: z.string().min(2).max(120),
-  sportCategoryId: z.number().int().positive().optional(),
   capacity: z.number().int().positive(),
   isIndoor: z.boolean(),
+  sportCategoryIds: z.array(z.number().int().positive()).default([]),
+  description: z.string().max(500).optional(),
+  location: z.string().max(120).optional(),
+  surfaceType: z.enum(SURFACE_TYPES).optional(),
+  photos: photosSchema,
 });
+
+export const updateVenueSchema = z.object({
+  name: z.string().min(2).max(120).optional(),
+  capacity: z.number().int().positive().optional(),
+  isIndoor: z.boolean().optional(),
+  sportCategoryIds: z.array(z.number().int().positive()).optional(),
+  description: z.string().max(500).optional(),
+  location: z.string().max(120).optional(),
+  surfaceType: z.enum(SURFACE_TYPES).optional().nullable(),
+  photos: photosSchema.optional(),
+  availabilityStatus: z.enum(['AVAILABLE', 'UNDER_MAINTENANCE', 'CLOSED']).optional(),
+}).refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update.' });
+
 
 // VENUE-06/35/36: one or more sessions (max 30), one venue, roster per session.
 const sessionSchema = z.object({

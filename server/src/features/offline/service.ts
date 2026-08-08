@@ -118,11 +118,19 @@ export async function enterFallbackBooking(
 
   const venue = await db
     .selectFrom('venue')
-    .select(['venue_id', 'sport_category_id', 'is_active'])
+    .select(['venue_id', 'is_active'])
     .where('venue_id', '=', input.venueId)
     .executeTakeFirst();
   if (!venue) throw notFound('Venue not found.');
   if (!venue.is_active) throw conflict('That venue is no longer active.', 'INACTIVE_VENUE');
+
+  // Fetch primary sport via junction table (venue may have multiple; use first)
+  const venueSport = await db
+    .selectFrom('venue_sport')
+    .select('sport_category_id')
+    .where('venue_id', '=', input.venueId)
+    .limit(1)
+    .executeTakeFirst();
 
   const actor = await db
     .selectFrom('app_user').select(['full_name', 'role'])
@@ -184,7 +192,7 @@ export async function enterFallbackBooking(
         session_id:     sessionRow.session_id,
         actor_user_id:  null,
         venue_id:       input.venueId,
-        sport_category_id: venue.sport_category_id ?? null,
+        sport_category_id: venueSport?.sport_category_id ?? null,
         outcome:        'COMPLETED',
         entered_via_offline_fallback: true,   // OFFL-04/10
         snapshot:       JSON.stringify({ enteredBy: staffId, note: input.note ?? null, fallback: true }),

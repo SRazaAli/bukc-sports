@@ -335,13 +335,24 @@ export type SessionStatus = 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'NEEDS_R
 export type ApprovalSubject = 'VENUE_BOOKING' | 'BORROW_REQUEST' | 'ACCOUNT_VERIFICATION' | 'EQUIPMENT_EXCEPTION';
 export type ApprovalVerb = 'SUBMIT' | 'FORWARD' | 'APPROVE' | 'REJECT' | 'RETURN_FOR_REEVALUATION' | 'CANCEL';
 
+export type VenueAvailabilityStatus = 'AVAILABLE' | 'UNDER_MAINTENANCE' | 'CLOSED';
+
 export interface VenueTable {
   venue_id: Generated<number>;
   name: string;
-  sport_category_id: number | null;
   capacity: number;
   is_indoor: boolean;
   is_active: ColumnType<boolean, boolean | undefined, boolean>;
+  availability_status: ColumnType<VenueAvailabilityStatus, VenueAvailabilityStatus | undefined, VenueAvailabilityStatus>;
+  description: string | null;
+  location: string | null;
+  surface_type: string | null;
+  photos: ColumnType<string[], string, string>; // jsonb — stored as JSON string, read as array
+}
+
+export interface VenueSportTable {
+  venue_id: number;
+  sport_category_id: number;
 }
 
 export interface BookingTable {
@@ -529,6 +540,7 @@ export interface DB {
   usage_history: UsageHistoryTable;
   // venue booking
   venue: VenueTable;
+  venue_sport: VenueSportTable;
   booking: BookingTable;
   booking_session_request: BookingSessionRequestTable;
   booking_session_request_equipment: BookingSessionRequestEquipmentTable;
