@@ -1,0 +1,20 @@
+# Local Postgres 16 with the extensions the schema needs (citext, btree_gist, pgcrypto).
+# Every teammate runs `docker compose up -d` and gets an identical database.
+# Port 5433 to avoid clashing with any host Postgres on 5432.
+services:
+  db:
+    image: postgres:16
+    container_name: bukc_db
+    environment:
+      POSTGRES_USER: bukc
+      POSTGRES_PASSWORD: bukc
+      POSTGRES_DB: bukc
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bukc -d bukc"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

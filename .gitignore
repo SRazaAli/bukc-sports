@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+*/node_modules/
+
+# env & secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# builds
+dist/
+build/
+client/dist/
+server/dist/
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / os
+.vscode/
+.idea/
+.DS_Store
+
+# test artifacts
+coverage/
+*.tmp
+
+# db
+pgdata/

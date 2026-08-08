@@ -1,0 +1,5 @@
+HEAD
+client/tsconfig.tsbuildinfo
+
+tsconfig.tsbuildinfo
+fix(auth): lockout counter never reset after expiry, causing effectively indefinite lock

@@ -1,0 +1,37 @@
+/* BUKC Sports — design tokens.
+   Grounded in the subject: a university sports department. Institutional trust
+   (deep navy, the university register) with a single energetic accent (court
+   orange, the equipment) used sparingly. Not the AI-default cream+terracotta. */
+:root {
+  --navy-900: #0f1b2d;
+  --navy-700: #1e3a5f;
+  --navy-100: #e7edf4;
+  --court:    #e8722b;
+  --court-50: #fdf1e8;
+  --paper:    #fbfaf8;
+  --ink:      #1a1d21;
+  --muted:    #5c6773;
+  --line:     #dfe3e8;
+  --ok:       #1f8a5b;
+  --warn:     #c9822b;
+  --danger:   #c23b3b;
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-8: 48px;
+  --radius: 8px;
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-body);
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--navy-700); }
+:focus-visible { outline: 2px solid var(--court); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "bukc-db",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "migrate": "tsx --env-file=.env run-migrations.ts",
+    "seed": "tsx --env-file=.env seed/seed.ts",
+    "seed:demo": "tsx --env-file=.env seed/seed-demo-inventory.ts",
+    "reset": "tsx --env-file=.env run-migrations.ts && tsx --env-file=.env seed/seed.ts"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
