@@ -80,8 +80,8 @@ export default function EquipmentBorrowScreen() {
     setSubmitting(true);
     setFormError(null);
 
-    const requestedStartAt = new Date(`${date}T${startTime}:00`).toISOString();
-    const requestedReturnAt = new Date(`${date}T${endTime}:00`).toISOString();
+    const requestedStartAt = `${date}T${startTime}:00.000Z`;
+    const requestedReturnAt = `${date}T${endTime}:00.000Z`;
 
     // Submit main item + any ticked related items sequentially
     const typeIds = [row.equipmentTypeId, ...Array.from(selected)];
@@ -116,11 +116,11 @@ export default function EquipmentBorrowScreen() {
 
   const badgeStyle: React.CSSProperties = !row ? {} :
     row.statusBadge === 'AVAILABLE' ? { background: '#d1fae5', color: '#065f46' } :
-    row.statusBadge === 'LOW_STOCK' ? { background: '#fef3c7', color: '#92400e' } :
-    { background: '#fee2e2', color: '#991b1b' };
+      row.statusBadge === 'LOW_STOCK' ? { background: '#fef3c7', color: '#92400e' } :
+        { background: '#fee2e2', color: '#991b1b' };
   const badgeText = !row ? '' :
     row.statusBadge === 'AVAILABLE' ? 'Available' :
-    row.statusBadge === 'LOW_STOCK' ? 'Low Stock' : 'Checked Out';
+      row.statusBadge === 'LOW_STOCK' ? 'Low Stock' : 'Checked Out';
 
   return (
     <PortalShell title="Request to Borrow" tint="sage">
@@ -218,10 +218,10 @@ export default function EquipmentBorrowScreen() {
                         {row.availableUnits === 0
                           ? 'Unavailable — cannot request'
                           : submitting
-                          ? 'Submitting…'
-                          : selected.size > 0
-                          ? `Submit Request (${1 + selected.size} items)`
-                          : 'Submit Request'}
+                            ? 'Submitting…'
+                            : selected.size > 0
+                              ? `Submit Request (${1 + selected.size} items)`
+                              : 'Submit Request'}
                       </PrimaryButton>
                     </div>
 
@@ -232,18 +232,18 @@ export default function EquipmentBorrowScreen() {
                     )}
                   </form>
                 )}
-  
-                  <div style={rulesBox}>
-                    <p style={rulesTitle}>Before you request</p>
-                    <ul style={rulesList}>
-                      <li>Borrow window must start and end on the same day.</li>
-                      <li>Bring your student ID card when collecting.</li>
-                      <li>Return equipment in the same condition.</li>
-                      {row.lendingUnit === 'PAIR' && (
-                        <li>Lent as a pair — both pieces must be returned together.</li>
-                      )}
-                    </ul>
-                  </div>
+
+                <div style={rulesBox}>
+                  <p style={rulesTitle}>Before you request</p>
+                  <ul style={rulesList}>
+                    <li>Borrow window must start and end on the same day.</li>
+                    <li>Bring your student ID card when collecting.</li>
+                    <li>Return equipment in the same condition.</li>
+                    {row.lendingUnit === 'PAIR' && (
+                      <li>Lent as a pair — both pieces must be returned together.</li>
+                    )}
+                  </ul>
+                </div>
 
                 {notice && (
                   <div style={successActions}>
@@ -275,11 +275,11 @@ export default function EquipmentBorrowScreen() {
 
                     const itemBadge: React.CSSProperties =
                       item.statusBadge === 'AVAILABLE' ? { background: '#d1fae5', color: '#065f46' } :
-                      item.statusBadge === 'LOW_STOCK' ? { background: '#fef3c7', color: '#92400e' } :
-                      { background: '#fee2e2', color: '#991b1b' };
+                        item.statusBadge === 'LOW_STOCK' ? { background: '#fef3c7', color: '#92400e' } :
+                          { background: '#fee2e2', color: '#991b1b' };
                     const itemBadgeText =
                       item.statusBadge === 'AVAILABLE' ? 'Available' :
-                      item.statusBadge === 'LOW_STOCK' ? 'Low Stock' : 'Checked Out';
+                        item.statusBadge === 'LOW_STOCK' ? 'Low Stock' : 'Checked Out';
 
                     return (
                       <div
@@ -347,7 +347,7 @@ const backBtn: React.CSSProperties = { background: 'none', border: 'none', color
 
 const box = {
   err: { padding: '10px 14px', borderRadius: 8, background: '#fee2e2', color: '#991b1b', fontSize: 14, marginBottom: 14 } as React.CSSProperties,
-  ok:  { padding: '10px 14px', borderRadius: 8, background: '#d1fae5', color: '#065f46', fontSize: 14, marginBottom: 14 } as React.CSSProperties,
+  ok: { padding: '10px 14px', borderRadius: 8, background: '#d1fae5', color: '#065f46', fontSize: 14, marginBottom: 14 } as React.CSSProperties,
 };
 
 const layout: React.CSSProperties = {
@@ -360,7 +360,7 @@ const layout: React.CSSProperties = {
 // Detail card
 const detailCard: React.CSSProperties = { border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden', background: '#fff' };
 const imageWrap: React.CSSProperties = { background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const image: React.CSSProperties = { width: '100%', height: 235, objectFit: 'contain' };
+const image: React.CSSProperties = { width: '100%', height: 230, objectFit: 'contain' };
 const imagePlaceholder: React.CSSProperties = { width: 90, height: 90, borderRadius: '50%', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 const placeholderLetter: React.CSSProperties = { fontSize: 40, fontWeight: 700, color: '#fff' };
 const infoBody: React.CSSProperties = { padding: '20px 22px' };

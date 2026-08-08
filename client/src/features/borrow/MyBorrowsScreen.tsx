@@ -42,8 +42,8 @@ function RequestForm({ types, initialTypeId, onDone, onError }: {
     if (!equipmentTypeId) { onError('Choose an equipment type.'); return; }
     setBusy(true);
     try {
-      const requestedStartAt = new Date(`${date}T${startTime}:00`).toISOString();
-      const requestedReturnAt = new Date(`${date}T${endTime}:00`).toISOString();
+      const requestedStartAt = `${date}T${startTime}:00.000Z`;
+      const requestedReturnAt = `${date}T${endTime}:00.000Z`;
       await submitRequest({ equipmentTypeId, requestedStartAt, requestedReturnAt });
       onDone('Request submitted. You will be notified once a Coordinator reviews it.');
     } catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
@@ -113,8 +113,8 @@ function KitRequestForm({ cats, initialSportId, onDone, onError }: {
     if (!kitPack?.canRequestAll) { onError('Not all items in this kit are available.'); return; }
     setSubmitting(true);
     try {
-      const requestedStartAt = new Date(`${date}T${startTime}:00`).toISOString();
-      const requestedReturnAt = new Date(`${date}T${endTime}:00`).toISOString();
+      const requestedStartAt = `${date}T${startTime}:00.000Z`;
+      const requestedReturnAt = `${date}T${endTime}:00.000Z`;
       const res = await submitKitBorrowRequest({ sportCategoryId: sportId, requestedStartAt, requestedReturnAt });
       onDone(res.message);
       setSportId(0); setKitPack(null);
@@ -253,7 +253,7 @@ export default function MyBorrowsScreen() {
         </Panel>
 
         {/* Kit pack request — expanded when arriving from the kit CTA */}
-        <Panel title="Request Full Kit" defaultOpen={!!incomingKit}>
+        <Panel title="🎒 Request Full Kit" defaultOpen={!!incomingKit}>
           <KitRequestForm
             cats={cats}
             initialSportId={incomingKit?.sportCategoryId}
