@@ -127,7 +127,7 @@ export default function EquipmentBorrowScreen() {
   const badgeStyle: React.CSSProperties = !row ? {} :
     row.statusBadge === 'AVAILABLE' ? { background: '#d1fae5', color: '#065f46' } :
       row.statusBadge === 'LOW_STOCK' ? { background: '#fef3c7', color: '#92400e' } :
-        { background: '#fee2e2', color: '#991b1b' };
+        { background: '#fee2e2', color: '#991b1b' }; 
   const badgeText = !row ? '' :
     row.statusBadge === 'AVAILABLE' ? 'Available' :
       row.statusBadge === 'LOW_STOCK' ? 'Low Stock' : 'Checked Out';
