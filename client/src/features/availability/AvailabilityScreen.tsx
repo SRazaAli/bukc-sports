@@ -1,30 +1,35 @@
 /**
  * Equipment Availability Checker (Feature 2 — EQUIP-AVAIL-01..10).
- * Open to every authenticated role. Read-only — no borrow request is ever
- * submitted from this screen (EQUIP-AVAIL-09). Students see a "Request to
- * Borrow" link per card that navigates to the dedicated request screen
- * (/my-borrows) with the equipment type pre-selected — the request itself
- * is still only ever submitted there, this is pure navigation.
- * Total stock only renders for staff (EQUIP-AVAIL-05); the server already
- * omits it for other roles.
+ * Open to every authenticated role. Read-only — no borrow action here
+ * (EQUIP-AVAIL-09; that's Feature 3). Total stock only renders for staff
+ * (EQUIP-AVAIL-05); the server already omits it for other roles.
+ *
+ * Kit Pack card: when a sport filter is active and that sport has ≥2 equipment
+ * types, a KitPackCard appears above the individual item grid giving students
+ * a summary of the full kit and a link to My Borrows to request it.
  */
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
 import { listSportCategories, type SportCategory } from '../inventory/api.js';
 import { listAvailability, subscribeAvailability, type AvailabilityRow } from './api.js';
+import { getKitPack, type KitPack } from './kitPackApi.js';
+import { KitPackCard } from './KitPackCard.js';
 import { ApiRequestError } from '../../lib/api.js';
 
 export default function AvailabilityScreen() {
   const { user, loading } = useAuth();
-  const navigate = useNavigate();
   const [rows, setRows] = useState<AvailabilityRow[] | null>(null);
   const [cats, setCats] = useState<SportCategory[]>([]);
   const [sportCategoryId, setSportCategoryId] = useState(0);
   const [indoorFilter, setIndoorFilter] = useState<'' | 'indoor' | 'outdoor'>('');
   const [live, setLive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Kit pack state — loaded when a single sport is selected
+  const [kitPack, setKitPack] = useState<KitPack | null>(null);
+  const [kitLoading, setKitLoading] = useState(false);
 
   const loadInitial = useCallback(async () => {
     try {
@@ -38,8 +43,7 @@ export default function AvailabilityScreen() {
 
   useEffect(() => { void loadInitial(); }, [loadInitial]);
 
-  // Live updates via SSE. The stream sends the full list on every change;
-  // filters are applied client-side against whatever the stream last sent.
+  // Live updates via SSE
   useEffect(() => {
     if (loading || !user) return;
     const close = subscribeAvailability((snapshot) => {
@@ -48,6 +52,19 @@ export default function AvailabilityScreen() {
     });
     return close;
   }, [loading, user]);
+
+  // Load kit pack whenever sport filter changes (and is non-zero)
+  useEffect(() => {
+    if (!sportCategoryId) {
+      setKitPack(null);
+      return;
+    }
+    setKitLoading(true);
+    getKitPack(sportCategoryId)
+      .then((res) => setKitPack(res.kitPack))
+      .catch(() => setKitPack(null))
+      .finally(() => setKitLoading(false));
+  }, [sportCategoryId]);
 
   const filtered = useMemo(() => {
     if (!rows) return [];
@@ -64,6 +81,12 @@ export default function AvailabilityScreen() {
 
   const isStaff = user.role === 'SUPER_ADMIN' || user.role === 'COORDINATOR';
   const isStudent = user.role === 'STUDENT';
+
+  // Show kit pack card only when:
+  // - A sport is selected
+  // - The kit has ≥2 items (single-item "kits" aren't meaningful)
+  // - Not filtering by indoor/outdoor (kit should represent the full set)
+  const showKitPack = !!sportCategoryId && !indoorFilter && kitPack && kitPack.items.length >= 2;
 
   return (
     <PortalShell title="Equipment Availability" tint={isStaff ? 'navy' : 'sage'}>
@@ -95,18 +118,29 @@ export default function AvailabilityScreen() {
           <p style={muted}>No equipment matches these filters.</p>
         ) : (
           <div style={grid}>
-            {filtered.map((r) => (
-              <EquipmentCard key={r.equipmentTypeId} row={r} showTotal={isStaff}
-                onRequest={isStudent ? () => navigate(`/my-borrows?type=${r.equipmentTypeId}`) : undefined} />
-            ))}
+            {filtered.map((r) => <EquipmentCard key={r.equipmentTypeId} row={r} showTotal={isStaff} />)}
           </div>
+        )}
+
+        {/* Kit Pack card — below individual items when sport is selected */}
+        {sportCategoryId > 0 && (
+          <>
+            {showKitPack && <p style={sectionLabel}>Full kit</p>}
+            <div style={kitSection}>
+              {kitLoading ? (
+                <div style={kitLoading_}>Loading kit pack…</div>
+              ) : showKitPack ? (
+                <KitPackCard pack={kitPack!} isStudent={isStudent} />
+              ) : null}
+            </div>
+          </>
         )}
       </div>
     </PortalShell>
   );
 }
 
-function EquipmentCard({ row, showTotal, onRequest }: { row: AvailabilityRow; showTotal: boolean; onRequest?: () => void }) {
+function EquipmentCard({ row, showTotal }: { row: AvailabilityRow; showTotal: boolean }) {
   const badgeStyle = row.statusBadge === 'AVAILABLE' ? badge.ok : row.statusBadge === 'LOW_STOCK' ? badge.warn : badge.danger;
   const badgeText = row.statusBadge === 'AVAILABLE' ? 'Available' : row.statusBadge === 'LOW_STOCK' ? 'Low Stock' : 'Checked Out';
 
@@ -125,47 +159,44 @@ function EquipmentCard({ row, showTotal, onRequest }: { row: AvailabilityRow; sh
         <p style={cardMeta}>{row.sportCategoryName} · {row.isIndoor ? 'Indoor' : 'Outdoor'} · {row.lendingUnit === 'PAIR' ? 'Pair' : 'Single'}</p>
         <div style={cardCount}>
           <span style={countNumber}>{row.availableUnits}</span>
-          <span style={countLabel}>available{showTotal && row.totalStock !== undefined ? ` of ${row.totalStock}` : ''}</span>
+          <span style={countLabel}>available{showTotal && row.totalStock !== undefined
+            ? ` of ${row.totalStock} total` : ''}</span>
         </div>
-        {/* Navigation only, never submits a request from here — the actual
-            borrow request is always initiated on the dedicated screen
-            (EQUIP-AVAIL-09: this checker stays read-only). */}
-        {onRequest && (
-          <button type="button" style={requestBtn} onClick={onRequest}>
-            Request to Borrow →
-          </button>
-        )}
       </div>
     </div>
   );
 }
 
-const wrap: React.CSSProperties = { maxWidth: 980, margin: '0 auto' };
-const headerRow: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, gap: 16, flexWrap: 'wrap' };
-const subtitle: React.CSSProperties = { color: '#5c6773', fontSize: 14.5, margin: 0, maxWidth: 480 };
-const liveDot: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: '#8a949f', whiteSpace: 'nowrap' };
-const liveDotOn: React.CSSProperties = { color: '#1f8a4c' };
-const dot: React.CSSProperties = { width: 7, height: 7, borderRadius: '50%', background: 'currentColor', display: 'inline-block' };
-const filterRow: React.CSSProperties = { display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' };
-const select: React.CSSProperties = { font: '14px var(--font-body)', padding: '8px 12px', border: '1px solid #ccc', borderRadius: 4, background: '#fff' };
-const muted: React.CSSProperties = { color: '#5c6773', fontSize: 14.5 };
-const errBox: React.CSSProperties = { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 4, padding: '10px 14px', marginBottom: 16, fontSize: 14 };
-const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 16 };
-const card: React.CSSProperties = { background: '#fff', border: '1px solid #ddd', borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' };
-const cardImageWrap: React.CSSProperties = { height: 110, background: '#eef1f4' };
-const cardImage: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover', display: 'block' };
-const cardImagePlaceholder: React.CSSProperties = { width: '100%', height: '100%', display: 'grid', placeItems: 'center', font: '600 32px var(--font-display)', color: '#b8c2cc' };
-const cardBody: React.CSSProperties = { padding: 14 };
-const cardTop: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 };
-const cardTitle: React.CSSProperties = { font: '600 15px var(--font-body)', color: '#26485f', margin: 0 };
-const cardMeta: React.CSSProperties = { fontSize: 12.5, color: '#8a949f', margin: '4px 0 10px' };
-const cardCount: React.CSSProperties = { display: 'flex', alignItems: 'baseline', gap: 6 };
-const requestBtn: React.CSSProperties = { marginTop: 12, width: '100%', font: '600 13px var(--font-body)', padding: '8px 10px', border: 'none', borderRadius: 4, background: '#0a6ebd', color: '#fff', cursor: 'pointer' };
-const countNumber: React.CSSProperties = { font: '700 24px var(--font-display)', color: '#1a1d21' };
-const countLabel: React.CSSProperties = { fontSize: 12.5, color: '#5c6773' };
-const badgeBase: React.CSSProperties = { font: '600 11px var(--font-mono)', padding: '3px 8px', borderRadius: 4, whiteSpace: 'nowrap' };
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const wrap: React.CSSProperties = { maxWidth: 900, margin: '0 auto', padding: '24px 16px' };
+const headerRow: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, gap: 12, flexWrap: 'wrap' };
+const subtitle: React.CSSProperties = { margin: 0, color: 'var(--color-muted, #6b7280)', fontSize: 14 };
+const liveDot: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--color-muted, #6b7280)' };
+const liveDotOn: React.CSSProperties = { color: '#059669' };
+const dot: React.CSSProperties = { display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'currentColor' };
+const filterRow: React.CSSProperties = { display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' };
+const select: React.CSSProperties = { padding: '8px 12px', borderRadius: 8, border: '1px solid var(--color-border, #d1d5db)', fontSize: 14, background: 'var(--color-surface, #fff)', cursor: 'pointer' };
+const errBox: React.CSSProperties = { padding: '10px 14px', borderRadius: 8, background: '#fee2e2', color: '#991b1b', fontSize: 14, marginBottom: 16 };
+const kitSection: React.CSSProperties = { marginBottom: 4 };
+const kitLoading_: React.CSSProperties = { padding: '12px 0', color: 'var(--color-muted, #6b7280)', fontSize: 14 };
+const sectionLabel: React.CSSProperties = { margin: '24px 0 12px', fontSize: 13, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-muted, #6b7280)' };
+const muted: React.CSSProperties = { color: 'var(--color-muted, #6b7280)', fontSize: 14 };
+const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 };
+const card: React.CSSProperties = { background: 'var(--color-surface, #fff)', border: '1px solid var(--color-border, #e5e7eb)', borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column' };
+const cardImageWrap: React.CSSProperties = { height: 120, background: 'var(--color-surface-alt, #f9fafb)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const cardImage: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover' };
+const cardImagePlaceholder: React.CSSProperties = { width: 56, height: 56, borderRadius: '50%', background: 'var(--color-accent, #2563eb)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 700 };
+const cardBody: React.CSSProperties = { padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4, flex: 1 };
+const cardTop: React.CSSProperties = { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 };
+const cardTitle: React.CSSProperties = { margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text, #111)', flex: 1 };
+const cardMeta: React.CSSProperties = { margin: 0, fontSize: 12, color: 'var(--color-muted, #6b7280)' };
+const cardCount: React.CSSProperties = { display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 6 };
+const countNumber: React.CSSProperties = { fontSize: 24, fontWeight: 700, color: 'var(--color-text, #111)', lineHeight: 1 };
+const countLabel: React.CSSProperties = { fontSize: 12, color: 'var(--color-muted, #6b7280)' };
+const badgeBase: React.CSSProperties = { display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' };
 const badge = {
-  ok: { background: '#e6f4ec', color: '#1f7a45' } as React.CSSProperties,
-  warn: { background: '#fdf1e3', color: '#9a6412' } as React.CSSProperties,
-  danger: { background: '#fbe9e7', color: '#b3352b' } as React.CSSProperties,
-};
+  ok: { backgroundColor: '#d1fae5', color: '#065f46' },
+  warn: { backgroundColor: '#fef3c7', color: '#92400e' },
+  danger: { backgroundColor: '#fee2e2', color: '#991b1b' },
+} as const;
