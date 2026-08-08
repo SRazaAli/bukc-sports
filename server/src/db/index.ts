@@ -355,6 +355,8 @@ export interface VenueSportTable {
   sport_category_id: number;
 }
 
+export type BookingEventType = 'INTER_UNIVERSITY' | 'INTERNAL';
+
 export interface BookingTable {
   booking_id: Generated<string>;
   venue_id: number;
@@ -374,6 +376,8 @@ export interface BookingTable {
   self_managed_equipment: ColumnType<boolean, boolean | undefined, boolean>;
   entered_via_offline_fallback: ColumnType<boolean, boolean | undefined, boolean>;
   holds_future_slot: ColumnType<boolean, boolean | undefined, boolean>;
+  booking_type: BookingEventType | null;
+  booking_metadata: ColumnType<Record<string, unknown> | null, string | null, string | null>;
 }
 
 export interface BookingSessionRequestTable {

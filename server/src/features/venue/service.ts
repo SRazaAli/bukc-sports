@@ -241,9 +241,19 @@ function validateSessions(sessions: SessionInput[]) {
 
 // ── submission (VENUE-04..14, VENUE-06/35/36 multi-session) ──
 export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXTERNAL', input: {
-  venueId: number; purpose: string; estimatedParticipants: number; sessions: SessionInput[];
+  venueId: number; estimatedParticipants: number; sessions: SessionInput[];
+  metadata: import('./validators.js').BookingMetadata;
 }) {
   validateSessions(input.sessions);
+
+  // Derive a human-readable purpose string from metadata for coordinator display
+  const meta = input.metadata;
+  let purposeSummary: string;
+  if (meta.bookingType === 'INTER_UNIVERSITY') {
+    purposeSummary = `Inter-University ${meta.matchFormat === 'FRIENDLY' ? 'Friendly' : meta.matchFormat} — ${meta.sport} vs ${meta.visitingUniversity}`;
+  } else {
+    purposeSummary = `Internal ${meta.matchFormat === 'FRIENDLY' ? 'Match' : meta.matchFormat} — ${meta.sport}: ${meta.teamAName}${meta.teamBName ? ` vs ${meta.teamBName}` : ''}`;
+  }
 
   // VENUE-07: one active booking (PENDING/FORWARDED) at a time.
   const active = await db.selectFrom('booking').select('booking_id')
@@ -261,14 +271,21 @@ export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXT
     const bookingId = await db.transaction().execute(async (trx) => {
       const row = await trx.insertInto('booking').values({
         venue_id: input.venueId, origin, requested_by: requesterId,
-        purpose: input.purpose, estimated_participants: input.estimatedParticipants,
+        purpose: purposeSummary.slice(0, 300),
+        estimated_participants: input.estimatedParticipants,
+        booking_type: meta.bookingType,
+        booking_metadata: JSON.stringify(meta),
       }).returning('booking_id').executeTakeFirstOrThrow();
 
       for (const s of input.sessions) {
+        // teamName in session_request = BUKC team name for inter-uni, Team A for internal
+        const sessionTeamName = meta.bookingType === 'INTER_UNIVERSITY'
+          ? meta.bukcTeamName : meta.teamAName;
         await trx.insertInto('booking_session_request').values({
           booking_id: row.booking_id, session_no: s.sessionNo,
           requested_start_at: s.requestedStartAt, requested_end_at: s.requestedEndAt,
-          team_name: s.teamName, participant_details: s.participantDetails ?? null,
+          team_name: s.teamName || sessionTeamName,
+          participant_details: s.participantDetails ?? null,
         }).execute();
       }
 
@@ -279,8 +296,9 @@ export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXT
       return row.booking_id;
     });
 
+    const sessionCount = input.sessions.length;
     await notifyStaffRole('COORDINATOR', 'QUEUE_NEW_ITEM', 'New venue booking request',
-      `A new ${input.sessions.length > 1 ? `${input.sessions.length}-session ` : ''}venue booking request is awaiting review.`, bookingId);
+      `A new ${sessionCount > 1 ? `${sessionCount}-session ` : ''}${meta.bookingType === 'INTER_UNIVERSITY' ? 'inter-university' : 'internal'} booking request is awaiting review.`, bookingId);
 
     return { booking_id: bookingId };
   } catch (e) { throw mapDbError(e); }
@@ -525,11 +543,18 @@ export async function getBookingDetail(bookingId: string) {
   const b = await db.selectFrom('booking as b')
     .innerJoin('venue as v', 'v.venue_id', 'b.venue_id')
     .select(['b.booking_id', 'b.origin', 'b.status', 'b.purpose', 'b.estimated_participants',
-      'b.feasibility_note', 'b.rejection_reason', 'v.name as venue_name'])
+      'b.feasibility_note', 'b.rejection_reason', 'v.name as venue_name',
+      'b.booking_type', 'b.booking_metadata'])
     .where('b.booking_id', '=', bookingId).executeTakeFirst();
   if (!b) throw notFound('Booking not found.');
   const sessions = await getSessionRequests(bookingId);
-  return { ...b, sessions };
+  return {
+    ...b,
+    booking_metadata: b.booking_metadata
+      ? (typeof b.booking_metadata === 'string' ? JSON.parse(b.booking_metadata) : b.booking_metadata)
+      : null,
+    sessions,
+  };
 }
 
 // ── calendar (CAL-01..05) ──

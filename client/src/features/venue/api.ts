@@ -88,9 +88,27 @@ export const updateVenue = (id: number, input: Partial<VenueFormInput> & { avail
 export const deleteVenue = (id: number) =>
   api<{ message: string }>(`/api/venue/venues/${id}`, { method: 'DELETE' });
 
-// VENUE-06/35/36: submit one or more sessions (max 30) as one package.
+export type BookingMetadata =
+  | {
+      bookingType: 'INTER_UNIVERSITY';
+      sport: string; eventFormat: string; matchFormat: string;
+      visitingUniversity: string; visitingCity: string; visitingTeamName: string;
+      visitingCaptainName: string; visitingCaptainContact: string;
+      bukcTeamName: string; bukcCaptainEnrollment: string; bukcCaptainContact: string;
+      bukcPlayers: Array<{ enrollmentNo: string; fullName: string }>;
+      authorizationRef?: string; specialRequirements?: string;
+    }
+  | {
+      bookingType: 'INTERNAL';
+      sport: string; eventFormat: string; matchFormat: string;
+      teamAName: string; teamACaptainEnrollment: string; teamACaptainContact: string;
+      teamBName?: string; teamBCaptainEnrollment?: string;
+      organizingEntity: string; specialRequirements?: string;
+    };
+
 export const submitBooking = (input: {
-  venueId: number; purpose: string; estimatedParticipants: number; sessions: SessionInput[];
+  venueId: number; estimatedParticipants: number; sessions: SessionInput[];
+  metadata: BookingMetadata;
 }) => api<{ booking: { bookingId: string } }>('/api/venue/bookings', { method: 'POST', body: input });
 
 // VENUE-28/29: Coordinator initiates a recurring academic event, same shape, no requester.

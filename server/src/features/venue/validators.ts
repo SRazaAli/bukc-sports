@@ -1,17 +1,13 @@
 import { z } from 'zod';
 
-// VENUE-01: casual-vs-official thresholds are surfaced as guidance, not
-// enforced as a hard block — nothing in the rules requires rejecting a
-// below-threshold submission; the Coordinator judges feasibility at review.
+// VENUE-01: casual-vs-official thresholds surfaced as guidance, not hard blocks.
 export const INDOOR_THRESHOLD = 6;
 export const OUTDOOR_THRESHOLD = 10;
 
 const SURFACE_TYPES = ['Hardwood', 'Synthetic', 'Grass', 'Concrete', 'Artificial Turf', 'Clay', 'Other'] as const;
 
-// Photos: base64 data URIs, max 3, max 400 KB each
-const photosSchema = z.array(
-  z.string().max(550_000, 'Each photo must be under 400 KB'),
-).max(3, 'Maximum 3 photos per venue').default([]);
+// ── Venue schemas ──
+const photosSchema = z.array(z.string().max(550_000)).max(3).default([]);
 
 export const createVenueSchema = z.object({
   name: z.string().min(2).max(120),
@@ -36,8 +32,7 @@ export const updateVenueSchema = z.object({
   availabilityStatus: z.enum(['AVAILABLE', 'UNDER_MAINTENANCE', 'CLOSED']).optional(),
 }).refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
-
-// VENUE-06/35/36: one or more sessions (max 30), one venue, roster per session.
+// ── Session schema (shared by all booking types) ──
 const sessionSchema = z.object({
   sessionNo: z.number().int().min(1).max(30),
   requestedStartAt: z.string().datetime(),
@@ -48,15 +43,60 @@ const sessionSchema = z.object({
   message: 'End time must be after start time', path: ['requestedEndAt'],
 });
 
-// VENUE-05: venue, date/time window(s), purpose, team(s), participant count.
-export const submitBookingSchema = z.object({
-  venueId: z.number().int().positive(),
-  purpose: z.string().min(2).max(300),
-  estimatedParticipants: z.number().int().positive(),
-  sessions: z.array(sessionSchema).min(1).max(30),
+// ── Player entry (BUKC roster) ──
+const bukcPlayerSchema = z.object({
+  enrollmentNo: z.string().min(1).max(30),
+  fullName: z.string().min(2).max(100),
 });
 
-// VENUE-28/29: Coordinator-initiated academic event, same shape minus a requester.
+// ── Inter-University metadata ──
+const interUniversityMetaSchema = z.object({
+  bookingType: z.literal('INTER_UNIVERSITY'),
+  sport: z.string().min(1).max(80),
+  eventFormat: z.enum(['SINGLE_MATCH', 'TOURNAMENT']),
+  matchFormat: z.enum(['FRIENDLY', 'LEAGUE', 'KNOCKOUT', 'ROUND_ROBIN']),
+  visitingUniversity: z.string().min(2).max(150),
+  visitingCity: z.string().min(1).max(80),
+  visitingTeamName: z.string().min(1).max(120),
+  visitingCaptainName: z.string().min(2).max(100),
+  visitingCaptainContact: z.string().min(6).max(20),
+  bukcTeamName: z.string().min(1).max(120),
+  bukcCaptainEnrollment: z.string().min(1).max(30),
+  bukcCaptainContact: z.string().min(6).max(20),
+  bukcPlayers: z.array(bukcPlayerSchema).min(1).max(30),
+  authorizationRef: z.string().max(200).optional(),
+  specialRequirements: z.string().max(500).optional(),
+});
+
+// ── Internal match metadata ──
+const internalMetaSchema = z.object({
+  bookingType: z.literal('INTERNAL'),
+  sport: z.string().min(1).max(80),
+  eventFormat: z.enum(['SINGLE_MATCH', 'TOURNAMENT']),
+  matchFormat: z.enum(['FRIENDLY', 'LEAGUE', 'KNOCKOUT', 'ROUND_ROBIN']),
+  teamAName: z.string().min(1).max(120),
+  teamACaptainEnrollment: z.string().min(1).max(30),
+  teamACaptainContact: z.string().min(6).max(20),
+  teamBName: z.string().max(120).optional(),
+  teamBCaptainEnrollment: z.string().max(30).optional(),
+  organizingEntity: z.string().min(1).max(120),
+  specialRequirements: z.string().max(500).optional(),
+});
+
+const bookingMetaSchema = z.discriminatedUnion('bookingType', [
+  interUniversityMetaSchema,
+  internalMetaSchema,
+]);
+
+// ── Submit booking (structured pitch) ──
+export const submitBookingSchema = z.object({
+  venueId: z.number().int().positive(),
+  estimatedParticipants: z.number().int().positive(),
+  sessions: z.array(sessionSchema).min(1).max(30),
+  metadata: bookingMetaSchema,
+});
+
+// VENUE-28/29: Coordinator academic event (legacy simple shape)
 export const academicEventSchema = z.object({
   venueId: z.number().int().positive(),
   purpose: z.string().min(2).max(300),
@@ -64,17 +104,10 @@ export const academicEventSchema = z.object({
   sessions: z.array(sessionSchema).min(1).max(30),
 });
 
-export const feasibilityNoteSchema = z.object({
-  note: z.string().max(500).optional(),
-});
-export const rejectBookingSchema = z.object({
-  reason: z.string().min(1).max(300),
-});
-export const returnForReevalSchema = z.object({
-  note: z.string().min(1).max(500),
-});
+export const feasibilityNoteSchema = z.object({ note: z.string().max(500).optional() });
+export const rejectBookingSchema = z.object({ reason: z.string().min(1).max(300) });
+export const returnForReevalSchema = z.object({ note: z.string().min(1).max(500) });
 
-// VENUE-13: Coordinator's per-session equipment plan.
 export const planAllocationSchema = z.object({
   allocations: z.array(z.object({
     requestSessionId: z.string().uuid(),
@@ -83,14 +116,14 @@ export const planAllocationSchema = z.object({
   })).min(1),
 });
 
-// VENUE-16: client confirms or declines self-managing a shortfall.
-export const confirmShortfallSchema = z.object({
-  confirm: z.boolean(),
-});
+export const confirmShortfallSchema = z.object({ confirm: z.boolean() });
 
-// EQUIP-AVAIL-14: swap an unavailable/short article for an available one.
 export const performSwapSchema = z.object({
   outgoingArticleId: z.string().uuid(),
   incomingArticleId: z.string().uuid(),
   reason: z.string().max(300).optional(),
 });
+
+export type BookingMetadata = z.infer<typeof bookingMetaSchema>;
+export type InterUniversityMeta = z.infer<typeof interUniversityMetaSchema>;
+export type InternalMeta = z.infer<typeof internalMetaSchema>;
