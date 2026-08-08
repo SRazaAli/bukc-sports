@@ -1,56 +1,64 @@
 /**
  * Coordinator — Borrow Queue (BORROW-07..14).
  *
- * Queue is grouped by student — one row per student showing how many items
- * they've requested and their time window. Clicking "Review" opens a detail
- * panel listing ALL of that student's pending requests, each with individual
- * Approve / Reject controls. After approving an item the coordinator selects
- * the physical article(s) to hand out.
+ * Queue is grouped by student: one row per student in the list view.
+ * Clicking "Review" opens a detail panel showing ALL that student's pending
+ * requests, each with its own approve/reject action.
  */
 import { useEffect, useState, useCallback } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
-import { listArticles, type Article } from '../inventory/api.js';
+import { listArticles, listTypes, type Article, type EquipmentType } from '../inventory/api.js';
 import {
   listQueue, approveRequest, rejectRequest, lendPlatform, lendWalkinGuest,
   type QueueItem,
 } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
 
-function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
+function errMsg(e: unknown) {
+  return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.';
+}
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function fmtTime(iso: string) {
+  return new Date(iso).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+}
+
+// ─── Grouping helper ──────────────────────────────────────────────────────────
 
 interface StudentGroup {
-  student_id: string;
-  student_name: string;
-  student_email: string;
-  items: QueueItem[];
-  earliest_start: string;
-  latest_return: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  requests: QueueItem[];
 }
 
 function groupByStudent(queue: QueueItem[]): StudentGroup[] {
   const map = new Map<string, StudentGroup>();
-  for (const q of queue) {
-    if (!map.has(q.student_id)) {
-      map.set(q.student_id, {
-        student_id: q.student_id, student_name: q.student_name,
-        student_email: q.student_email, items: [],
-        earliest_start: q.requested_start_at, latest_return: q.requested_return_at,
+  for (const item of queue) {
+    const existing = map.get(item.student_id);
+    if (existing) {
+      existing.requests.push(item);
+    } else {
+      map.set(item.student_id, {
+        studentId: item.student_id,
+        studentName: item.student_name,
+        studentEmail: item.student_email,
+        requests: [item],
       });
     }
-    const g = map.get(q.student_id)!;
-    g.items.push(q);
-    if (q.requested_start_at < g.earliest_start) g.earliest_start = q.requested_start_at;
-    if (q.requested_return_at > g.latest_return) g.latest_return = q.requested_return_at;
   }
-  return [...map.values()].sort((a, b) => a.earliest_start.localeCompare(b.earliest_start));
+  return Array.from(map.values());
 }
+
+// ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function BorrowQueueScreen() {
   const { user, loading } = useAuth();
   const [queue, setQueue] = useState<QueueItem[] | null>(null);
-  const [selectedGroup, setSelectedGroup] = useState<StudentGroup | null>(null);
+  const [selectedStudent, setSelectedStudent] = useState<StudentGroup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showWalkin, setShowWalkin] = useState(false);
@@ -65,11 +73,16 @@ export default function BorrowQueueScreen() {
   if (user.role !== 'COORDINATOR') return <Navigate to="/home" replace />;
 
   const flash = {
-    ok:  (m: string) => { setNotice(m); setError(null); },
-    err: (m: string) => { setError(m);  setNotice(null); },
+    ok: (m: string) => { setNotice(m); setError(null); void load(); },
+    err: (m: string) => { setError(m); setNotice(null); },
   };
 
   const groups = queue ? groupByStudent(queue) : [];
+
+  // Keep selectedStudent in sync after a reload (requests may have been approved/rejected)
+  const syncedStudent = selectedStudent
+    ? groups.find((g) => g.studentId === selectedStudent.studentId) ?? null
+    : null;
 
   return (
     <PortalShell title="Borrow Queue" tint="slate">
@@ -77,61 +90,64 @@ export default function BorrowQueueScreen() {
         {error  && <div style={box.err}>{error}</div>}
         {notice && <div style={box.ok}>{notice}</div>}
 
-        {selectedGroup ? (
+        {syncedStudent ? (
           <StudentReviewPanel
-            group={selectedGroup}
-            onBack={() => { setSelectedGroup(null); void load(); }}
-            onDone={(m) => { flash.ok(m); setSelectedGroup(null); void load(); }}
+            group={syncedStudent}
+            onBack={() => setSelectedStudent(null)}
+            onDone={(m) => { flash.ok(m); }}
             onError={flash.err}
           />
         ) : (
           <>
-            <Panel title="Pending Requests" action={
-              <span style={{ fontSize: 12, color: '#8a949f' }}>
-                {groups.length} student{groups.length !== 1 ? 's' : ''} waiting
-              </span>
-            }>
-              {queue === null ? <p style={muted}>Loading…</p> : groups.length === 0 ? (
+            {/* ── Pending requests table ── */}
+            <Panel
+              title="Pending Requests"
+              action={
+                groups.length >= 2 ? (
+                  <ApproveAllButton
+                    queue={queue ?? []}
+                    onDone={flash.ok}
+                    onError={flash.err}
+                  />
+                ) : undefined
+              }
+            >
+              {queue === null ? (
+                <p style={muted}>Loading…</p>
+              ) : groups.length === 0 ? (
                 <p style={muted}>No pending requests.</p>
               ) : (
                 <table style={table}>
                   <thead>
                     <tr>
                       <th style={th}>Student</th>
-                      <th style={th}>Items Requested</th>
-                      <th style={th}>Window</th>
-                      <th style={th}>Submitted</th>
+                      <th style={th}>Requests</th>
+                      <th style={th}>Earliest request</th>
                       <th style={th} />
                     </tr>
                   </thead>
                   <tbody>
                     {groups.map((g) => (
-                      <tr key={g.student_id}>
+                      <tr key={g.studentId}>
                         <td style={td}>
-                          <span style={{ fontWeight: 600 }}>{g.student_name}</span><br />
-                          <span style={{ color: '#8a949f', fontSize: 12 }}>{g.student_email}</span>
+                          <span style={studentName}>{g.studentName}</span>
+                          <span style={studentEmail}>{g.studentEmail}</span>
                         </td>
                         <td style={td}>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                            {g.items.map((item) => (
-                              <span key={item.borrow_request_id} style={itemChip}>
-                                {item.equipment_type_name}
-                              </span>
-                            ))}
-                          </div>
+                          <span style={countBadge}>{g.requests.length}</span>
+                          <span style={itemNames}>
+                            {g.requests.map((r) => r.equipment_type_name).join(', ')}
+                          </span>
                         </td>
-                        <td style={{ ...td, fontSize: 12, color: '#5c6773' }}>
-                          {new Date(g.earliest_start).toLocaleDateString()}&nbsp;
-                          {new Date(g.earliest_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          {' → '}
-                          {new Date(g.latest_return).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </td>
-                        <td style={{ ...td, fontSize: 12, color: '#5c6773' }}>
-                          {new Date(g.items[0].submitted_at).toLocaleString()}
+                        <td style={td}>
+                          {fmtDate(g.requests[0]!.submitted_at)}<br />
+                          <span style={{ color: '#6b7280', fontSize: 12 }}>
+                            {fmtTime(g.requests[0]!.submitted_at)}
+                          </span>
                         </td>
                         <td style={{ ...td, textAlign: 'right' }}>
-                          <button style={reviewBtn} onClick={() => setSelectedGroup(g)}>
-                            Review ({g.items.length})
+                          <button style={reviewBtn} onClick={() => setSelectedStudent(g)}>
+                            Review →
                           </button>
                         </td>
                       </tr>
@@ -141,11 +157,18 @@ export default function BorrowQueueScreen() {
               )}
             </Panel>
 
-            <Panel title="Walk-in Guest"
-              action={<button style={ghostBtn} onClick={() => setShowWalkin((v) => !v)}>{showWalkin ? 'Close' : 'New Walk-in'}</button>}>
+            {/* ── Walk-in ── */}
+            <Panel
+              title="Walk-in Guest"
+              action={
+                <button style={ghostBtn} onClick={() => setShowWalkin((v) => !v)}>
+                  {showWalkin ? 'Close' : 'New Walk-in'}
+                </button>
+              }
+            >
               {showWalkin
                 ? <WalkinForm onDone={(m) => { flash.ok(m); setShowWalkin(false); }} onError={flash.err} />
-                : <p style={muted}>Lend equipment directly to an unregistered guest — no prior request needed.</p>}
+                : <p style={muted}>Lend equipment directly to an unregistered guest, no prior request needed.</p>}
             </Panel>
           </>
         )}
@@ -154,285 +177,461 @@ export default function BorrowQueueScreen() {
   );
 }
 
-// ─────────────────────────── STUDENT REVIEW PANEL ────────────────
+// ─── Student review panel ─────────────────────────────────────────────────────
+
 function StudentReviewPanel({ group, onBack, onDone, onError }: {
   group: StudentGroup;
   onBack: () => void;
   onDone: (m: string) => void;
   onError: (m: string) => void;
 }) {
-  type ItemState = 'pending' | 'approving' | 'rejecting' | 'done';
-  const [itemStates, setItemStates] = useState<Record<string, ItemState>>(
-    () => Object.fromEntries(group.items.map((i) => [i.borrow_request_id, 'pending' as ItemState]))
-  );
-  const [reasons, setReasons] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const [localNotice, setLocalNotice] = useState<string | null>(null);
+  // Track which request is currently open for lending (post-approve)
+  const [lendingItem, setLendingItem] = useState<QueueItem | null>(null);
 
-  function setIS(id: string, s: ItemState) { setItemStates((p) => ({ ...p, [id]: s })); }
-  function setBusyFor(id: string, v: boolean) { setBusy((p) => ({ ...p, [id]: v })); }
-
-  async function approve(item: QueueItem) {
-    setBusyFor(item.borrow_request_id, true);
-    try { await approveRequest(item.borrow_request_id); setIS(item.borrow_request_id, 'approving'); }
-    catch (e) { onError(errMsg(e)); } finally { setBusyFor(item.borrow_request_id, false); }
+  if (lendingItem) {
+    return (
+      <div>
+        <button style={backBtn} onClick={() => setLendingItem(null)}>← Back to {group.studentName}'s requests</button>
+        <ArticleSelectForm
+          item={lendingItem}
+          onDone={(m) => { setLendingItem(null); onDone(m); }}
+          onError={onError}
+        />
+      </div>
+    );
   }
-
-  async function reject(item: QueueItem) {
-    const reason = reasons[item.borrow_request_id] ?? '';
-    if (!reason.trim()) { onError('A rejection reason is required.'); return; }
-    setBusyFor(item.borrow_request_id, true);
-    try {
-      await rejectRequest(item.borrow_request_id, reason);
-      setIS(item.borrow_request_id, 'done');
-      setLocalNotice(`Rejected: ${item.equipment_type_name}`);
-    } catch (e) { onError(errMsg(e)); } finally { setBusyFor(item.borrow_request_id, false); }
-  }
-
-  const allDone = group.items.every((i) => itemStates[i.borrow_request_id] === 'done');
 
   return (
-    <Panel title={`Review — ${group.student_name}`}
-      action={<button style={ghostBtn} onClick={onBack}>← Back to queue</button>}>
+    <div>
+      <button style={backBtn} onClick={onBack}>← Back to queue</button>
 
-      <div style={{ marginBottom: 14, fontSize: 13, color: '#5c6773' }}>
-        {group.student_email} &nbsp;·&nbsp;
-        {new Date(group.earliest_start).toLocaleString()} → {new Date(group.latest_return).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      {/* Student header */}
+      <div style={studentHeader}>
+        <div>
+          <h2 style={reviewTitle}>{group.studentName}</h2>
+          <span style={reviewEmail}>{group.studentEmail}</span>
+        </div>
+        <span style={pendingCountBadge}>{group.requests.length} pending</span>
       </div>
 
-      {localNotice && <div style={{ ...box.ok, marginBottom: 12 }}>{localNotice}</div>}
-
-      {group.items.map((item) => {
-        const state = itemStates[item.borrow_request_id];
-        const isBusy = busy[item.borrow_request_id] ?? false;
-        return (
-          <div key={item.borrow_request_id} style={itemCard(state)}>
-            <div style={itemCardHead}>
-              <span style={{ fontWeight: 600, fontSize: 14 }}>{item.equipment_type_name}</span>
-              <span style={{ ...statusChip, ...(state === 'done' ? chip.done : state === 'approving' ? chip.approved : chip.pending) }}>
-                {state === 'done' ? '✓ Done' : state === 'approving' ? 'Approved — select article' : state === 'rejecting' ? 'Rejecting…' : 'Pending'}
-              </span>
-            </div>
-
-            {state === 'pending' && (
-              <div style={actionRow}>
-                <button style={acceptBtn} disabled={isBusy} onClick={() => approve(item)}>
-                  {isBusy ? 'Approving…' : 'Approve'}
-                </button>
-                <button style={rejectBtnStyle} onClick={() => setIS(item.borrow_request_id, 'rejecting')}>
-                  Reject…
-                </button>
-              </div>
-            )}
-
-            {state === 'rejecting' && (
-              <div style={{ marginTop: 10 }}>
-                <label style={lbl}>Reason (sent to the student)</label>
-                <textarea style={textarea} rows={2}
-                  value={reasons[item.borrow_request_id] ?? ''}
-                  onChange={(e) => setReasons((p) => ({ ...p, [item.borrow_request_id]: e.target.value }))}
-                />
-                <div style={actionRow}>
-                  <button style={rejectBtnStyle}
-                    disabled={isBusy || !(reasons[item.borrow_request_id] ?? '').trim()}
-                    onClick={() => reject(item)}>
-                    {isBusy ? 'Rejecting…' : 'Confirm Rejection'}
-                  </button>
-                  <button style={ghostBtn} onClick={() => setIS(item.borrow_request_id, 'pending')}>Cancel</button>
-                </div>
-              </div>
-            )}
-
-            {state === 'approving' && (
-              <ArticlePickerInline item={item}
-                onDone={(m) => { setIS(item.borrow_request_id, 'done'); setLocalNotice(m); }}
-                onError={onError} />
-            )}
-
-            {state === 'done' && (
-              <p style={{ margin: '6px 0 0', fontSize: 13, color: '#5c6773' }}>Processed</p>
-            )}
-          </div>
-        );
-      })}
-
-      {allDone && (
-        <button style={{ ...acceptBtn, marginTop: 8 }}
-          onClick={() => onDone(`All items for ${group.student_name} processed.`)}>
-          Done — back to queue
-        </button>
-      )}
-    </Panel>
-  );
-}
-
-// ─────────────────────────── ARTICLE PICKER ──────────────────────
-function ArticlePickerInline({ item, onDone, onError }: {
-  item: QueueItem; onDone: (m: string) => void; onError: (m: string) => void;
-}) {
-  const [articles, setArticles] = useState<Article[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    listArticles({ equipmentTypeId: item.equipment_type_id, state: 'AVAILABLE' })
-      .then((r) => setArticles(r.articles)).catch((e) => onError(errMsg(e)));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.equipment_type_id]);
-
-  function toggle(id: string) {
-    setSelectedIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : cur.length < 2 ? [...cur, id] : cur);
-  }
-
-  async function submit() {
-    if (selectedIds.length === 0) { onError('Select at least one article.'); return; }
-    setBusy(true);
-    try {
-      await lendPlatform({
-        borrowRequestId: item.borrow_request_id, articleIds: selectedIds,
-        agreedStartAt: item.requested_start_at, agreedReturnAt: item.requested_return_at,
-      });
-      onDone(`${item.equipment_type_name} lent to ${item.student_name}.`);
-    } catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
-  }
-
-  return (
-    <div style={{ marginTop: 12 }}>
-      <p style={{ margin: '0 0 8px', fontSize: 13, color: '#5c6773' }}>Select physical article(s) to hand out:</p>
-      {articles.length === 0
-        ? <p style={{ fontSize: 13, color: '#b3352b' }}>No available articles for this type.</p>
-        : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-            {articles.map((a) => {
-              const sel = selectedIds.includes(a.article_id);
-              return (
-                <button key={a.article_id} onClick={() => toggle(a.article_id)} style={{
-                  padding: '6px 14px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
-                  border: `2px solid ${sel ? '#0a6ebd' : '#ccc'}`,
-                  background: sel ? '#e8f3ff' : '#fff',
-                  fontWeight: sel ? 600 : 400, color: sel ? '#0a6ebd' : '#333',
-                }}>
-                  {a.barcode}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      <button style={acceptBtn} disabled={busy || selectedIds.length === 0} onClick={submit}>
-        {busy ? 'Lending…' : `Hand Out (${selectedIds.length} selected)`}
-      </button>
+      {/* One card per request */}
+      <div style={requestStack}>
+        {group.requests.map((item) => (
+          <RequestItemCard
+            key={item.borrow_request_id}
+            item={item}
+            onApproved={(m) => { onDone(m); }}
+            onApprovedAndLend={(m) => { onDone(m); setLendingItem(item); }}
+            onRejected={(m) => onDone(m)}
+            onError={onError}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-// ─────────────────────────── WALK-IN FORM ────────────────────────
-function WalkinForm({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
+// ─── Per-request card inside the review panel ─────────────────────────────────
+
+function RequestItemCard({ item, onApproved, onApprovedAndLend, onRejected, onError }: {
+  item: QueueItem;
+  onApproved: (m: string) => void;
+  onApprovedAndLend: (m: string) => void;
+  onRejected: (m: string) => void;
+  onError: (m: string) => void;
+}) {
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [outcome, setOutcome] = useState<'approved' | 'rejected' | null>(null);
+
+  async function handleApprove() {
+    setBusy(true);
+    try {
+      await approveRequest(item.borrow_request_id);
+      setDone(true);
+      setOutcome('approved');
+      onApproved(`Approved: ${item.equipment_type_name}.`);
+    } catch (e) { onError(errMsg(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function handleApproveAndLend() {
+    setBusy(true);
+    try {
+      await approveRequest(item.borrow_request_id);
+      setDone(true);
+      setOutcome('approved');
+      onApprovedAndLend(`Approved: ${item.equipment_type_name}. Select articles to lend.`);
+    } catch (e) { onError(errMsg(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function handleReject() {
+    if (!reason.trim()) return;
+    setBusy(true);
+    try {
+      await rejectRequest(item.borrow_request_id, reason.trim());
+      setDone(true);
+      setOutcome('rejected');
+      onRejected(`Rejected: ${item.equipment_type_name}.`);
+    } catch (e) { onError(errMsg(e)); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ ...reqCard, ...(done ? reqCardDone : {}) }}>
+      {/* Done overlay */}
+      {done && (
+        <div style={doneOverlay}>
+          <span style={outcome === 'approved' ? approvedTag : rejectedTag}>
+            {outcome === 'approved' ? '✓ Approved' : '✗ Rejected'}
+          </span>
+        </div>
+      )}
+
+      {/* Equipment + window */}
+      <div style={reqCardHeader}>
+        <span style={equipName}>{item.equipment_type_name}</span>
+      </div>
+
+      <div style={detailGrid}>
+        <div style={detailCell}>
+          <span style={detailLabel}>Date</span>
+          <span style={detailValue}>{fmtDate(item.requested_start_at)}</span>
+        </div>
+        <div style={detailCell}>
+          <span style={detailLabel}>Borrow time</span>
+          <span style={detailValue}>{fmtTime(item.requested_start_at)}</span>
+        </div>
+        <div style={detailCell}>
+          <span style={detailLabel}>Return by</span>
+          <span style={detailValue}>{fmtTime(item.requested_return_at)}</span>
+        </div>
+        <div style={detailCell}>
+          <span style={detailLabel}>Submitted</span>
+          <span style={detailValue}>{fmtTime(item.submitted_at)}</span>
+        </div>
+      </div>
+
+      {/* Actions */}
+      {!done && !rejectOpen && (
+        <div style={actionRow}>
+          <button style={busy ? { ...approveBtn, opacity: 0.6 } : approveBtn} disabled={busy} onClick={handleApprove}>
+            Approve
+          </button>
+          <button style={busy ? { ...approveLendBtn, opacity: 0.6 } : approveLendBtn} disabled={busy} onClick={handleApproveAndLend}>
+            Approve &amp; Lend →
+          </button>
+          <button style={rejectOutlineBtn} disabled={busy} onClick={() => setRejectOpen(true)}>
+            Reject
+          </button>
+        </div>
+      )}
+
+      {!done && rejectOpen && (
+        <div style={rejectForm}>
+          <input
+            style={rejectInput}
+            placeholder="Reason for rejection…"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <div style={actionRow}>
+            <button
+              style={reason.trim() && !busy ? confirmRejectBtn : { ...confirmRejectBtn, opacity: 0.5 }}
+              disabled={!reason.trim() || busy}
+              onClick={handleReject}
+            >
+              Confirm Reject
+            </button>
+            <button style={cancelBtn} disabled={busy} onClick={() => { setRejectOpen(false); setReason(''); }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Article select form ──────────────────────────────────────────────────────
+
+function ArticleSelectForm({ item, onDone, onError }: {
+  item: QueueItem; onDone: (m: string) => void; onError: (m: string) => void;
+}) {
   const [articles, setArticles] = useState<Article[]>([]);
-  const [guestName, setGuestName] = useState('');
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [hours, setHours] = useState(2);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [idCardHeld, setIdCardHeld] = useState(true);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    listArticles({ state: 'AVAILABLE' }).then((r) => setArticles(r.articles)).catch((e) => onError(errMsg(e)));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    listArticles({ equipmentTypeId: item.equipment_type_id, state: 'AVAILABLE' })
+      .then((r) => setArticles(r.articles))
+      .catch((e) => onError(errMsg(e)));
+  }, [item.equipment_type_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggle(id: string) {
-    setSelectedIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : cur.length < 2 ? [...cur, id] : cur);
+    setSelected((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
   }
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!guestName.trim()) { onError('Guest name is required.'); return; }
-    if (selectedIds.length === 0) { onError('Select at least one article.'); return; }
-    const now = new Date();
-    const ret = new Date(now.getTime() + hours * 3600 * 1000);
+  async function lend() {
+    if (selected.length === 0) { onError('Select at least one article.'); return; }
     setBusy(true);
     try {
-      await lendWalkinGuest({ guestName: guestName.trim(), articleIds: selectedIds, agreedStartAt: now.toISOString(), agreedReturnAt: ret.toISOString() });
-      onDone(`Walk-in lend recorded for ${guestName}.`);
+      await lendPlatform({
+        borrowRequestId: item.borrow_request_id,
+        articleIds: selected,
+        agreedStartAt: item.requested_start_at,
+        agreedReturnAt: item.requested_return_at,
+      });
+      onDone(`Equipment lent to ${item.student_name}.`);
     } catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
 
   return (
-    <form onSubmit={submit}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, maxWidth: 480 }}>
-        <div style={{ gridColumn: '1/-1' }}>
-          <label style={lbl}>Guest name</label>
-          <input style={textInput} value={guestName} onChange={(e) => setGuestName(e.target.value)} required />
+    <div style={lendBox}>
+      <h3 style={lendTitle}>Lend — {item.equipment_type_name}</h3>
+      <p style={muted}>Select the physical article(s) to hand out to {item.student_name}.</p>
+      {articles.length === 0 ? (
+        <p style={{ ...muted, color: '#b91c1c' }}>No available articles for this type.</p>
+      ) : (
+        <div style={articleList}>
+          {articles.map((a) => (
+            <label key={a.article_id} style={articleRow}>
+              <input type="checkbox" checked={selected.includes(a.article_id)} onChange={() => toggle(a.article_id)} />
+              <span style={{ fontWeight: 500 }}>{a.barcode}</span>
+              <span style={{ color: '#6b7280', fontSize: 13 }}>{a.condition_label ?? '—'}</span>
+            </label>
+          ))}
         </div>
-        <div>
-          <label style={lbl}>Duration (hours)</label>
-          <input type="number" min={1} max={12} style={textInput} value={hours} onChange={(e) => setHours(Number(e.target.value))} />
+      )}
+      <label style={{ ...articleRow, marginTop: 12 }}>
+        <input type="checkbox" checked={idCardHeld} onChange={(e) => setIdCardHeld(e.target.checked)} />
+        ID card held
+      </label>
+      <div style={{ marginTop: 14 }}>
+        <button
+          style={selected.length > 0 && !busy ? approveBtn : { ...approveBtn, opacity: 0.5 }}
+          disabled={selected.length === 0 || busy}
+          onClick={lend}
+        >
+          {busy ? 'Processing…' : 'Confirm Lend'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Approve All ──────────────────────────────────────────────────────────────
+
+function ApproveAllButton({ queue, onDone, onError }: {
+  queue: QueueItem[];
+  onDone: (m: string) => void;
+  onError: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function handleApproveAll() {
+    setBusy(true);
+    const failed: string[] = [];
+    for (const item of queue) {
+      try { await approveRequest(item.borrow_request_id); }
+      catch { failed.push(item.equipment_type_name); }
+    }
+    setBusy(false);
+    if (failed.length === 0) onDone(`All ${queue.length} requests approved.`);
+    else if (failed.length < queue.length) onDone(`Approved with errors — failed: ${failed.join(', ')}.`);
+    else onError('All approvals failed.');
+  }
+
+  return (
+    <button style={busy ? { ...approveAllBtn, opacity: 0.6 } : approveAllBtn} disabled={busy} onClick={handleApproveAll}>
+      {busy ? 'Approving…' : `Approve All (${queue.length})`}
+    </button>
+  );
+}
+
+// ─── Walk-in form ─────────────────────────────────────────────────────────────
+
+function WalkinForm({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
+  const [types, setTypes] = useState<EquipmentType[]>([]);
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [typeId, setTypeId] = useState(0);
+  const [articleIds, setArticleIds] = useState<string[]>([]);
+  const [fullName, setFullName] = useState('');
+  const [idNumber, setIdNumber] = useState('');
+  const [contact, setContact] = useState('');
+  const [isFaculty, setIsFaculty] = useState(false);
+  const [startAt, setStartAt] = useState('');
+  const [endAt, setEndAt] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    listTypes().then((r) => setTypes(r.types)).catch(() => onError('Could not load equipment types.'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!typeId) { setArticles([]); setArticleIds([]); return; }
+    listArticles({ equipmentTypeId: typeId, state: 'AVAILABLE' })
+      .then((r) => setArticles(r.articles))
+      .catch(() => onError('Could not load articles.'));
+  }, [typeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function toggleArticle(id: string) {
+    setArticleIds((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
+  }
+
+  async function submit() {
+    setBusy(true);
+    try {
+      await lendWalkinGuest({
+        equipmentTypeId: typeId, articleIds, fullName, idNumber,
+        contactNumber: contact, isFaculty,
+        agreedStartAt: new Date(startAt).toISOString(),
+        agreedReturnAt: new Date(endAt).toISOString(),
+      });
+      onDone(`Walk-in lend recorded for ${fullName}.`);
+    } catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={walkinGrid}>
+      {([['Full name', fullName, setFullName], ['ID number', idNumber, setIdNumber], ['Contact', contact, setContact]] as [string, string, (v: string) => void][]).map(([label, val, set]) => (
+        <div key={label} style={formField}>
+          <label style={fieldLabel}>{label}</label>
+          <input style={fieldInput} value={val} onChange={(e) => set(e.target.value)} />
         </div>
-        <div style={{ gridColumn: '1/-1' }}>
-          <label style={lbl}>Articles</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {articles.map((a) => {
-              const sel = selectedIds.includes(a.article_id);
-              return (
-                <button key={a.article_id} type="button" onClick={() => toggle(a.article_id)} style={{
-                  padding: '5px 12px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
-                  border: `2px solid ${sel ? '#0a6ebd' : '#ccc'}`,
-                  background: sel ? '#e8f3ff' : '#fff',
-                  fontWeight: sel ? 600 : 400, color: sel ? '#0a6ebd' : '#333',
-                }}>
-                  {a.barcode} <span style={{ fontSize: 11, color: '#888' }}>({a.equipment_type_name})</span>
-                </button>
-              );
-            })}
+      ))}
+      <div style={formField}>
+        <label style={fieldLabel}>Equipment type</label>
+        <select style={fieldInput} value={typeId} onChange={(e) => setTypeId(Number(e.target.value))}>
+          <option value={0}>— select —</option>
+          {types.map((t) => <option key={t.equipment_type_id} value={t.equipment_type_id}>{t.name}</option>)}
+        </select>
+      </div>
+      {articles.length > 0 && (
+        <div style={{ ...formField, gridColumn: '1 / -1' }}>
+          <label style={fieldLabel}>Articles</label>
+          <div style={articleList}>
+            {articles.map((a) => (
+              <label key={a.article_id} style={articleRow}>
+                <input type="checkbox" checked={articleIds.includes(a.article_id)} onChange={() => toggleArticle(a.article_id)} />
+                {a.barcode}
+              </label>
+            ))}
           </div>
         </div>
-        <div style={{ gridColumn: '1/-1' }}>
-          <button style={acceptBtn} disabled={busy}>{busy ? 'Lending…' : 'Record Walk-in Lend'}</button>
-        </div>
+      )}
+      <div style={formField}>
+        <label style={fieldLabel}>Start</label>
+        <input type="datetime-local" style={fieldInput} value={startAt} onChange={(e) => setStartAt(e.target.value)} />
       </div>
-    </form>
+      <div style={formField}>
+        <label style={fieldLabel}>Return by</label>
+        <input type="datetime-local" style={fieldInput} value={endAt} onChange={(e) => setEndAt(e.target.value)} />
+      </div>
+      <label style={{ ...articleRow, gridColumn: '1 / -1' }}>
+        <input type="checkbox" checked={isFaculty} onChange={(e) => setIsFaculty(e.target.checked)} />
+        Faculty member
+      </label>
+      <div style={{ gridColumn: '1 / -1' }}>
+        <button style={busy ? { ...approveBtn, opacity: 0.6 } : approveBtn} disabled={busy} onClick={submit}>
+          {busy ? 'Recording…' : 'Record Walk-in Lend'}
+        </button>
+      </div>
+    </div>
   );
 }
 
-// ─────────────────────────── shared UI ───────────────────────────
-function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+// ─── Panel wrapper ────────────────────────────────────────────────────────────
+
+function Panel({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <section style={panelBox}>
-      <div style={panelHead}><span>{title}</span>{action}</div>
+    <div style={panelWrap}>
+      <div style={panelHeader}>
+        <span style={panelTitleStyle}>{title}</span>
+        {action}
+      </div>
       <div style={panelBody}>{children}</div>
-    </section>
+    </div>
   );
 }
 
-// ─── styles ──────────────────────────────────────────────────────
-const wrap: React.CSSProperties = { maxWidth: 900, margin: '0 auto' };
-const panelBox: React.CSSProperties = { background: '#fff', border: '1px solid #ddd', borderRadius: 8, marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' };
-const panelHead: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid #e5e5e5', font: '600 15px var(--font-body)', color: '#26485f', background: 'linear-gradient(#fff,#f7f9fb)' };
-const panelBody: React.CSSProperties = { padding: 18 };
-const table: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 14 };
-const th: React.CSSProperties = { textAlign: 'left', font: '600 11px var(--font-body)', color: '#888', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '8px 10px', borderBottom: '1px solid #e5e5e5', background: '#f7f9fb' };
-const td: React.CSSProperties = { padding: '12px 10px', borderBottom: '1px solid #eee', color: '#333', verticalAlign: 'top' };
-const muted: React.CSSProperties = { color: '#5c6773', fontSize: 14, margin: 0 };
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const wrap: React.CSSProperties = { maxWidth: 860, margin: '0 auto', padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: 20 };
+const muted: React.CSSProperties = { color: '#6b7280', fontSize: 14, margin: 0 };
+
 const box = {
-  err: { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
-  ok:  { background: '#eaf6ee', color: '#1e6b3a', border: '1px solid #c2e6cd', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
+  err: { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 6, padding: '10px 14px', fontSize: 14 } as React.CSSProperties,
+  ok:  { background: '#eaf6ee', color: '#1e6b3a', border: '1px solid #c2e6cd', borderRadius: 6, padding: '10px 14px', fontSize: 14 } as React.CSSProperties,
 };
-const itemChip: React.CSSProperties = { background: '#e7edf4', color: '#26485f', borderRadius: 4, padding: '2px 8px', fontSize: 12, fontWeight: 500 };
-const itemCard = (state: string): React.CSSProperties => ({
-  background: state === 'done' ? '#f0faf4' : state === 'approving' ? '#f0f7ff' : '#fff',
-  border: `1px solid ${state === 'done' ? '#c2e6cd' : state === 'approving' ? '#bdd8f7' : '#e0e5ec'}`,
-  borderRadius: 8, padding: 16, marginBottom: 12,
-});
-const itemCardHead: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 };
-const statusChip: React.CSSProperties = { font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4 };
-const chip = {
-  pending:  { background: '#fef3c7', color: '#92400e' } as React.CSSProperties,
-  approved: { background: '#dbeafe', color: '#1e40af' } as React.CSSProperties,
-  done:     { background: '#d1fae5', color: '#065f46' } as React.CSSProperties,
-};
-const actionRow: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 };
-const acceptBtn: React.CSSProperties = { background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 18px', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
-const rejectBtnStyle: React.CSSProperties = { background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 18px', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
-const reviewBtn: React.CSSProperties = { background: '#0a6ebd', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
-const ghostBtn: React.CSSProperties = { background: 'none', border: '1px solid #ccc', borderRadius: 6, padding: '7px 14px', fontSize: 13, cursor: 'pointer', color: '#26485f' };
-const lbl: React.CSSProperties = { display: 'block', font: '500 12px var(--font-body)', color: '#26485f', marginBottom: 4 };
-const textarea: React.CSSProperties = { width: '100%', font: '14px var(--font-body)', padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6, boxSizing: 'border-box', resize: 'vertical' };
-const textInput: React.CSSProperties = { width: '100%', font: '14px var(--font-body)', padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6, boxSizing: 'border-box' };
+
+// Panel
+const panelWrap: React.CSSProperties = { border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', background: '#fff' };
+const panelHeader: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb', gap: 12 };
+const panelTitleStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: '#111' };
+const panelBody: React.CSSProperties = { padding: '16px 18px' };
+
+// Queue table
+const table: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 14 };
+const th: React.CSSProperties = { padding: '8px 10px', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e5e7eb', color: '#374151', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.04em' };
+const td: React.CSSProperties = { padding: '12px 10px', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' };
+const studentName: React.CSSProperties = { display: 'block', fontWeight: 600, color: '#111', fontSize: 14 };
+const studentEmail: React.CSSProperties = { display: 'block', color: '#6b7280', fontSize: 12, marginTop: 2 };
+const countBadge: React.CSSProperties = { display: 'inline-block', background: '#e0e7ff', color: '#3730a3', borderRadius: 12, padding: '1px 8px', fontSize: 12, fontWeight: 700, marginRight: 8 };
+const itemNames: React.CSSProperties = { color: '#374151', fontSize: 13 };
+
+// Student review panel
+const studentHeader: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, gap: 12, flexWrap: 'wrap' };
+const reviewTitle: React.CSSProperties = { margin: 0, fontSize: 18, fontWeight: 700, color: '#111' };
+const reviewEmail: React.CSSProperties = { fontSize: 13, color: '#6b7280' };
+const pendingCountBadge: React.CSSProperties = { background: '#fef3c7', color: '#92400e', fontSize: 12, fontWeight: 600, padding: '4px 12px', borderRadius: 20 };
+const requestStack: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 12 };
+
+// Request item card
+const reqCard: React.CSSProperties = { border: '1px solid #e5e7eb', borderRadius: 8, padding: '16px', background: '#fafafa', position: 'relative' };
+const reqCardDone: React.CSSProperties = { opacity: 0.6 };
+const reqCardHeader: React.CSSProperties = { marginBottom: 12 };
+const equipName: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: '#111' };
+const doneOverlay: React.CSSProperties = { position: 'absolute', top: 12, right: 14 };
+const approvedTag: React.CSSProperties = { background: '#d1fae5', color: '#065f46', fontSize: 12, fontWeight: 600, padding: '2px 10px', borderRadius: 12 };
+const rejectedTag: React.CSSProperties = { background: '#fee2e2', color: '#991b1b', fontSize: 12, fontWeight: 600, padding: '2px 10px', borderRadius: 12 };
+
+// Detail grid
+const detailGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px 16px', marginBottom: 14 };
+const detailCell: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 2 };
+const detailLabel: React.CSSProperties = { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#9ca3af' };
+const detailValue: React.CSSProperties = { fontSize: 14, color: '#111', fontWeight: 500 };
+
+// Action row
+const actionRow: React.CSSProperties = { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' };
+
+// Buttons
+const approveBtn: React.CSSProperties = { background: '#374151', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const approveLendBtn: React.CSSProperties = { background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const rejectOutlineBtn: React.CSSProperties = { background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const confirmRejectBtn: React.CSSProperties = { background: '#6b7280', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const cancelBtn: React.CSSProperties = { background: 'transparent', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: 6, padding: '8px 14px', fontSize: 13, cursor: 'pointer' };
+const ghostBtn: React.CSSProperties = { background: 'transparent', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, padding: '6px 14px', fontSize: 13, cursor: 'pointer' };
+const reviewBtn: React.CSSProperties = { background: 'transparent', color: '#2563eb', border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const approveAllBtn: React.CSSProperties = { background: '#374151', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const rejectForm: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8 };
+const rejectInput: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14, width: '100%', boxSizing: 'border-box' };
+
+// Back button
+const backBtn: React.CSSProperties = { background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: 14, padding: 0, marginBottom: 20 };
+
+// Lend box
+const lendBox: React.CSSProperties = { border: '1px solid #e5e7eb', borderRadius: 8, padding: '20px', background: '#fff' };
+const lendTitle: React.CSSProperties = { margin: '0 0 8px', fontSize: 16, fontWeight: 700, color: '#111' };
+const articleList: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8 };
+const articleRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, cursor: 'pointer' };
+
+// Walk-in
+const walkinGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 20px' };
+const formField: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4 };
+const fieldLabel: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: '#374151' };
+const fieldInput: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14 };
