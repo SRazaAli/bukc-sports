@@ -26,7 +26,8 @@ export interface AvailabilityRow {
   totalStock?: number;
 }
 
-function badgeFor(availableUnits: number, threshold: number): StatusBadge {
+// Exported so kitPackService can reuse the same badge logic without duplicating.
+export function badgeFor(availableUnits: number, threshold: number): StatusBadge {
   if (availableUnits === 0) return 'CHECKED_OUT';
   if (availableUnits <= threshold) return 'LOW_STOCK';
   return 'AVAILABLE';
@@ -48,9 +49,6 @@ export async function listAvailability(
   if (filter.sportCategoryId) q = q.where('av.sport_category_id', '=', filter.sportCategoryId);
   if (filter.equipmentTypeId) q = q.where('av.equipment_type_id', '=', filter.equipmentTypeId);
   if (filter.isIndoor !== undefined) q = q.where('et.is_indoor', '=', filter.isIndoor);
-  // Archived types are no longer offered for borrowing — this checker's whole
-  // purpose is "what can I borrow now", so they're excluded for every role.
-  q = q.where('et.is_active', '=', true);
 
   const rows = await q.orderBy('sc.name').orderBy('et.name').execute();
   const staff = role === 'SUPER_ADMIN' || role === 'COORDINATOR';

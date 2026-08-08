@@ -8,8 +8,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../middleware/async.js';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
-import { badRequest, forbidden } from '../../middleware/errors.js';
+import { badRequest } from '../../middleware/errors.js';
 import * as svc from './service.js';
+import { submitKitBorrowRequest } from './kitBorrowService.js';
 import * as v from './validators.js';
 
 export const borrowRouter = Router();
@@ -42,6 +43,30 @@ borrowRouter.post('/requests', ...student, asyncHandler(async (req, res) => {
 
 borrowRouter.get('/requests/mine', ...student, asyncHandler(async (req, res) => {
   res.json({ requests: await svc.listMyRequests(req.user!.userId) });
+}));
+
+// Kit borrow — one request per equipment type in a sport, wrapped in a
+// transaction. Must be registered BEFORE the parameterised /requests/:id
+// routes so Express does not match "kit" as a borrow request ID.
+borrowRouter.post('/requests/kit', ...student, asyncHandler(async (req, res) => {
+  const { sportCategoryId, requestedStartAt, requestedReturnAt } = req.body as {
+    sportCategoryId?: number;
+    requestedStartAt?: string;
+    requestedReturnAt?: string;
+  };
+  if (!sportCategoryId || !requestedStartAt || !requestedReturnAt) {
+    throw badRequest('sportCategoryId, requestedStartAt and requestedReturnAt are required.');
+  }
+  const result = await submitKitBorrowRequest({
+    sportCategoryId: Number(sportCategoryId),
+    requestedStartAt: new Date(requestedStartAt),
+    requestedReturnAt: new Date(requestedReturnAt),
+    studentUserId: req.user!.userId,
+  });
+  res.status(201).json({
+    message: `Kit requested: ${result.typeNames.join(', ')}.`,
+    requestIds: result.requestIds,
+  });
 }));
 
 // ── coordinator ──
@@ -88,12 +113,8 @@ borrowRouter.post('/:id/return', ...coordinatorOnly, asyncHandler(async (req, re
   res.json({ ...result, message: 'Return processed.' });
 }));
 
-borrowRouter.get('/reputation/:userId', requireAuth, asyncHandler(async (req, res) => {
+borrowRouter.get('/reputation/:userId', ...staffRead, asyncHandler(async (req, res) => {
   const userId = req.params.userId;
   if (!userId) throw badRequest('Missing userId');
-  const isStaff = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'COORDINATOR';
-  if (!isStaff && userId !== req.user!.userId) {
-    throw forbidden('Cannot view another user\'s reputation.');
-  }
   res.json(await svc.getReputation(userId));
 }));
