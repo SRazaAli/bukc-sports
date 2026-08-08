@@ -37,9 +37,37 @@ ALTER TABLE venue
   ADD COLUMN photos jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 -- ── Part C: case-insensitive name uniqueness ──
+-- Before creating the index, resolve any pre-existing same-name venues that
+-- differ only by case. For each duplicate group, keep the one with the lowest
+-- venue_id and append " (2)", " (3)" etc. to the others so the index can be built.
+-- In practice this only fires when seed/demo data created duplicates before this migration.
+DO $$
+DECLARE
+  dup RECORD;
+  counter int;
+BEGIN
+  FOR dup IN
+    SELECT lower(name) AS lower_name
+    FROM venue
+    GROUP BY lower(name)
+    HAVING count(*) > 1
+  LOOP
+    counter := 2;
+    FOR dup IN
+      SELECT venue_id, name
+      FROM venue
+      WHERE lower(name) = dup.lower_name
+      ORDER BY venue_id ASC
+      OFFSET 1  -- skip the first (lowest id) — it keeps its name
+    LOOP
+      UPDATE venue SET name = name || ' (' || counter || ')' WHERE venue_id = dup.venue_id;
+      counter := counter + 1;
+    END LOOP;
+  END LOOP;
+END $$;
+
 -- Drop the existing case-sensitive UNIQUE constraint and replace with a
--- lower() functional unique index (no need for citext extension change —
--- lower() index is sufficient and avoids rewriting the column type).
+-- lower() functional unique index so same-name venues are blocked regardless of casing.
 ALTER TABLE venue DROP CONSTRAINT venue_name_key;
 CREATE UNIQUE INDEX uq_venue_name_ci ON venue (lower(name));
 
