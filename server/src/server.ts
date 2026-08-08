@@ -8,6 +8,7 @@ import { pool } from './db/index.js';
 import { startAvailabilityListener, stopAvailabilityListener } from './lib/sse.js';
 import { checkOverdueBorrows } from './features/borrow/service.js';
 import { checkEquipmentLocks, checkPostEventRelease } from './features/venue/equipment.js';
+import { fireWeeklyHealthCheckAlert, checkHealthCheckOverdue } from './features/inventory/service.js';
 
 const app = createApp();
 
@@ -41,12 +42,33 @@ const releaseInterval = setInterval(() => {
   checkPostEventRelease().catch((err) => console.error('checkPostEventRelease failed:', err));
 }, 5 * 60_000);
 
+// INV-15/28: fire the weekly HEALTH_CHECK_DUE notification to Coordinators.
+// 7 days in milliseconds = 604_800_000. Runs at startup then every 7 days.
+// In dev/test the interval is long enough that it won't fire during a normal
+// session — use the /api/inventory/debug/weekly-health-check route manually.
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+// Delay first fire by 10 seconds (let the server warm up) then run weekly.
+const weeklyHealthTimeout = setTimeout(() => {
+  fireWeeklyHealthCheckAlert().catch((err) => console.error('weeklyHealthAlert failed:', err));
+  setInterval(() => {
+    fireWeeklyHealthCheckAlert().catch((err) => console.error('weeklyHealthAlert failed:', err));
+  }, WEEK_MS);
+}, 10_000);
+
+// INV-29: check for overdue health-check sessions (> 48h, no overdue alert yet).
+// Runs every hour — lightweight query, no harm in frequent checks.
+const overdueHealthInterval = setInterval(() => {
+  checkHealthCheckOverdue().catch((err) => console.error('checkHealthCheckOverdue failed:', err));
+}, 60 * 60_000);
+
 // Graceful shutdown so the DB pool and LISTEN connection close cleanly.
 async function shutdown(signal: string) {
   console.log(`\n${signal} received, shutting down...`);
   clearInterval(overdueInterval);
   clearInterval(lockInterval);
   clearInterval(releaseInterval);
+  clearTimeout(weeklyHealthTimeout);
+  clearInterval(overdueHealthInterval);
   server.close(async () => {
     await stopAvailabilityListener();
     await pool.end();

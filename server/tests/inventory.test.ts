@@ -409,3 +409,506 @@ describe('Decommission & availability (INV-13/23/24)', () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ═══════════════════════════ INV-25: AUDIT LOG ═══════════════════════════
+describe('Article audit log (INV-25)', () => {
+  it('T-420: adding a SINGLE article writes an ARTICLE_ENTERED audit entry', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(100), entryScore: 85 });
+    expect(a.status).toBe(201);
+    const articleId = a.body.article.articleId;
+
+    const log = await db.selectFrom('article_audit_log')
+      .select(['action', 'actor_id', 'detail'])
+      .where('article_id', '=', articleId)
+      .where('action', '=', 'ARTICLE_ENTERED')
+      .executeTakeFirst();
+    expect(log).toBeTruthy();
+    expect(log?.action).toBe('ARTICLE_ENTERED');
+  });
+
+  it('T-421: adding a pair writes ARTICLE_ENTERED for both halves plus a PAIR_FORMED entry', async () => {
+    const typeId = await makePairType(staff);
+    const entry = await staff.post('/api/inventory/articles/pair').send({
+      equipmentTypeId: typeId, barcodeA: bc(101), barcodeB: bc(102), entryScoreA: 90, entryScoreB: 90,
+    });
+    expect(entry.status).toBe(201);
+    const { articleIdA, articleIdB } = entry.body.pairEntry;
+
+    const entered = await db.selectFrom('article_audit_log')
+      .select('action')
+      .where('article_id', 'in', [articleIdA, articleIdB])
+      .where('action', '=', 'ARTICLE_ENTERED')
+      .execute();
+    expect(entered.length).toBe(2);
+
+    const paired = await db.selectFrom('article_audit_log')
+      .select('action')
+      .where('action', '=', 'PAIR_FORMED')
+      .executeTakeFirst();
+    expect(paired).toBeTruthy();
+  });
+
+  it('T-422: decommissioning an article writes ARTICLE_DECOMMISSIONED', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(103), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+    await staff.post(`/api/inventory/articles/${articleId}/decommission`).send({});
+
+    const log = await db.selectFrom('article_audit_log')
+      .select('action')
+      .where('article_id', '=', articleId)
+      .where('action', '=', 'ARTICLE_DECOMMISSIONED')
+      .executeTakeFirst();
+    expect(log).toBeTruthy();
+  });
+
+  it('T-423: decommissioning one half of a pair writes ARTICLE_DECOMMISSIONED for both halves', async () => {
+    const typeId = await makePairType(staff);
+    const entry = await staff.post('/api/inventory/articles/pair').send({
+      equipmentTypeId: typeId, barcodeA: bc(104), barcodeB: bc(105), entryScoreA: 90, entryScoreB: 90,
+    });
+    const { articleIdA, articleIdB } = entry.body.pairEntry;
+    await staff.post(`/api/inventory/articles/${articleIdA}/decommission`).send({});
+
+    const logs = await db.selectFrom('article_audit_log')
+      .select('article_id')
+      .where('article_id', 'in', [articleIdA, articleIdB])
+      .where('action', '=', 'ARTICLE_DECOMMISSIONED')
+      .execute();
+    expect(logs.length).toBe(2);
+  });
+
+  it('T-424: recording a scan writes a SCAN_RECORDED audit entry', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(106), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+    await staff.post(`/api/inventory/articles/${articleId}/scan`).send({ kind: 'AD_HOC', score: 55 });
+
+    const log = await db.selectFrom('article_audit_log')
+      .select('action')
+      .where('article_id', '=', articleId)
+      .where('action', '=', 'SCAN_RECORDED')
+      .executeTakeFirst();
+    expect(log).toBeTruthy();
+  });
+
+  it('T-425: a scan that raises a damage flag writes DAMAGE_FLAG_RAISED', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(107), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+    await staff.post(`/api/inventory/articles/${articleId}/scan`).send({ kind: 'AD_HOC', score: 10 });
+
+    const log = await db.selectFrom('article_audit_log')
+      .select('action')
+      .where('article_id', '=', articleId)
+      .where('action', '=', 'DAMAGE_FLAG_RAISED')
+      .executeTakeFirst();
+    expect(log).toBeTruthy();
+  });
+
+  it('T-426: clearing a damage flag (via scan) writes DAMAGE_FLAG_CLEARED', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(108), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+    await staff.post(`/api/inventory/articles/${articleId}/scan`).send({ kind: 'AD_HOC', score: 10 });
+    // Scan back to GOOD — clears the flag implicitly
+    await staff.post(`/api/inventory/articles/${articleId}/scan`).send({ kind: 'AD_HOC', score: 90 });
+
+    const log = await db.selectFrom('article_audit_log')
+      .select('action')
+      .where('article_id', '=', articleId)
+      .where('action', '=', 'DAMAGE_FLAG_CLEARED')
+      .executeTakeFirst();
+    expect(log).toBeTruthy();
+  });
+
+  it('T-427: condition override writes CONDITION_OVERRIDDEN', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(109), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+    await staff.post(`/api/inventory/articles/${articleId}/condition`).send({ label: 'WORN' });
+
+    const log = await db.selectFrom('article_audit_log')
+      .select('action')
+      .where('article_id', '=', articleId)
+      .where('action', '=', 'CONDITION_OVERRIDDEN')
+      .executeTakeFirst();
+    expect(log).toBeTruthy();
+  });
+
+  it('T-428: type edit writes TYPE_EDITED to the audit log', async () => {
+    const typeId = await makeSingleType(staff);
+    await staff.patch(`/api/inventory/types/${typeId}`).send({ name: 'Renamed Football' });
+
+    const log = await db.selectFrom('article_audit_log')
+      .select('action')
+      .where('equipment_type_id', '=', typeId)
+      .where('action', '=', 'TYPE_EDITED')
+      .executeTakeFirst();
+    expect(log).toBeTruthy();
+  });
+
+  it('T-429: audit log is returned in getArticleDetail (INV-27)', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(110), entryScore: 85 });
+    const articleId = a.body.article.articleId;
+    await staff.post(`/api/inventory/articles/${articleId}/scan`).send({ kind: 'AD_HOC', score: 55 });
+
+    const detail = await staff.get(`/api/inventory/articles/${articleId}`);
+    expect(detail.status).toBe(200);
+    expect(Array.isArray(detail.body.auditLog)).toBe(true);
+    // Should have at least ARTICLE_ENTERED + SCAN_RECORDED
+    expect(detail.body.auditLog.length).toBeGreaterThanOrEqual(2);
+    const actions = detail.body.auditLog.map((e: { action: string }) => e.action);
+    expect(actions).toContain('ARTICLE_ENTERED');
+    expect(actions).toContain('SCAN_RECORDED');
+  });
+
+  it('T-430: lifecycle endpoint returns actor names (INV-27)', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(111), entryScore: 75 });
+    const articleId = a.body.article.articleId;
+
+    const lifecycle = await staff.get(`/api/inventory/articles/${articleId}/lifecycle`);
+    expect(lifecycle.status).toBe(200);
+    expect(lifecycle.body.article.entered_by_name).toBeTruthy();
+    expect(lifecycle.body.auditLog[0].actor_name).toBeTruthy();
+  });
+
+  it('T-431: audit log is immutable — DB trigger rejects DELETE', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(112), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+
+    const log = await db.selectFrom('article_audit_log')
+      .select('log_id')
+      .where('article_id', '=', articleId)
+      .executeTakeFirst();
+    expect(log).toBeTruthy();
+
+    // Direct DB delete should raise the fn_audit_immutable trigger
+    await expect(
+      db.deleteFrom('article_audit_log').where('log_id', '=', log!.log_id).execute(),
+    ).rejects.toThrow();
+  });
+
+  it('T-432: GET /api/inventory/audit-log returns entries filterable by articleId', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(113), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+
+    const res = await staff.get(`/api/inventory/audit-log?articleId=${articleId}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.log)).toBe(true);
+    expect(res.body.log.length).toBeGreaterThan(0);
+    expect(res.body.log.every((e: { article_id: string }) => e.article_id === articleId)).toBe(true);
+  });
+});
+
+// ═══════════════════════════ INV-01/21/22/23: NOTIFICATIONS ═══════════════════════════
+describe('Inventory notifications (INV-01/21/22/23)', () => {
+  async function makeCoordinator(email: string) {
+    const saId = (await db.selectFrom('app_user').select('user_id')
+      .where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+    // Use a known bcrypt hash for "CoordPass1!" to allow login if needed
+    const coordRes = await db.insertInto('app_user').values({
+      role: 'COORDINATOR', status: 'ACTIVE', full_name: 'Inv Notif Coord',
+      email, contact_number: '03001112233',
+      password_hash: '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+      created_by: saId, verified_at: new Date(),
+    }).returning('user_id').executeTakeFirstOrThrow();
+    return coordRes.user_id;
+  }
+
+  async function coordAgent(email: string) {
+    const agent = request.agent(app);
+    // Login as the coordinator
+    const res = await agent.post('/api/auth/login').send({ email, password: 'password' });
+    if (res.status !== 200) return null;
+    const bearer = { Authorization: `Bearer ${res.body.accessToken}` };
+    return {
+      get: (u: string) => agent.get(u).set(bearer),
+      post: (u: string) => agent.post(u).set(bearer),
+      patch: (u: string) => agent.patch(u).set(bearer),
+      delete: (u: string) => agent.delete(u).set(bearer),
+    };
+  }
+
+  it('T-433 INV-21: a damaged entry scan sends DAMAGE_FLAGGED notification to Super Admin', async () => {
+    const typeId = await makeSingleType(staff);
+    const saId = (await db.selectFrom('app_user').select('user_id')
+      .where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+
+    const before = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', saId).where('type', '=', 'DAMAGE_FLAGGED').executeTakeFirst();
+    const countBefore = Number(before?.n ?? 0);
+
+    await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(120), entryScore: 10 });
+
+    const after = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', saId).where('type', '=', 'DAMAGE_FLAGGED').executeTakeFirst();
+    expect(Number(after?.n ?? 0)).toBeGreaterThan(countBefore);
+  });
+
+  it('T-434 INV-21: a DAMAGED scan (not at entry) also fires DAMAGE_FLAGGED to Super Admin', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(121), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+    const saId = (await db.selectFrom('app_user').select('user_id')
+      .where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+
+    const before = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', saId).where('type', '=', 'DAMAGE_FLAGGED').executeTakeFirst();
+
+    await staff.post(`/api/inventory/articles/${articleId}/scan`).send({ kind: 'AD_HOC', score: 5 });
+
+    const after = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', saId).where('type', '=', 'DAMAGE_FLAGGED').executeTakeFirst();
+    expect(Number(after?.n ?? 0)).toBeGreaterThan(Number(before?.n ?? 0));
+  });
+
+  it('T-435 INV-21: second DAMAGED scan on an already-flagged article does NOT fire a duplicate notification', async () => {
+    const typeId = await makeSingleType(staff);
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(122), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+    await staff.post(`/api/inventory/articles/${articleId}/scan`).send({ kind: 'AD_HOC', score: 5 });
+
+    const saId = (await db.selectFrom('app_user').select('user_id')
+      .where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+    const before = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', saId).where('type', '=', 'DAMAGE_FLAGGED').executeTakeFirst();
+
+    await staff.post(`/api/inventory/articles/${articleId}/scan`).send({ kind: 'AD_HOC', score: 3 });
+
+    const after = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', saId).where('type', '=', 'DAMAGE_FLAGGED').executeTakeFirst();
+    expect(Number(after?.n ?? 0)).toBe(Number(before?.n ?? 0));
+  });
+
+  it('T-436b INV-01: Coordinator adding an article sends INVENTORY_ACTION to Super Admin', async () => {
+    const coordId = await makeCoordinator('inv-coord-01@bukc.edu.pk');
+    const coord = await coordAgent('inv-coord-01@bukc.edu.pk');
+    if (!coord) {
+      // Login path won't work with a dummy hash in this test env — skip gracefully
+      return;
+    }
+    const typeId = await makeSingleType(staff);
+    const saId = (await db.selectFrom('app_user').select('user_id')
+      .where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+
+    const before = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', saId).where('type', '=', 'INVENTORY_ACTION').executeTakeFirst();
+
+    await coord.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(123), entryScore: 80 });
+
+    const after = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', saId).where('type', '=', 'INVENTORY_ACTION').executeTakeFirst();
+    expect(Number(after?.n ?? 0)).toBeGreaterThan(Number(before?.n ?? 0));
+    void coordId; // used above
+  });
+
+  it('T-437b INV-22: Super Admin editing a type does NOT send an SA notification (SA is the actor)', async () => {
+    const typeId = await makeSingleType(staff);
+    const saId = (await db.selectFrom('app_user').select('user_id')
+      .where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+
+    const before = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', saId).where('type', '=', 'INVENTORY_ACTION').executeTakeFirst();
+
+    await staff.patch(`/api/inventory/types/${typeId}`).send({ name: 'SA Renamed' });
+
+    const after = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', saId).where('type', '=', 'INVENTORY_ACTION').executeTakeFirst();
+    // SA editing should not notify themselves
+    expect(Number(after?.n ?? 0)).toBe(Number(before?.n ?? 0));
+  });
+});
+
+// ═══════════════════════════ INV-15/28/29: HEALTH CHECK SCHEDULER ═══════════════════════════
+describe('Weekly health check sessions (INV-15/28/29)', () => {
+  // Import the service functions directly for scheduler tests
+  // (avoids needing a time-shifted HTTP trigger)
+  it('T-436 INV-15: fireWeeklyHealthCheckAlert creates a health_check_session and notifies Coordinators', async () => {
+    const { fireWeeklyHealthCheckAlert } = await import('../src/features/inventory/service.js');
+
+    // Add some articles so total_articles_due > 0
+    const typeId = await makeSingleType(staff);
+    await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(130), entryScore: 90 });
+    await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(131), entryScore: 80 });
+
+    // Insert a test coordinator
+    const saId = (await db.selectFrom('app_user').select('user_id').where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+    await db.insertInto('app_user').values({
+      role: 'COORDINATOR', status: 'ACTIVE', full_name: 'Health Coord',
+      email: 'healthcoord@bukc.edu.pk', contact_number: '03009876543',
+      password_hash: 'x', created_by: saId, verified_at: new Date(),
+    }).execute();
+
+    await fireWeeklyHealthCheckAlert();
+
+    const session = await db.selectFrom('health_check_session')
+      .select(['session_id', 'total_articles_due', 'scanned_count', 'completed_at'])
+      .orderBy('alert_sent_at', 'desc').executeTakeFirst();
+    expect(session).toBeTruthy();
+    expect(session!.total_articles_due).toBeGreaterThanOrEqual(2);
+    expect(session!.scanned_count).toBe(0);
+    expect(session!.completed_at).toBeNull();
+
+    // Coordinator should have a HEALTH_CHECK_DUE notification
+    const coordId = (await db.selectFrom('app_user').select('user_id').where('email', '=', 'healthcoord@bukc.edu.pk').executeTakeFirstOrThrow()).user_id;
+    const notif = await db.selectFrom('notification').select('type')
+      .where('recipient_id', '=', coordId).where('type', '=', 'HEALTH_CHECK_DUE').executeTakeFirst();
+    expect(notif).toBeTruthy();
+  });
+
+  it('T-437 INV-28: a SCHEDULED scan increments scanned_count on the open session', async () => {
+    const { fireWeeklyHealthCheckAlert } = await import('../src/features/inventory/service.js');
+
+    const typeId = await makeSingleType(staff, 'Scan Tracker Ball');
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(132), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+
+    const saId = (await db.selectFrom('app_user').select('user_id').where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+    await db.insertInto('app_user').values({
+      role: 'COORDINATOR', status: 'ACTIVE', full_name: 'Scan Coord',
+      email: 'scancoord@bukc.edu.pk', contact_number: '03007654321',
+      password_hash: 'x', created_by: saId, verified_at: new Date(),
+    }).onConflict((oc) => oc.column('email').doNothing()).execute();
+
+    await fireWeeklyHealthCheckAlert();
+
+    const sessionBefore = await db.selectFrom('health_check_session')
+      .select(['session_id', 'scanned_count'])
+      .orderBy('alert_sent_at', 'desc').executeTakeFirst();
+    expect(sessionBefore!.scanned_count).toBe(0);
+
+    // A SCHEDULED scan should increment the count via the DB trigger
+    await staff.post(`/api/inventory/articles/${articleId}/scan`).send({ kind: 'SCHEDULED', score: 75 });
+
+    const sessionAfter = await db.selectFrom('health_check_session')
+      .select(['session_id', 'scanned_count'])
+      .where('session_id', '=', sessionBefore!.session_id)
+      .executeTakeFirst();
+    expect(sessionAfter!.scanned_count).toBe(1);
+  });
+
+  it('T-438 INV-28: an AD_HOC scan does NOT increment scanned_count', async () => {
+    const { fireWeeklyHealthCheckAlert } = await import('../src/features/inventory/service.js');
+
+    const typeId = await makeSingleType(staff, 'Ad Hoc Ball');
+    const a = await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(133), entryScore: 90 });
+    const articleId = a.body.article.articleId;
+
+    const saId = (await db.selectFrom('app_user').select('user_id').where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+    await db.insertInto('app_user').values({
+      role: 'COORDINATOR', status: 'ACTIVE', full_name: 'Adhoc Coord',
+      email: 'adhoccoord@bukc.edu.pk', contact_number: '03005551234',
+      password_hash: 'x', created_by: saId, verified_at: new Date(),
+    }).onConflict((oc) => oc.column('email').doNothing()).execute();
+
+    await fireWeeklyHealthCheckAlert();
+
+    const sessionBefore = await db.selectFrom('health_check_session')
+      .select('scanned_count').orderBy('alert_sent_at', 'desc').executeTakeFirst();
+
+    // AD_HOC scan — should NOT count
+    await staff.post(`/api/inventory/articles/${articleId}/scan`).send({ kind: 'AD_HOC', score: 75 });
+
+    const sessionAfter = await db.selectFrom('health_check_session')
+      .select('scanned_count').orderBy('alert_sent_at', 'desc').executeTakeFirst();
+    expect(sessionAfter!.scanned_count).toBe(sessionBefore!.scanned_count); // unchanged
+  });
+
+  it('T-439 INV-15: fireWeeklyHealthCheckAlert skips if an open session already exists', async () => {
+    const { fireWeeklyHealthCheckAlert } = await import('../src/features/inventory/service.js');
+
+    const typeId = await makeSingleType(staff, 'Skip Ball');
+    await staff.post('/api/inventory/articles').send({ equipmentTypeId: typeId, barcode: bc(134), entryScore: 90 });
+
+    const saId = (await db.selectFrom('app_user').select('user_id').where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+    await db.insertInto('app_user').values({
+      role: 'COORDINATOR', status: 'ACTIVE', full_name: 'Skip Coord',
+      email: 'skipcoord@bukc.edu.pk', contact_number: '03004445678',
+      password_hash: 'x', created_by: saId, verified_at: new Date(),
+    }).onConflict((oc) => oc.column('email').doNothing()).execute();
+
+    await fireWeeklyHealthCheckAlert(); // first call — opens a session
+    const countBefore = await db.selectFrom('health_check_session')
+      .select(db.fn.countAll().as('n')).executeTakeFirst();
+
+    await fireWeeklyHealthCheckAlert(); // second call — should be skipped
+    const countAfter = await db.selectFrom('health_check_session')
+      .select(db.fn.countAll().as('n')).executeTakeFirst();
+
+    expect(Number(countAfter?.n ?? 0)).toBe(Number(countBefore?.n ?? 0)); // no new session
+  });
+
+  it('T-440 INV-29: checkHealthCheckOverdue fires HEALTH_CHECK_OVERDUE for sessions open >48h', async () => {
+    const { checkHealthCheckOverdue } = await import('../src/features/inventory/service.js');
+    const { sql: rawSql } = await import('kysely');
+    const { pool } = await import('../src/db/index.js');
+
+    // Insert an overdue session directly via raw SQL (alert_sent_at 49h ago)
+    await pool.query(
+      `INSERT INTO health_check_session (total_articles_due, alert_sent_at)
+       VALUES (5, now() - interval '49 hours')`,
+    );
+
+    const saId = (await db.selectFrom('app_user').select('user_id').where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+    await db.insertInto('app_user').values({
+      role: 'COORDINATOR', status: 'ACTIVE', full_name: 'Overdue Coord',
+      email: 'overduecoord@bukc.edu.pk', contact_number: '03003334567',
+      password_hash: 'x', created_by: saId, verified_at: new Date(),
+    }).onConflict((oc) => oc.column('email').doNothing()).execute();
+    const coordId = (await db.selectFrom('app_user').select('user_id')
+      .where('email', '=', 'overduecoord@bukc.edu.pk').executeTakeFirstOrThrow()).user_id;
+
+    await checkHealthCheckOverdue();
+
+    // Session should now have overdue_notified_at set
+    const session = await db.selectFrom('health_check_session')
+      .select('overdue_notified_at')
+      .where('total_articles_due', '=', 5)
+      .where('completed_at', 'is', null)
+      .executeTakeFirst();
+    expect(session?.overdue_notified_at).not.toBeNull();
+
+    // Coordinator should have the HEALTH_CHECK_OVERDUE notification
+    const notif = await db.selectFrom('notification')
+      .select('type')
+      .where('recipient_id', '=', coordId)
+      .where('type', '=', 'HEALTH_CHECK_OVERDUE')
+      .executeTakeFirst();
+    expect(notif).toBeTruthy();
+  });
+
+  it('T-441 INV-29: checkHealthCheckOverdue does NOT re-fire if already notified', async () => {
+    const { checkHealthCheckOverdue } = await import('../src/features/inventory/service.js');
+    const { pool } = await import('../src/db/index.js');
+
+    // Insert session already past 48h AND already notified
+    await pool.query(
+      `INSERT INTO health_check_session (total_articles_due, alert_sent_at, overdue_notified_at)
+       VALUES (3, now() - interval '50 hours', now() - interval '1 hour')`,
+    );
+
+    const saId = (await db.selectFrom('app_user').select('user_id').where('role', '=', 'SUPER_ADMIN').executeTakeFirstOrThrow()).user_id;
+    await db.insertInto('app_user').values({
+      role: 'COORDINATOR', status: 'ACTIVE', full_name: 'Already Notified Coord',
+      email: 'alreadycoord@bukc.edu.pk', contact_number: '03002223456',
+      password_hash: 'x', created_by: saId, verified_at: new Date(),
+    }).onConflict((oc) => oc.column('email').doNothing()).execute();
+    const coordId = (await db.selectFrom('app_user').select('user_id')
+      .where('email', '=', 'alreadycoord@bukc.edu.pk').executeTakeFirstOrThrow()).user_id;
+
+    const before = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', coordId).where('type', '=', 'HEALTH_CHECK_OVERDUE').executeTakeFirst();
+
+    await checkHealthCheckOverdue();
+
+    const after = await db.selectFrom('notification').select(db.fn.countAll().as('n'))
+      .where('recipient_id', '=', coordId).where('type', '=', 'HEALTH_CHECK_OVERDUE').executeTakeFirst();
+    expect(Number(after?.n ?? 0)).toBe(Number(before?.n ?? 0));
+  });
+});

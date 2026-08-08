@@ -146,3 +146,61 @@ export const listDamageFlags = () => api<{ flags: DamageFlag[] }>('/api/inventor
 // it via the article's type thresholds, same as any other scan.
 export const clearDamageFlag = (id: string, input: { score: number; imageData?: string }) =>
   api<{ conditionLabel: ConditionLabel; message: string }>(`/api/inventory/damage-flags/${id}/clear`, { method: 'POST', body: input });
+
+// ── INV-27: Article lifecycle (full history) ──
+export interface AuditLogEntry {
+  log_id: string;
+  article_id: string | null;
+  equipment_type_id: number | null;
+  action: string;
+  occurred_at: string;
+  detail: Record<string, unknown>;
+  actor_name: string;
+  actor_role: string;
+}
+
+export interface ScanEntry {
+  scan_id: string;
+  kind: string;
+  source: string;
+  health_score: string;
+  resulting_label: ConditionLabel;
+  scanned_at: string;
+  scanned_by_name: string;
+}
+
+export interface FlagEntry {
+  flag_id: string;
+  raised_by_system: boolean;
+  raised_at: string;
+  cleared_at: string | null;
+  cleared_with_label: ConditionLabel | null;
+  raised_by_name: string | null;
+  cleared_by_name: string | null;
+}
+
+export interface PairHistoryEntry {
+  pair_id: string;
+  article_a_id: string;
+  article_b_id: string;
+  formed_at: string;
+  dissolved_at: string | null;
+  dissolution_reason: string | null;
+  formed_by_name: string | null;
+  dissolved_by_name: string | null;
+}
+
+export interface ArticleLifecycle {
+  article: Article & {
+    entered_by_name: string;
+    decommissioned_at: string | null;
+    decommissioned_by_name: string | null;
+  };
+  scans: ScanEntry[];
+  flags: FlagEntry[];
+  pairs: PairHistoryEntry[];
+  auditLog: AuditLogEntry[];
+}
+
+export const getArticleLifecycle = (id: string) =>
+  api<ArticleLifecycle>(`/api/inventory/articles/${id}/lifecycle`);

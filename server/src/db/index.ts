@@ -467,6 +467,38 @@ export interface OfflineFallbackAuditTable {
   note:             string | null;
 }
 
+// ── Inventory audit log (Feature 4 — INV-25) ──
+export type ArticleAuditAction =
+  | 'ARTICLE_ENTERED'
+  | 'ARTICLE_DECOMMISSIONED'
+  | 'TYPE_EDITED'
+  | 'SCAN_RECORDED'
+  | 'DAMAGE_FLAG_RAISED'
+  | 'DAMAGE_FLAG_CLEARED'
+  | 'CONDITION_OVERRIDDEN'
+  | 'PAIR_FORMED'
+  | 'PAIR_DISSOLVED';
+
+export interface ArticleAuditLogTable {
+  log_id:            Generated<string>;
+  article_id:        string | null;
+  equipment_type_id: number | null;
+  action:            ArticleAuditAction;
+  actor_id:          string;
+  occurred_at:       Generated<Timestamp>;
+  detail:            ColumnType<Record<string, unknown>, string, string>;
+}
+
+// ── Health check session (INV-15/28/29) ──
+export interface HealthCheckSessionTable {
+  session_id:          Generated<string>;
+  alert_sent_at:       Generated<Timestamp>;
+  total_articles_due:  number;
+  scanned_count:       ColumnType<number, number | undefined, number>;
+  overdue_notified_at: Timestamp | null;
+  completed_at:        Timestamp | null;
+}
+
 export interface DB {
   app_user: AppUserTable;
   student_profile: StudentProfileTable;
@@ -508,6 +540,9 @@ export interface DB {
   v_calendar: VCalendar;
   // offline fallback
   offline_fallback_audit: OfflineFallbackAuditTable;
+  // inventory audit + health check sessions (Feature 4 — INV-25/28/29)
+  article_audit_log: ArticleAuditLogTable;
+  health_check_session: HealthCheckSessionTable;
 }
 
 const { Pool } = pg;

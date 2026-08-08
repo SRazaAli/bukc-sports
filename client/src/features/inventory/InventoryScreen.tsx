@@ -12,6 +12,7 @@ import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
 import { ApiRequestError } from '../../lib/api.js';
 import * as inv from './api.js';
+import type { ArticleLifecycle } from './api.js';
 import { STATE_LABEL } from './api.js';
 import { Modal, ConfirmModal, CameraCapture, BarcodeScannerModal } from './shared.js';
 
@@ -468,6 +469,7 @@ function ArticlesTab({ flash }: { flash: Flash }) {
   const debouncedSearch = useDebounced(search);
   const [decommissioning, setDecommissioning] = useState<string | null>(null);
   const [scanTarget, setScanTarget] = useState<{ articleId: string; label: string } | null>(null);
+  const [lifecycleTarget, setLifecycleTarget] = useState<{ articleId: string; barcode: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -548,6 +550,7 @@ function ArticlesTab({ flash }: { flash: Flash }) {
                   <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <button style={linkBtn} onClick={() => setScanTarget({ articleId: r.a.article_id, label: `${r.a.barcode} (A)` })}>Scan A</button>
                     {r.b && <button style={linkBtn} onClick={() => setScanTarget({ articleId: r.b!.article_id, label: `${r.b!.barcode} (B)` })}>Scan B</button>}
+                    <button style={{ ...linkBtn, color: '#7c5c00' }} onClick={() => setLifecycleTarget({ articleId: r.a.article_id, barcode: r.a.barcode })}>History</button>
                     <button style={{ ...linkBtn, color: 'var(--danger)' }} onClick={() => setDecommissioning(r.a.article_id)}>Decommission Pair</button>
                   </td>
                 </tr>
@@ -559,6 +562,7 @@ function ArticlesTab({ flash }: { flash: Flash }) {
                   <td style={td}><span style={{ ...badgeBase, ...stateBadge(r.a.state) }}>{STATE_LABEL[r.a.state]}</span></td>
                   <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <button style={linkBtn} onClick={() => setScanTarget({ articleId: r.a.article_id, label: r.a.barcode })}>Scan</button>
+                    <button style={{ ...linkBtn, color: '#7c5c00' }} onClick={() => setLifecycleTarget({ articleId: r.a.article_id, barcode: r.a.barcode })}>History</button>
                     <button style={{ ...linkBtn, color: 'var(--danger)' }} onClick={() => setDecommissioning(r.a.article_id)}>Decommission</button>
                   </td>
                 </tr>
@@ -584,6 +588,14 @@ function ArticlesTab({ flash }: { flash: Flash }) {
             } catch (e) { flash.setError(errMsg(e)); setScanTarget(null); }
           }}
           onCancel={() => setScanTarget(null)} />
+      )}
+
+      {lifecycleTarget && (
+        <ArticleLifecycleModal
+          articleId={lifecycleTarget.articleId}
+          barcode={lifecycleTarget.barcode}
+          onClose={() => setLifecycleTarget(null)}
+        />
       )}
     </>
   );
@@ -623,6 +635,191 @@ function ScanModal({ label, onSubmit, onCancel }: {
           <button style={primaryBtn} disabled={busy}>{busy ? 'Saving…' : 'Submit'}</button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+// ── INV-27: Article Lifecycle Modal ──
+// Full history of a single article — scans, damage flags, pair history, audit log.
+// Opened from within the Articles tab via the "History" button on each row.
+function ArticleLifecycleModal({ articleId, barcode, onClose }: {
+  articleId: string; barcode: string; onClose: () => void;
+}) {
+  const [data, setData] = useState<ArticleLifecycle | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'timeline' | 'scans' | 'flags' | 'pairs'>('timeline');
+
+  useEffect(() => {
+    inv.getArticleLifecycle(articleId)
+      .then(setData)
+      .catch((e) => setError(errMsg(e)));
+  }, [articleId]);
+
+  function fmtDate(d: string) {
+    return new Date(d).toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  const actionLabel: Record<string, string> = {
+    ARTICLE_ENTERED: 'Article Added',
+    ARTICLE_DECOMMISSIONED: 'Decommissioned',
+    TYPE_EDITED: 'Equipment Type Edited',
+    SCAN_RECORDED: 'Health Check Scan',
+    DAMAGE_FLAG_RAISED: 'Damage Flag Raised',
+    DAMAGE_FLAG_CLEARED: 'Damage Flag Cleared',
+    CONDITION_OVERRIDDEN: 'Condition Override',
+    PAIR_FORMED: 'Pair Formed',
+    PAIR_DISSOLVED: 'Pair Dissolved',
+  };
+
+  const actionColor: Record<string, string> = {
+    ARTICLE_ENTERED: '#1f7a45',
+    ARTICLE_DECOMMISSIONED: '#b3352b',
+    DAMAGE_FLAG_RAISED: '#b3352b',
+    DAMAGE_FLAG_CLEARED: '#1f7a45',
+    SCAN_RECORDED: '#0a6ebd',
+    CONDITION_OVERRIDDEN: '#7c5c00',
+    TYPE_EDITED: '#5c6773',
+    PAIR_FORMED: '#1f7a45',
+    PAIR_DISSOLVED: '#7c5c00',
+  };
+
+  const lifecycleTabBtn = (t: typeof tab) => ({
+    ...tabBtn,
+    ...(tab === t ? tabActive : {}),
+    flex: 'none',
+    padding: '7px 14px',
+  });
+
+  return (
+    <Modal title={`Article History — ${barcode}`} onClose={onClose}>
+      <div style={{ minWidth: 560, maxWidth: 700 }}>
+        {error && <div style={box.err}>{error}</div>}
+        {!data && !error && <p style={muted}>Loading…</p>}
+        {data && (
+          <>
+            {/* Article summary */}
+            <div style={{ background: '#f7f9fb', border: '1px solid #e5e5e5', borderRadius: 6, padding: '10px 14px', marginBottom: 14, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+              <div><span style={lbl}>Type</span><span style={{ fontSize: 14 }}>{data.article.equipment_type_name}</span></div>
+              <div><span style={lbl}>State</span><span style={{ fontSize: 14 }}>{STATE_LABEL[data.article.state as inv.ArticleState] ?? data.article.state}</span></div>
+              <div><span style={lbl}>Condition</span><span style={{ fontSize: 14 }}>{data.article.current_condition_label}</span></div>
+              <div><span style={lbl}>Entered</span><span style={{ fontSize: 14 }}>{fmtDate(data.article.entered_at as unknown as string)} by {data.article.entered_by_name}</span></div>
+              {data.article.decommissioned_at && (
+                <div><span style={lbl}>Decommissioned</span><span style={{ fontSize: 14, color: '#b3352b' }}>{fmtDate(data.article.decommissioned_at as unknown as string)}{data.article.decommissioned_by_name ? ` by ${data.article.decommissioned_by_name}` : ''}</span></div>
+              )}
+            </div>
+
+            {/* Sub-tabs */}
+            <div style={{ ...tabRow, marginBottom: 14 }}>
+              {(['timeline', 'scans', 'flags', 'pairs'] as const).map((t) => (
+                <button key={t} style={lifecycleTabBtn(t)} onClick={() => setTab(t)}>
+                  {t === 'timeline' ? `Audit Log (${data.auditLog.length})` :
+                   t === 'scans' ? `Scans (${data.scans.length})` :
+                   t === 'flags' ? `Damage Flags (${data.flags.length})` :
+                   `Pair History (${data.pairs.length})`}
+                </button>
+              ))}
+            </div>
+
+            {tab === 'timeline' && (
+              <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+                {data.auditLog.length === 0 ? (
+                  <p style={muted}>No audit entries yet.</p>
+                ) : (
+                  <div style={{ position: 'relative' }}>
+                    {data.auditLog.map((entry, i) => (
+                      <div key={entry.log_id} style={{ display: 'flex', gap: 12, marginBottom: 12, paddingBottom: 12, borderBottom: i < data.auditLog.length - 1 ? '1px solid #eee' : 'none' }}>
+                        <div style={{ flexShrink: 0, width: 10, height: 10, borderRadius: '50%', background: actionColor[entry.action] ?? '#5c6773', marginTop: 5 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                            <span style={{ font: '600 13px var(--font-body)', color: actionColor[entry.action] ?? '#333' }}>
+                              {actionLabel[entry.action] ?? entry.action}
+                            </span>
+                            <span style={{ font: '12px var(--font-body)', color: '#5c6773', whiteSpace: 'nowrap' }}>{fmtDate(entry.occurred_at as unknown as string)}</span>
+                          </div>
+                          <div style={{ font: '12px var(--font-body)', color: '#5c6773', marginTop: 2 }}>
+                            {entry.actor_name} ({entry.actor_role.replace('_', ' ')})
+                          </div>
+                          {entry.detail && Object.keys(entry.detail).length > 0 && (
+                            <div style={{ font: '11px var(--font-mono)', color: '#5c6773', marginTop: 3, wordBreak: 'break-all' }}>
+                              {JSON.stringify(entry.detail)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {tab === 'scans' && (
+              <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+                {data.scans.length === 0 ? <p style={muted}>No scans recorded.</p> : (
+                  <table style={table}>
+                    <thead><tr><th style={th}>Date</th><th style={th}>Kind</th><th style={th}>Score</th><th style={th}>Label</th><th style={th}>By</th></tr></thead>
+                    <tbody>
+                      {data.scans.map((s) => (
+                        <tr key={s.scan_id}>
+                          <td style={td}>{fmtDate(s.scanned_at as unknown as string)}</td>
+                          <td style={td}>{s.kind}</td>
+                          <td style={td}>{Number(s.health_score).toFixed(1)}</td>
+                          <td style={td}><span style={{ ...badgeBase, ...(s.resulting_label === 'GOOD' ? badge.ok : s.resulting_label === 'WORN' ? badge.warn : badge.danger) }}>{s.resulting_label}</span></td>
+                          <td style={td}>{s.scanned_by_name}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {tab === 'flags' && (
+              <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+                {data.flags.length === 0 ? <p style={muted}>No damage flags on record.</p> : (
+                  <table style={table}>
+                    <thead><tr><th style={th}>Raised</th><th style={th}>By</th><th style={th}>Cleared</th><th style={th}>Cleared By</th><th style={th}>Final Label</th></tr></thead>
+                    <tbody>
+                      {data.flags.map((f) => (
+                        <tr key={f.flag_id}>
+                          <td style={td}>{fmtDate(f.raised_at as unknown as string)}</td>
+                          <td style={td}>{f.raised_by_system ? 'System' : (f.raised_by_name ?? '—')}</td>
+                          <td style={td}>{f.cleared_at ? fmtDate(f.cleared_at as unknown as string) : <span style={{ color: '#b3352b' }}>Open</span>}</td>
+                          <td style={td}>{f.cleared_by_name ?? '—'}</td>
+                          <td style={td}>{f.cleared_with_label ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {tab === 'pairs' && (
+              <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+                {data.pairs.length === 0 ? <p style={muted}>No pair history.</p> : (
+                  <table style={table}>
+                    <thead><tr><th style={th}>Partner Article</th><th style={th}>Formed</th><th style={th}>By</th><th style={th}>Dissolved</th><th style={th}>Reason</th></tr></thead>
+                    <tbody>
+                      {data.pairs.map((p) => {
+                        const partner = p.article_a_id === articleId ? p.article_b_id : p.article_a_id;
+                        return (
+                          <tr key={p.pair_id}>
+                            <td style={{ ...td, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{partner.slice(0, 8)}…</td>
+                            <td style={td}>{fmtDate(p.formed_at as unknown as string)}</td>
+                            <td style={td}>{p.formed_by_name ?? '—'}</td>
+                            <td style={td}>{p.dissolved_at ? fmtDate(p.dissolved_at as unknown as string) : <span style={{ color: '#1f7a45' }}>Active</span>}</td>
+                            <td style={td}>{p.dissolution_reason ?? '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </Modal>
   );
 }

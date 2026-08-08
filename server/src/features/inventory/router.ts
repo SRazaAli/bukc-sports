@@ -3,6 +3,9 @@
  * COORDINATOR) per INV role table; the DB staff-guard triggers enforce this
  * again. Reads of availability status are open to any authenticated user
  * (clients see the derived availability, EQUIP-AVAIL feature builds on it).
+ *
+ * Actor identity (userId + role) is now threaded into mutating service calls so
+ * notifications (INV-01/21/22/23) and audit log (INV-25) can record who acted.
  */
 import { Router } from 'express';
 import { asyncHandler } from '../../middleware/async.js';
@@ -66,9 +69,10 @@ inventoryRouter.patch('/types/:id/thresholds', ...staff, asyncHandler(async (req
 }));
 
 // Full edit — name, indoor flag, thresholds/duration, condition bands, image.
+// INV-22: actor identity and role are passed through for SA notification + audit.
 inventoryRouter.patch('/types/:id', ...staff, asyncHandler(async (req, res) => {
   const input = parse(v.updateEquipmentTypeSchema, req.body);
-  await svc.updateEquipmentType(Number(reqId(req)), input);
+  await svc.updateEquipmentType(Number(reqId(req)), input, req.user!.userId, req.user!.role);
   res.json({ message: 'Equipment type updated.' });
 }));
 
@@ -90,26 +94,35 @@ inventoryRouter.get('/articles', ...staff, asyncHandler(async (req, res) => {
   res.json({ articles: await svc.listArticles({ equipmentTypeId, state, condition }) });
 }));
 
+// INV-02/03/04: add single article. INV-01/25: actor info passed through.
 inventoryRouter.post('/articles', ...staff, asyncHandler(async (req, res) => {
   const input = parse(v.addArticleSchema, req.body);
-  const created = await svc.addArticle(input, req.user!.userId);
+  const created = await svc.addArticle(input, req.user!.userId, req.user!.role);
   res.status(201).json({ article: created });
 }));
 
-// Pair-type articles are always entered as a pair in one action (INV-07/08 at intake).
+// Pair-type articles are always entered as a pair (INV-07/08 at intake).
+// INV-01/25: actor info passed through.
 inventoryRouter.post('/articles/pair', ...staff, asyncHandler(async (req, res) => {
   const input = parse(v.addArticlePairSchema, req.body);
-  const created = await svc.addArticlePair(input, req.user!.userId);
+  const created = await svc.addArticlePair(input, req.user!.userId, req.user!.role);
   res.status(201).json({ pairEntry: created });
 }));
 
+// INV-27: full lifecycle of one article (scans, flags, pairs, audit log).
 inventoryRouter.get('/articles/:id', ...staff, asyncHandler(async (req, res) => {
   res.json(await svc.getArticleDetail(reqId(req)));
 }));
 
+// INV-27: dedicated lifecycle endpoint (same data, explicit path).
+inventoryRouter.get('/articles/:id/lifecycle', ...staff, asyncHandler(async (req, res) => {
+  res.json(await svc.getArticleLifecycle(reqId(req)));
+}));
+
 // Decommissioning a pair-type article decommissions both halves (service-level).
+// INV-23/25: actor info passed through.
 inventoryRouter.post('/articles/:id/decommission', ...staff, asyncHandler(async (req, res) => {
-  await svc.decommissionArticle(reqId(req), req.user!.userId);
+  await svc.decommissionArticle(reqId(req), req.user!.userId, req.user!.role);
   res.json({ message: 'Article decommissioned.' });
 }));
 
@@ -119,9 +132,10 @@ inventoryRouter.post('/articles/:id/scan', ...staff, asyncHandler(async (req, re
   res.json({ ...result, message: 'Scan recorded.' });
 }));
 
+// INV-19: manual condition override — logged via INV-25 audit.
 inventoryRouter.post('/articles/:id/condition', ...staff, asyncHandler(async (req, res) => {
   const input = parse(v.overrideConditionSchema, req.body);
-  await svc.overrideCondition(reqId(req), input.label);
+  await svc.overrideCondition(reqId(req), input.label, req.user!.userId);
   res.json({ message: 'Condition updated.' });
 }));
 
@@ -130,10 +144,16 @@ inventoryRouter.get('/damage-flags', ...staff, asyncHandler(async (_req, res) =>
   res.json({ flags: await svc.listOpenDamageFlags() });
 }));
 
-// Clearing now takes a fresh health score (like any scan) — the label is derived
-// from the article's type thresholds, consistent with scoring everywhere else.
 inventoryRouter.post('/damage-flags/:id/clear', ...staff, asyncHandler(async (req, res) => {
   const input = parse(v.clearFlagSchema, req.body);
   const result = await svc.clearDamageFlag(reqId(req), input.score, req.user!.userId, input.imageData);
   res.json({ ...result, message: 'Damage flag cleared.' });
+}));
+
+// ── Audit log (INV-25) — staff read ──
+inventoryRouter.get('/audit-log', ...staff, asyncHandler(async (req, res) => {
+  const articleId = req.query.articleId as string | undefined;
+  const equipmentTypeId = req.query.equipmentTypeId ? Number(req.query.equipmentTypeId) : undefined;
+  const limit = req.query.limit ? Math.min(Number(req.query.limit), 500) : 200;
+  res.json({ log: await svc.listArticleAuditLog({ articleId, equipmentTypeId, limit }) });
 }));
