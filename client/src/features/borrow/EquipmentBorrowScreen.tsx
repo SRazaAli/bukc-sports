@@ -14,7 +14,11 @@ import { listAvailability, type AvailabilityRow } from '../availability/api.js';
 import { submitRequest } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
 
-function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
+function errMsg(e: unknown): string {
+  if (e instanceof ApiRequestError) return e.body?.error ?? e.message ?? 'Something went wrong.';
+  if (e instanceof Error) return e.message;
+  return 'Something went wrong.';
+}
 
 export default function EquipmentBorrowScreen() {
   const { user, loading } = useAuth();
@@ -85,39 +89,45 @@ export default function EquipmentBorrowScreen() {
 
     // Submit main item + any ticked related items sequentially
     const typeIds = [row.equipmentTypeId, ...Array.from(selected)];
-    const failed: string[] = [];
+    const itemErrors: { name: string; reason: string }[] = [];
 
     for (const id of typeIds) {
+      const name = id === row.equipmentTypeId
+        ? row.name
+        : (related.find((r) => r.equipmentTypeId === id)?.name ?? String(id));
       try {
         await submitRequest({ equipmentTypeId: id, requestedStartAt, requestedReturnAt });
-      } catch {
-        const name = id === row.equipmentTypeId
-          ? row.name
-          : (related.find((r) => r.equipmentTypeId === id)?.name ?? String(id));
-        failed.push(name);
+      } catch (err) {
+        itemErrors.push({ name, reason: errMsg(err) });
       }
     }
 
     setSubmitting(false);
 
-    if (failed.length === 0) {
+    const succeeded = typeIds.length - itemErrors.length;
+
+    if (itemErrors.length === 0) {
+      // All succeeded
       const extras = typeIds.length - 1;
       setNotice(
         extras > 0
           ? `Request submitted for ${row.name} + ${extras} related item${extras > 1 ? 's' : ''}! A Coordinator will review your requests.`
           : 'Request submitted! A Coordinator will review it shortly.',
       );
-    } else if (failed.length < typeIds.length) {
-      setNotice(`Partial success — submitted, but failed for: ${failed.join(', ')}.`);
+    } else if (succeeded > 0) {
+      // Some succeeded, some failed — show which failed and why
+      const reasons = itemErrors.map((err) => `${err.name}: ${err.reason}`).join(' · ');
+      setNotice(`Partially submitted (${succeeded} of ${typeIds.length} items). Issues — ${reasons}`);
     } else {
-      setFormError(errMsg(new Error('All requests failed. Please try again.')));
+      // Everything failed — show the first error directly (usually the main item)
+      setFormError(itemErrors[0]?.reason ?? 'Request failed. Please try again.');
     }
   }
 
   const badgeStyle: React.CSSProperties = !row ? {} :
     row.statusBadge === 'AVAILABLE' ? { background: '#d1fae5', color: '#065f46' } :
       row.statusBadge === 'LOW_STOCK' ? { background: '#fef3c7', color: '#92400e' } :
-        { background: '#fee2e2', color: '#991b1b' };
+        { background: '#fee2e2', color: '#991b1b' }; 
   const badgeText = !row ? '' :
     row.statusBadge === 'AVAILABLE' ? 'Available' :
       row.statusBadge === 'LOW_STOCK' ? 'Low Stock' : 'Checked Out';
@@ -372,7 +382,7 @@ const statsGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: '
 const statCell: React.CSSProperties = { background: '#f9fafb', borderRadius: 8, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4 };
 const statLabel: React.CSSProperties = { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#9ca3af' };
 const statValue: React.CSSProperties = { fontSize: 20, fontWeight: 700, color: '#111' };
-const rulesBox: React.CSSProperties = { background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, padding: '14px 16px' };
+const rulesBox: React.CSSProperties = { background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, padding: '14px 16px', marginTop: 20 };
 const rulesTitle: React.CSSProperties = { margin: '0 0 8px', fontSize: 13, fontWeight: 600, color: '#374151' };
 const rulesList: React.CSSProperties = { margin: 0, paddingLeft: 18, fontSize: 13, color: '#4b5563', lineHeight: 1.7 };
 
@@ -389,7 +399,7 @@ const summaryBox: React.CSSProperties = { background: '#eff6ff', border: '1px so
 const summaryLabel: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: '#1e40af' };
 const summaryItems: React.CSSProperties = { fontSize: 13, color: '#1e3a8a' };
 
-const successActions: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 };
+const successActions: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 };
 const viewRequestsBtn: React.CSSProperties = { padding: '10px 0', borderRadius: 8, border: 'none', background: '#374151', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
 const backLink: React.CSSProperties = { background: 'none', border: 'none', color: '#2563eb', fontSize: 14, cursor: 'pointer', padding: 0 };
 
