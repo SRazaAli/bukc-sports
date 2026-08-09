@@ -174,6 +174,7 @@ export interface BookingDetailFull {
   booking_metadata: Record<string, unknown> | null;
   sent_back_note: string | null; sent_back_at: string | null;
   coordinator_proposed_sessions: Array<{ sessionNo: number; startAt: string; endAt: string }> | null;
+  coordinator_equipment: Array<{ equipment_type_id: number; name: string; quantity: number }>;
   requester_name: string | null; requester_email: string | null;
   sessions: SessionRequest[];
 }

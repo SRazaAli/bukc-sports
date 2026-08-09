@@ -725,6 +725,8 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
   const [reason, setReason] = useState('');
   const [sendBackNote, setSendBackNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [noteErr, setNoteErr] = useState('');
+  const [rejectErr, setRejectErr] = useState('');
 
   // Compile equipment changes for summary and send-back
   const equipChanges = requestedEquipment.map((e) => {
@@ -743,13 +745,15 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
     catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
   async function reject() {
-    if (!reason.trim()) { onError('Rejection reason is required.'); return; }
+    if (!reason.trim()) { setRejectErr('Rejection reason is required.'); return; }
+    setRejectErr('');
     setBusy(true);
     try { await rejectBooking(item.booking_id, reason); onDone('Request rejected.'); }
     catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
   async function doSendBack() {
-    if (!sendBackNote.trim()) { onError('Write a note for the requester.'); return; }
+    if (!sendBackNote.trim()) { setNoteErr('Please write a note for the requester before sending back.'); return; }
+    setNoteErr('');
     setBusy(true);
     try {
       await sendBackToRequester(detail.booking_id, { note: sendBackNote, proposedSessions: proposedSessions ?? undefined });
@@ -809,7 +813,9 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
       {mode === 'reject' && (
         <div>
           <label style={lbl}>Rejection reason (shown to {requesterName})</label>
-          <textarea style={{ ...textarea, width: '100%' }} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
+          <textarea style={{ ...textarea, width: '100%', borderColor: rejectErr ? '#c0392b' : undefined }} rows={3} value={reason}
+            onChange={(e) => { setReason(e.target.value); if (rejectErr) setRejectErr(''); }} />
+          {rejectErr && <div style={{ color: '#c0392b', fontSize: 13, marginTop: 4, fontWeight: 500 }}>⚠ {rejectErr}</div>}
           <div style={actionRow}>
             <button style={rejectBtn} disabled={!reason.trim() || busy} onClick={reject}>Confirm rejection</button>
             <button style={ghostBtn} onClick={() => setMode('none')}>Cancel</button>
@@ -852,11 +858,12 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
 
           <label style={lbl}>Your note to {requesterName} *</label>
           <textarea
-            style={{ ...textarea, width: '100%', minHeight: 120, marginBottom: 14 }}
+            style={{ ...textarea, width: '100%', minHeight: 120, marginBottom: noteErr ? 6 : 14, borderColor: noteErr ? '#c0392b' : undefined }}
             placeholder="Explain the conflict or issue and what you propose. Be specific — include dates, times, and reasons. If equipment is short, describe what the university can provide."
             value={sendBackNote}
-            onChange={(e) => setSendBackNote(e.target.value)}
+            onChange={(e) => { setSendBackNote(e.target.value); if (noteErr) setNoteErr(''); }}
           />
+          {noteErr && <div style={{ color: '#c0392b', fontSize: 13, marginBottom: 10, fontWeight: 500 }}>⚠ {noteErr}</div>}
           <div style={actionRow}>
             <button style={warnBtn} disabled={!sendBackNote.trim() || busy} onClick={doSendBack}>
               {busy ? 'Sending…' : `↩ Send Back to ${requesterName}`}

@@ -70,7 +70,7 @@ export default function MyBookingsScreen() {
   if (user.role !== 'STUDENT' && user.role !== 'EXTERNAL') return <Navigate to="/home" replace />;
 
   const hasActive = bookings.some((b) =>
-    ['PENDING', 'FORWARDED', 'SHORTFALL_PENDING'].includes(b.status),
+    ['PENDING', 'FORWARDED', 'SHORTFALL_PENDING', 'SENT_BACK'].includes(b.status),
   );
 
   return (
@@ -805,7 +805,7 @@ function StatusBadge({ status }: { status: string }) {
     : status === 'SENT_BACK' ? { background: '#fdf1e3', color: '#9a6412' }
     : { background: '#f0f4f8', color: '#26485f' };
   const label = status === 'SHORTFALL_PENDING' ? 'Awaiting your response'
-    : status === 'SENT_BACK' ? 'Coordinator sent back — review required'
+    : status === 'SENT_BACK' ? 'Returned'
     : status;
   return <span style={{ font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4, ...s }}>{label}</span>;
 }
@@ -836,6 +836,14 @@ function SentBackReviewModal({ booking, onDone, onError, onClose }: {
 
   const proposed = detail?.coordinator_proposed_sessions;
   const note = detail?.sent_back_note;
+  const coordEquip = detail?.coordinator_equipment ?? [];
+  const studentEquip = (detail?.booking_metadata?.equipmentItems as Array<{ name: string; equipmentTypeId: number; quantity: number }> | undefined) ?? [];
+  const equipSupport = detail?.booking_metadata?.equipmentSupport as string | undefined;
+  const hasEquipInfo = equipSupport === 'UNIVERSITY' && coordEquip.length > 0;
+  const equipShortfalls = coordEquip.filter((ce) => {
+    const se = studentEquip.find((e) => e.equipmentTypeId === ce.equipment_type_id);
+    return se && ce.quantity < se.quantity;
+  });
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
@@ -905,6 +913,34 @@ function SentBackReviewModal({ booking, onDone, onError, onClose }: {
                     {' – '}{new Date(s.requested_end_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Equipment allocation info */}
+            {hasEquipInfo && (
+              <div style={{ background: '#f7f9fb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+                <div style={{ font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
+                  📦 Equipment Allocation
+                </div>
+                {coordEquip.map((ce) => {
+                  const se = studentEquip.find((e) => e.equipmentTypeId === ce.equipment_type_id);
+                  const short = se && ce.quantity < se.quantity;
+                  return (
+                    <div key={ce.equipment_type_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #f0f0f0', fontSize: 14 }}>
+                      <span style={{ color: '#333' }}>{ce.name}</span>
+                      <span>
+                        <span style={{ fontWeight: 600, color: short ? '#c0392b' : '#1f8a4c' }}>×{ce.quantity}</span>
+                        {short && se && <span style={{ fontSize: 12, color: '#c0392b', marginLeft: 6 }}>(you requested {se.quantity})</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+                {equipShortfalls.length > 0 && (
+                  <div style={{ marginTop: 10, padding: '8px 10px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 6, fontSize: 13, color: '#991b1b' }}>
+                    ⚠ The university can provide less equipment than requested for {equipShortfalls.length} item{equipShortfalls.length > 1 ? 's' : ''}.
+                    Review the coordinator's note for details and decide whether to accept or decline.
+                  </div>
+                )}
               </div>
             )}
 

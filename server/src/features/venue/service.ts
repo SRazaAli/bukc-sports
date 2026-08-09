@@ -724,10 +724,29 @@ export async function getBookingDetailFull(bookingId: string) {
   const parse = <T>(v: unknown): T | null =>
     v ? (typeof v === 'string' ? JSON.parse(v) : v as T) : null;
 
+  // Fetch coordinator's saved equipment allocation (if any)
+  const allocations = await db
+    .selectFrom('booking_session_request_equipment as bsre')
+    .innerJoin('booking_session_request as bsr', 'bsr.request_session_id', 'bsre.request_session_id')
+    .innerJoin('equipment_type as et', 'et.equipment_type_id', 'bsre.equipment_type_id')
+    .select(['bsre.equipment_type_id', 'et.name as equipment_type_name', 'bsre.quantity'])
+    .where('bsr.booking_id', '=', bookingId)
+    .execute();
+
+  // Deduplicate by type (same qty applies across sessions)
+  const coordEquipMap: Record<number, { name: string; quantity: number }> = {};
+  for (const a of allocations) {
+    coordEquipMap[a.equipment_type_id] = { name: a.equipment_type_name, quantity: a.quantity };
+  }
+  const coordinatorEquipment = Object.entries(coordEquipMap).map(([id, v]) => ({
+    equipment_type_id: Number(id), name: v.name, quantity: v.quantity,
+  }));
+
   return {
     ...b,
     booking_metadata: parse<Record<string, unknown>>(b.booking_metadata),
     coordinator_proposed_sessions: parse<Array<{ sessionNo: number; startAt: string; endAt: string }>>(b.coordinator_proposed_sessions),
+    coordinator_equipment: coordinatorEquipment,
     sessions,
   };
 }
