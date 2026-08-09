@@ -111,6 +111,44 @@ venueRouter.post('/bookings/:id/return', ...superAdminOnly, asyncHandler(async (
   res.json({ message: 'Booking returned to the Coordinator for re-evaluation.' });
 }));
 
+// ── Coordinator: send back to requester with note + optional proposed schedule ──
+venueRouter.post('/bookings/:id/send-back', ...coordinatorOnly, asyncHandler(async (req, res) => {
+  const { note, proposedSessions } = req.body as {
+    note: string;
+    proposedSessions?: Array<{ sessionNo: number; startAt: string; endAt: string }>;
+  };
+  if (!note?.trim()) throw badRequest('A note is required when sending back.');
+  await svc.sendBackToRequester(reqId(req), req.user!.userId, note, proposedSessions);
+  res.json({ message: 'Booking sent back to the requester.' });
+}));
+
+// ── Requester: accept coordinator's send-back (re-enters queue as PENDING) ──
+venueRouter.post('/bookings/:id/accept-sent-back', ...requester, asyncHandler(async (req, res) => {
+  await svc.acceptSentBack(reqId(req), req.user!.userId);
+  res.json({ message: 'Accepted — your booking is back in the Coordinator\'s queue.' });
+}));
+
+// ── Requester: decline coordinator's send-back (→ REJECTED) ──
+venueRouter.post('/bookings/:id/decline-sent-back', ...requester, asyncHandler(async (req, res) => {
+  await svc.declineSentBack(reqId(req), req.user!.userId);
+  res.json({ message: 'Booking cancelled.' });
+}));
+
+// ── Full booking detail (coordinator review — includes metadata + sent_back fields) ──
+venueRouter.get('/bookings/:id/full', ...anyStaff, asyncHandler(async (req, res) => {
+  res.json(await svc.getBookingDetailFull(reqId(req)));
+}));
+
+// ── Equipment availability check for proposed session windows (coordinator tool) ──
+venueRouter.post('/bookings/:id/equipment-check', ...coordinatorOnly, asyncHandler(async (req, res) => {
+  const { equipmentTypeIds, sessionWindows } = req.body as {
+    equipmentTypeIds: number[];
+    sessionWindows: Array<{ startAt: string; endAt: string }>;
+  };
+  const result = await svc.getEquipmentAvailabilityForSessions(equipmentTypeIds ?? [], sessionWindows ?? []);
+  res.json({ availability: result });
+}));
+
 // ── shared reads ──
 venueRouter.get('/bookings/:id', ...anyStaff, asyncHandler(async (req, res) => {
   res.json(await svc.getBookingDetail(reqId(req)));

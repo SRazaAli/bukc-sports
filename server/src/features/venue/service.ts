@@ -523,6 +523,215 @@ export async function approveBooking(bookingId: string, superAdminId: string) {
   }
 }
 
+// ── Coordinator: send booking back to requester (VENUE-12) ──
+// Coordinator found conflicts or equipment issues. Instead of rejecting,
+// they send it back with a note and optionally a proposed alternative schedule.
+// Status: PENDING → SENT_BACK. Student can then accept (→ PENDING) or decline (→ REJECTED).
+export async function sendBackToRequester(
+  bookingId: string,
+  coordinatorId: string,
+  note: string,
+  proposedSessions?: Array<{ sessionNo: number; startAt: string; endAt: string }>,
+) {
+  try {
+    const b = await db.selectFrom('booking')
+      .select(['status', 'requested_by', 'purpose'])
+      .where('booking_id', '=', bookingId)
+      .executeTakeFirst();
+    if (!b) throw notFound('Booking not found.');
+    if (b.status !== 'PENDING') throw conflict(`Cannot send back — booking is ${b.status}.`);
+
+    await db.transaction().execute(async (trx) => {
+      await trx.updateTable('booking').set({
+        status: 'SENT_BACK',
+        sent_back_note: note,
+        sent_back_by: coordinatorId,
+        sent_back_at: new Date(),
+        coordinator_proposed_sessions: proposedSessions ? JSON.stringify(proposedSessions) : null,
+      }).where('booking_id', '=', bookingId).execute();
+
+      await trx.insertInto('approval_action').values({
+        subject: 'VENUE_BOOKING', verb: 'SEND_BACK',
+        booking_id: bookingId, actor_id: coordinatorId, note,
+      }).execute();
+    });
+
+    if (b.requested_by) {
+      await notifyRequester(
+        'BOOKING_SENT_BACK',
+        b.requested_by,
+        'Your venue booking request needs your attention',
+        `The Coordinator has reviewed your booking and sent it back with a note. Please check your booking request for details.`,
+        bookingId,
+      );
+    }
+  } catch (e) { throw mapDbError(e); }
+}
+
+// ── Requester: accept the coordinator's send-back (→ PENDING) ──
+// If coordinator proposed a new schedule, replace the session request rows
+// with the proposed ones. Booking re-enters the coordinator's queue.
+export async function acceptSentBack(bookingId: string, requesterId: string) {
+  try {
+    const b = await db.selectFrom('booking')
+      .select(['status', 'requested_by', 'coordinator_proposed_sessions'])
+      .where('booking_id', '=', bookingId)
+      .executeTakeFirst();
+    if (!b) throw notFound('Booking not found.');
+    if (b.status !== 'SENT_BACK') throw conflict('This booking is not awaiting your response.');
+    if (b.requested_by !== requesterId) throw new AppError(403, 'Not your booking.');
+
+    await db.transaction().execute(async (trx) => {
+      const proposed = b.coordinator_proposed_sessions
+        ? (typeof b.coordinator_proposed_sessions === 'string'
+            ? JSON.parse(b.coordinator_proposed_sessions)
+            : b.coordinator_proposed_sessions) as Array<{ sessionNo: number; startAt: string; endAt: string }>
+        : null;
+
+      // If coordinator proposed a new schedule, replace session request rows
+      if (proposed && proposed.length > 0) {
+        await trx.deleteFrom('booking_session_request')
+          .where('booking_id', '=', bookingId).execute();
+        for (const s of proposed) {
+          await trx.insertInto('booking_session_request').values({
+            booking_id: bookingId,
+            session_no: s.sessionNo,
+            requested_start_at: new Date(s.startAt),
+            requested_end_at: new Date(s.endAt),
+            team_name: '',
+            participant_details: null,
+          }).execute();
+        }
+      }
+
+      await trx.updateTable('booking').set({
+        status: 'PENDING',
+        sent_back_note: null,
+        coordinator_proposed_sessions: null,
+      }).where('booking_id', '=', bookingId).execute();
+
+      await trx.insertInto('approval_action').values({
+        subject: 'VENUE_BOOKING', verb: 'ACCEPT_SENT_BACK',
+        booking_id: bookingId, actor_id: requesterId,
+      }).execute();
+    });
+
+    await notifyStaffRole('COORDINATOR', 'QUEUE_NEW_ITEM',
+      'Booking request resubmitted',
+      'A requester has accepted your proposed schedule and resubmitted the booking.', bookingId);
+  } catch (e) { throw mapDbError(e); }
+}
+
+// ── Requester: decline the coordinator's send-back (→ REJECTED) ──
+export async function declineSentBack(bookingId: string, requesterId: string) {
+  try {
+    const b = await db.selectFrom('booking')
+      .select(['status', 'requested_by'])
+      .where('booking_id', '=', bookingId).executeTakeFirst();
+    if (!b) throw notFound('Booking not found.');
+    if (b.status !== 'SENT_BACK') throw conflict('This booking is not awaiting your response.');
+    if (b.requested_by !== requesterId) throw new AppError(403, 'Not your booking.');
+
+    await db.updateTable('booking').set({
+      status: 'REJECTED',
+      rejection_reason: 'Requester declined the coordinator\'s proposed changes.',
+    }).where('booking_id', '=', bookingId).execute();
+
+    await db.insertInto('approval_action').values({
+      subject: 'VENUE_BOOKING', verb: 'DECLINE_SENT_BACK',
+      booking_id: bookingId, actor_id: requesterId,
+    }).execute();
+  } catch (e) { throw mapDbError(e); }
+}
+
+// ── Equipment availability check for session dates (coordinator tool) ──
+// For each equipment type requested in the booking, returns:
+//   available: current v_article_availability.available_units
+//   locked_on_date: units already locked in approved events that overlap the session windows
+//   net_available: available - locked_on_date (what the coordinator can actually plan with)
+export async function getEquipmentAvailabilityForSessions(
+  equipmentTypeIds: number[],
+  sessionWindows: Array<{ startAt: string; endAt: string }>,
+) {
+  if (equipmentTypeIds.length === 0) return [];
+
+  // Current availability from the view
+  const avail = await db.selectFrom('v_article_availability')
+    .select(['equipment_type_id', 'available_units', 'total_stock'])
+    .where('equipment_type_id', 'in', equipmentTypeIds)
+    .execute();
+
+  // Units already locked in approved events overlapping any of the proposed session windows
+  // We check event_equipment_allocation for sessions whose slot overlaps our windows
+  const lockedPerType: Record<number, number> = {};
+  for (const win of sessionWindows) {
+    const locked = await db.selectFrom('event_equipment_allocation as ea')
+      .innerJoin('booking_session as bs', 'bs.session_id', 'ea.session_id')
+      .innerJoin('booking as b', 'b.booking_id', 'bs.booking_id')
+      .select([
+        'ea.equipment_type_id',
+        sql<string>`sum(ea.quantity)`.as('locked_qty'),
+      ])
+      .where('b.status', '=', 'APPROVED')
+      .where('ea.equipment_type_id', 'in', equipmentTypeIds)
+      .where(sql<boolean>`lower(bs.slot) < ${win.endAt}::timestamptz AND upper(bs.slot) > ${win.startAt}::timestamptz`)
+      .groupBy('ea.equipment_type_id')
+      .execute();
+
+    for (const row of locked) {
+      const typeId = row.equipment_type_id;
+      lockedPerType[typeId] = (lockedPerType[typeId] ?? 0) + Number(row.locked_qty);
+    }
+  }
+
+  return avail.map((r) => {
+    const available = Number(r.available_units);
+    const locked = lockedPerType[r.equipment_type_id] ?? 0;
+    const netAvailable = Math.max(0, available - locked);
+    return {
+      equipment_type_id: r.equipment_type_id,
+      available_now: available,
+      total_stock: Number(r.total_stock),
+      locked_on_date: locked,
+      net_available: netAvailable,
+    };
+  });
+}
+
+// ── Extended booking detail for coordinator review ──
+// Includes sent_back fields + booking_metadata so coordinator
+// can see what the student originally requested
+export async function getBookingDetailFull(bookingId: string) {
+  const b = await db.selectFrom('booking as b')
+    .innerJoin('venue as v', 'v.venue_id', 'b.venue_id')
+    .leftJoin('app_user as requester', 'requester.user_id', 'b.requested_by')
+    .select([
+      'b.booking_id', 'b.origin', 'b.status', 'b.purpose',
+      'b.estimated_participants', 'b.feasibility_note', 'b.rejection_reason',
+      'b.venue_id', 'v.name as venue_name',
+      'b.booking_type', 'b.booking_metadata',
+      'b.sent_back_note', 'b.sent_back_at',
+      'b.coordinator_proposed_sessions',
+      'requester.full_name as requester_name',
+      'requester.email as requester_email',
+    ])
+    .where('b.booking_id', '=', bookingId)
+    .executeTakeFirst();
+  if (!b) throw notFound('Booking not found.');
+
+  const sessions = await getSessionRequests(bookingId);
+
+  const parse = <T>(v: unknown): T | null =>
+    v ? (typeof v === 'string' ? JSON.parse(v) : v as T) : null;
+
+  return {
+    ...b,
+    booking_metadata: parse<Record<string, unknown>>(b.booking_metadata),
+    coordinator_proposed_sessions: parse<Array<{ sessionNo: number; startAt: string; endAt: string }>>(b.coordinator_proposed_sessions),
+    sessions,
+  };
+}
+
 // VENUE-22: Super Admin can send back to Coordinator instead of rejecting outright.
 export async function returnForReevaluation(bookingId: string, superAdminId: string, note: string) {
   try {

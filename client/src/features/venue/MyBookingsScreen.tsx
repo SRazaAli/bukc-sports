@@ -21,6 +21,7 @@ import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
 import {
   listVenues, submitBooking, listMyBookings, confirmShortfall, listCalendar,
+  acceptSentBack, declineSentBack,
   type Venue, type MyBooking,
 } from './api.js';
 import { listTypes, type EquipmentType } from '../inventory/api.js';
@@ -109,6 +110,11 @@ export default function MyBookingsScreen() {
                     <td style={{ ...td, textAlign: 'right' }}>
                       {b.status === 'SHORTFALL_PENDING' && (
                         <ShortfallActions bookingId={b.booking_id}
+                          onDone={(m) => { setNotice(m); void load(); }}
+                          onError={(m) => setError(m)} />
+                      )}
+                      {b.status === 'SENT_BACK' && (
+                        <SentBackActions booking={b}
                           onDone={(m) => { setNotice(m); void load(); }}
                           onError={(m) => setError(m)} />
                       )}
@@ -786,8 +792,39 @@ function RevRow({ label, value }: { label: string; value: string }) {
 function StatusBadge({ status }: { status: string }) {
   const s = ['APPROVED', 'COMPLETED'].includes(status) ? { background: '#e6f4ec', color: '#1f7a45' }
     : ['REJECTED', 'CANCELLED'].includes(status) ? { background: '#fbe9e7', color: '#b3352b' }
-    : { background: '#fdf1e3', color: '#9a6412' };
-  return <span style={{ font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4, ...s }}>{status === 'SHORTFALL_PENDING' ? 'Awaiting your response' : status}</span>;
+    : status === 'SENT_BACK' ? { background: '#fdf1e3', color: '#9a6412' }
+    : { background: '#f0f4f8', color: '#26485f' };
+  const label = status === 'SHORTFALL_PENDING' ? 'Awaiting your response'
+    : status === 'SENT_BACK' ? 'Coordinator sent back — review required'
+    : status;
+  return <span style={{ font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4, ...s }}>{label}</span>;
+}
+function SentBackActions({ booking, onDone, onError }: { booking: MyBooking; onDone: (m: string) => void; onError: (m: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [showDecline, setShowDecline] = useState(false);
+  async function accept() {
+    setBusy(true);
+    try { await acceptSentBack(booking.booking_id); onDone('Booking resubmitted — back in the Coordinator\'s queue.'); }
+    catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
+  }
+  async function decline() {
+    setBusy(true);
+    try { await declineSentBack(booking.booking_id); onDone('Booking declined and closed.'); }
+    catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
+  }
+  if (showDecline) return (
+    <span style={{ display: 'inline-flex', gap: 6 }}>
+      <span style={{ fontSize: 12.5, color: '#5c6773' }}>Confirm decline?</span>
+      <button style={smdanger} disabled={busy} onClick={decline}>Yes, decline</button>
+      <button style={smghost} onClick={() => setShowDecline(false)}>Cancel</button>
+    </span>
+  );
+  return (
+    <span style={{ display: 'inline-flex', gap: 6 }}>
+      <button style={smaccept} disabled={busy} onClick={accept}>Accept & resubmit</button>
+      <button style={smghost} onClick={() => setShowDecline(true)}>Decline</button>
+    </span>
+  );
 }
 function ShortfallActions({ bookingId, onDone, onError }: { bookingId: string; onDone: (m: string) => void; onError: (m: string) => void }) {
   const [busy, setBusy] = useState(false);

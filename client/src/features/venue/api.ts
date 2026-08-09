@@ -164,7 +164,44 @@ export const listAllocationAlerts = () => api<{ alerts: AllocationAlert[] }>('/a
 export const performSwap = (allocationId: string, input: { outgoingArticleId: string; incomingArticleId: string; reason?: string }) =>
   api<{ message: string }>(`/api/venue/event-equipment/${allocationId}/swap`, { method: 'POST', body: input });
 
-// ── Feature 9: Conflict Detection & Resolution ──
+// ── Coordinator send-back workflow ──
+export interface BookingDetailFull {
+  booking_id: string; origin: string; status: string; purpose: string;
+  estimated_participants: number; feasibility_note: string | null;
+  rejection_reason: string | null; venue_id: number; venue_name: string;
+  booking_type: string | null;
+  booking_metadata: Record<string, unknown> | null;
+  sent_back_note: string | null; sent_back_at: string | null;
+  coordinator_proposed_sessions: Array<{ sessionNo: number; startAt: string; endAt: string }> | null;
+  requester_name: string | null; requester_email: string | null;
+  sessions: SessionRequest[];
+}
+export interface EquipmentAvailRow {
+  equipment_type_id: number;
+  available_now: number;
+  total_stock: number;
+  locked_on_date: number;
+  net_available: number;
+}
+
+export const getBookingFull = (id: string) => api<BookingDetailFull>(`/api/venue/bookings/${id}/full`);
+
+export const sendBackToRequester = (id: string, input: {
+  note: string;
+  proposedSessions?: Array<{ sessionNo: number; startAt: string; endAt: string }>;
+}) => api<{ message: string }>(`/api/venue/bookings/${id}/send-back`, { method: 'POST', body: input });
+
+export const acceptSentBack = (id: string) =>
+  api<{ message: string }>(`/api/venue/bookings/${id}/accept-sent-back`, { method: 'POST', body: {} });
+
+export const declineSentBack = (id: string) =>
+  api<{ message: string }>(`/api/venue/bookings/${id}/decline-sent-back`, { method: 'POST', body: {} });
+
+export const checkEquipmentForSessions = (bookingId: string, input: {
+  equipmentTypeIds: number[];
+  sessionWindows: Array<{ startAt: string; endAt: string }>;
+}) => api<{ availability: EquipmentAvailRow[] }>(`/api/venue/bookings/${bookingId}/equipment-check`, { method: 'POST', body: input });
+
 
 // Advisory query: returns all currently SCHEDULED/IN_PROGRESS sessions
 // (i.e. sessions that are actively holding a slot). Filter by venue + dates.

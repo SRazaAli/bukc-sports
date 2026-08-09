@@ -229,7 +229,8 @@ export type NotificationType =
   | 'SWAP_PERFORMED' | 'SWAP_NOTICE_SUPERADMIN' | 'DAMAGE_FLAGGED' | 'INVENTORY_ACTION'
   | 'MULTISESSION_PROGRESS' | 'FALLBACK_ENTRY_MADE'
   | 'RETURN_CONDITION_UNVERIFIED' | 'BAD_SPORT_FLAGGED'
-  | 'ACCOUNT_DEACTIVATED' | 'ACCOUNT_REACTIVATED';
+  | 'ACCOUNT_DEACTIVATED' | 'ACCOUNT_REACTIVATED'
+  | 'BOOKING_SENT_BACK';
 
 export interface BorrowRequestTable {
   borrow_request_id: Generated<string>;
@@ -330,10 +331,10 @@ export interface UsageHistoryTable {
 
 // ── Venue booking domain (Feature 5) ──
 export type BookingOrigin = 'CLIENT' | 'EXTERNAL' | 'ACADEMIC';
-export type BookingStatus = 'PENDING' | 'FORWARDED' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'COMPLETED' | 'SHORTFALL_PENDING';
+export type BookingStatus = 'PENDING' | 'FORWARDED' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'COMPLETED' | 'SHORTFALL_PENDING' | 'SENT_BACK';
 export type SessionStatus = 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'NEEDS_RESCHEDULING' | 'CANCELLED';
 export type ApprovalSubject = 'VENUE_BOOKING' | 'BORROW_REQUEST' | 'ACCOUNT_VERIFICATION' | 'EQUIPMENT_EXCEPTION';
-export type ApprovalVerb = 'SUBMIT' | 'FORWARD' | 'APPROVE' | 'REJECT' | 'RETURN_FOR_REEVALUATION' | 'CANCEL';
+export type ApprovalVerb = 'SUBMIT' | 'FORWARD' | 'APPROVE' | 'REJECT' | 'RETURN_FOR_REEVALUATION' | 'CANCEL' | 'SEND_BACK' | 'ACCEPT_SENT_BACK' | 'DECLINE_SENT_BACK';
 
 export type VenueAvailabilityStatus = 'AVAILABLE' | 'UNDER_MAINTENANCE' | 'CLOSED';
 
@@ -378,6 +379,11 @@ export interface BookingTable {
   holds_future_slot: ColumnType<boolean, boolean | undefined, boolean>;
   booking_type: BookingEventType | null;
   booking_metadata: ColumnType<Record<string, unknown> | null, string | null, string | null>;
+  // Migration 023: coordinator send-back workflow
+  sent_back_note: string | null;
+  sent_back_by: string | null;
+  sent_back_at: Timestamp | null;
+  coordinator_proposed_sessions: ColumnType<Array<{ sessionNo: number; startAt: string; endAt: string }> | null, string | null, string | null>;
 }
 
 export interface BookingSessionRequestTable {
