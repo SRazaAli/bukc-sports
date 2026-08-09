@@ -25,6 +25,9 @@ function fmtDate(iso: string) {
 function fmtTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
 }
+function isExpired(requestedStartAt: string): boolean {
+  return new Date(requestedStartAt).getTime() < Date.now();
+}
 
 // ─── Grouping helper ──────────────────────────────────────────────────────────
 
@@ -316,7 +319,14 @@ function RequestItemCard({ item, onApproved, onApprovedAndLend, onRejected, onEr
       </div>
 
       {/* Actions */}
-      {!done && !rejectOpen && (
+      {!done && isExpired(item.requested_start_at) && (
+        <div style={expiredTag}>
+          <span style={expiredIcon}>⏰</span>
+          Request expired — borrow window has passed
+        </div>
+      )}
+
+      {!done && !isExpired(item.requested_start_at) && !rejectOpen && (
         <div style={actionRow}>
           <button style={busy ? { ...approveBtn, opacity: 0.6 } : approveBtn} disabled={busy} onClick={handleApprove}>
             Approve
@@ -330,7 +340,7 @@ function RequestItemCard({ item, onApproved, onApprovedAndLend, onRejected, onEr
         </div>
       )}
 
-      {!done && rejectOpen && (
+      {!done && !isExpired(item.requested_start_at) && rejectOpen && (
         <div style={rejectForm}>
           <input
             style={rejectInput}
@@ -619,6 +629,8 @@ const ghostBtn: React.CSSProperties = { background: 'transparent', color: '#3741
 const reviewBtn: React.CSSProperties = { background: 'transparent', color: '#2563eb', border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const approveAllBtn: React.CSSProperties = { background: '#374151', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const rejectForm: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8 };
+const expiredTag: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 7, background: '#f3f4f6', color: '#6b7280', fontSize: 13, fontWeight: 500 };
+const expiredIcon: React.CSSProperties = { fontSize: 15 };
 const rejectInput: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14, width: '100%', boxSizing: 'border-box' };
 
 // Back button
