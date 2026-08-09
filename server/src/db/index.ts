@@ -384,6 +384,8 @@ export interface BookingTable {
   sent_back_by: string | null;
   sent_back_at: Timestamp | null;
   coordinator_proposed_sessions: ColumnType<Array<{ sessionNo: number; startAt: string; endAt: string }> | null, string | null, string | null>;
+  // Migration 026: coordinator article selections persist across send-back round-trips
+  coordinator_selected_articles: ColumnType<Array<{ equipmentTypeId: number; articleIds: string[] }> | null, string | null, string | null>;
 }
 
 export interface BookingSessionRequestTable {

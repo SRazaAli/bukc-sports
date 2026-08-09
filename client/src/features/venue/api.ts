@@ -146,15 +146,11 @@ export interface AllocationLine {
   equipment_type_id: number; equipment_type_name: string; quantity: number;
   is_self_managed: boolean; needs_shortfall_confirmation: boolean;
 }
-export interface AllocationInput { requestSessionId: string; equipmentTypeId: number; quantity: number }
 export interface AllocationAlert {
   allocation_id: string; equipment_type_id: number; equipment_type_name: string;
   quantity: number; session_id: string; venue_name: string; availableUnits: number;
 }
 
-export const planAllocation = (bookingId: string, allocations: AllocationInput[]) =>
-  api<{ shortfalls: Array<{ equipmentTypeId: number; requested: number; available: number }>; message: string }>(
-    `/api/venue/bookings/${bookingId}/equipment`, { method: 'POST', body: { allocations } });
 export const getAllocationPlan = (bookingId: string) =>
   api<{ allocations: AllocationLine[] }>(`/api/venue/bookings/${bookingId}/equipment`);
 export const confirmShortfall = (bookingId: string, confirm: boolean) =>
@@ -174,10 +170,19 @@ export interface BookingDetailFull {
   booking_metadata: Record<string, unknown> | null;
   sent_back_note: string | null; sent_back_at: string | null;
   coordinator_proposed_sessions: Array<{ sessionNo: number; startAt: string; endAt: string }> | null;
+  coordinator_selected_articles: Array<{ equipmentTypeId: number; articleIds: string[] }> | null;
   coordinator_equipment: Array<{ equipment_type_id: number; name: string; quantity: number }>;
   requester_name: string | null; requester_email: string | null;
   sessions: SessionRequest[];
 }
+
+export interface AllocationInput { requestSessionId: string; equipmentTypeId: number; quantity: number }
+
+export const planAllocation = (bookingId: string, allocations: AllocationInput[], selectedArticles?: Array<{ equipmentTypeId: number; articleIds: string[] }>) =>
+  api<{ message: string; shortfalls: Array<{ equipmentTypeId: number; requested: number; available: number }> }>(
+    `/api/venue/bookings/${bookingId}/equipment`,
+    { method: 'POST', body: { allocations, selectedArticles } },
+  );
 export interface EquipmentAvailRow {
   equipment_type_id: number;
   available_now: number;

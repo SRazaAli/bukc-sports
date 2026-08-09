@@ -712,6 +712,7 @@ export async function getBookingDetailFull(bookingId: string) {
       'b.booking_type', 'b.booking_metadata',
       'b.sent_back_note', 'b.sent_back_at',
       'b.coordinator_proposed_sessions',
+      'b.coordinator_selected_articles',
       'requester.full_name as requester_name',
       'requester.email as requester_email',
     ])
@@ -746,6 +747,7 @@ export async function getBookingDetailFull(bookingId: string) {
     ...b,
     booking_metadata: parse<Record<string, unknown>>(b.booking_metadata),
     coordinator_proposed_sessions: parse<Array<{ sessionNo: number; startAt: string; endAt: string }>>(b.coordinator_proposed_sessions),
+    coordinator_selected_articles: parse<Array<{ equipmentTypeId: number; articleIds: string[] }>>(b.coordinator_selected_articles),
     coordinator_equipment: coordinatorEquipment,
     sessions,
   };

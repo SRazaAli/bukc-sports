@@ -142,16 +142,44 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
         setDetail(d);
         const meta = d.booking_metadata as Record<string, unknown> | null;
         const items = (meta?.equipmentItems as Array<{ equipmentTypeId: number; quantity: number }> | undefined) ?? [];
-        // Init coordinator qty from student request
-        setEquipQty(Object.fromEntries(items.map((e) => [e.equipmentTypeId, e.quantity])));
-        // Init proposal rows from original sessions
-        setProposalRows(d.sessions.map((s, i) => ({
-          sessionNo: i + 1,
-          date: s.requested_start_at.slice(0, 10),
-          startTime: s.requested_start_at.slice(11, 16),
-          endTime: s.requested_end_at.slice(11, 16),
-          participantDetails: '',
-        })));
+
+        // Hydrate coordinator qty — prefer previously saved values over student request
+        if (d.coordinator_equipment && d.coordinator_equipment.length > 0) {
+          setEquipQty(Object.fromEntries(d.coordinator_equipment.map((e) => [e.equipment_type_id, e.quantity])));
+        } else {
+          setEquipQty(Object.fromEntries(items.map((e) => [e.equipmentTypeId, e.quantity])));
+        }
+
+        // Hydrate previously selected articles
+        if (d.coordinator_selected_articles && d.coordinator_selected_articles.length > 0) {
+          setSelectedArticles(Object.fromEntries(
+            d.coordinator_selected_articles.map((e) => [e.equipmentTypeId, e.articleIds]),
+          ));
+        }
+
+        // Hydrate proposed sessions — if coordinator previously proposed a schedule, pre-populate
+        if (d.coordinator_proposed_sessions && d.coordinator_proposed_sessions.length > 0) {
+          setProposedSessions(d.coordinator_proposed_sessions);
+          setProposalRows(d.coordinator_proposed_sessions.map((s) => ({
+            sessionNo: s.sessionNo,
+            date: s.startAt.slice(0, 10),
+            startTime: s.startAt.slice(11, 16),
+            endTime: s.endAt.slice(11, 16),
+            participantDetails: '',
+          })));
+          setShowProposalEditor(true);
+          // Conflict check considered done if there's a saved proposal
+          setConflictChecked(true);
+        } else {
+          // Init proposal rows from original sessions for editor pre-population
+          setProposalRows(d.sessions.map((s, i) => ({
+            sessionNo: i + 1,
+            date: s.requested_start_at.slice(0, 10),
+            startTime: s.requested_start_at.slice(11, 16),
+            endTime: s.requested_end_at.slice(11, 16),
+            participantDetails: '',
+          })));
+        }
       })
       .catch((e) => onError(errMsg(e)))
       .finally(() => setLoadingDetail(false));
@@ -274,12 +302,15 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
               if (step === 3 && equipmentSupport !== 'SELF' && requestedEquipment.length > 0) {
                 const allocations: Array<{ requestSessionId: string; equipmentTypeId: number; quantity: number }> = [];
                 for (const s of effectiveSessions) {
-                  for (const item of requestedEquipment) {
-                    const qty = equipQty[item.equipmentTypeId] ?? 0;
-                    if (qty > 0) allocations.push({ requestSessionId: s.request_session_id, equipmentTypeId: item.equipmentTypeId, quantity: qty });
+                  for (const item2 of requestedEquipment) {
+                    const qty = equipQty[item2.equipmentTypeId] ?? 0;
+                    if (qty > 0) allocations.push({ requestSessionId: s.request_session_id, equipmentTypeId: item2.equipmentTypeId, quantity: qty });
                   }
                 }
-                try { await planAllocation(detail.booking_id, allocations); } catch { /* non-fatal */ }
+                const selArticlesArr = Object.entries(selectedArticles).map(([typeId, ids]) => ({
+                  equipmentTypeId: Number(typeId), articleIds: ids,
+                }));
+                try { await planAllocation(detail.booking_id, allocations, selArticlesArr); } catch { /* non-fatal */ }
               }
               setStep((s) => (s + 1) as StepN);
             }}>
@@ -428,18 +459,17 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
       </p>
 
       <button style={primaryBtn} disabled={checking} onClick={runCheck}>
-        {checking ? 'Checking…' : conflictChecked ? '🔄 Re-check' : '🔍 Run Conflict Check'}
+        {checking ? 'Checking…' : conflictChecked ? 'Re-check' : 'Run Conflict Check'}
       </button>
 
       {conflictChecked && (
         <div style={{ marginTop: 16 }}>
           {!hasConflicts ? (
             <div style={{ ...box.ok, display: 'flex', gap: 10, alignItems: 'center' }}>
-              <span style={{ fontSize: 18 }}>✅</span>
               <span>No conflicts — all {effectiveSessions.length} session{effectiveSessions.length > 1 ? 's' : ''} are free on the calendar.</span>
             </div>
           ) : (
-            <div style={{ ...box.err }}>⚠ {Object.values(sessionConflicts).filter((c) => c.length > 0).length} session(s) conflict with existing approved bookings.</div>
+            <div style={{ ...box.err }}>{Object.values(sessionConflicts).filter((c) => c.length > 0).length} session(s) conflict with existing approved bookings.</div>
           )}
 
           {effectiveSessions.map((s) => {
@@ -450,7 +480,7 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
               <div key={s.request_session_id} style={{ marginTop: 12, border: `1px solid ${cs.length > 0 ? '#fca5a5' : '#86efac'}`, borderRadius: 8, overflow: 'hidden' }}>
                 <div style={{ padding: '8px 16px', background: cs.length > 0 ? '#fef2f2' : '#f0fdf4', display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ font: '600 13px var(--font-body)', color: cs.length > 0 ? '#991b1b' : '#166534' }}>
-                    {cs.length > 0 ? `⚠ Session ${s.session_no} — CONFLICT` : `✓ Session ${s.session_no} — Clear`}
+                    {cs.length > 0 ? `Session ${s.session_no} — CONFLICT` : `Session ${s.session_no} — Clear`}
                   </span>
                   <span style={{ fontSize: 13, color: '#555' }}>{fmtDate(s.requested_start_at)} · {fmtTime(s.requested_start_at)}–{fmtTime(s.requested_end_at)}</span>
                 </div>
@@ -471,13 +501,13 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
           <div style={{ marginTop: 16 }}>
             {!showProposalEditor && (
               <button style={{ ...ghostBtn, fontSize: 13 }} onClick={() => onShowProposalEditorChange(true)}>
-                📅 {hasConflicts ? 'Propose an alternative schedule' : 'Propose an alternative schedule anyway…'}
+                {hasConflicts ? 'Propose an alternative schedule' : 'Propose an alternative schedule anyway…'}
               </button>
             )}
             {showProposalEditor && (
               <div style={{ padding: 16, border: '1px solid #bfdbfe', borderRadius: 8, background: '#eff6ff' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <span style={{ font: '600 14px var(--font-body)', color: '#1e40af' }}>📅 Proposed Alternative Schedule</span>
+                  <span style={{ font: '600 14px var(--font-body)', color: '#1e40af' }}>Proposed Alternative Schedule</span>
                   <button style={{ ...ghostBtn, fontSize: 12, padding: '4px 10px' }} onClick={() => { onShowProposalEditorChange(false); onProposedSessionsChange(null); }}>Clear</button>
                 </div>
                 <p style={{ margin: '0 0 12px', fontSize: 13, color: '#3730a3' }}>
@@ -491,9 +521,9 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
                   allowMultiple={effectiveSessions.length > 1}
                 />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
-                  <button style={primaryBtn} onClick={applyProposal}>✓ Apply as proposed schedule</button>
+                  <button style={primaryBtn} onClick={applyProposal}>Apply as proposed schedule</button>
                   {proposedSessions && (
-                    <span style={{ fontSize: 13, color: '#1f8a4c', fontWeight: 600 }}>✓ Applied — equipment step will use these dates</span>
+                    <span style={{ fontSize: 13, color: '#1f8a4c', fontWeight: 600 }}>Applied — equipment step will use these dates</span>
                   )}
                 </div>
               </div>
@@ -504,7 +534,7 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
 
       {!conflictChecked && (
         <div style={{ textAlign: 'center', padding: '32px 24px', color: '#8a949f' }}>
-          <div style={{ fontSize: 36, marginBottom: 8 }}>🗓</div>
+          
           <p style={{ margin: 0, fontSize: 14 }}>Run the conflict check to see what's on the calendar for {detail.venue_name}.</p>
         </div>
       )}
@@ -561,28 +591,34 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
   onSelectedArticlesChange: (s: Record<number, string[]>) => void;
   onError: (m: string) => void;
 }) {
-  const [checking, setChecking] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
-  const isChecked = equipAvail.length > 0 || articleGroups.length > 0;
+  const isLoaded = equipAvail.length > 0 || articleGroups.length > 0;
   const availMap = Object.fromEntries(equipAvail.map((a) => [a.equipment_type_id, a]));
 
-  async function runCheck() {
-    if (requestedEquipment.length === 0) { onError('No equipment was requested.'); return; }
-    setChecking(true);
-    try {
-      const typeIds = requestedEquipment.map((e) => e.equipmentTypeId);
-      const windows = effectiveSessions.map((s) => ({ startAt: s.requested_start_at, endAt: s.requested_end_at }));
-      const [availRes, artRes] = await Promise.all([
-        checkEquipmentForSessions(bookingId, { equipmentTypeIds: typeIds, sessionWindows: windows }),
-        getArticleAvailability(bookingId, { sessionWindows: windows, equipmentTypeIds: typeIds }),
-      ]);
-      onEquipAvailChange(availRes.availability);
-      onArticleGroupsChange(artRes.groups);
-      const initSel: Record<number, string[]> = {};
-      typeIds.forEach((id) => { initSel[id] = selectedArticles[id] ?? []; });
-      onSelectedArticlesChange(initSel);
-    } catch (e) { onError(errMsg(e)); } finally { setChecking(false); }
-  }
+  useEffect(() => {
+    if (equipmentSupport === 'SELF' || requestedEquipment.length === 0) return;
+    if (isLoaded) return;
+    setLoading(true);
+    const typeIds = requestedEquipment.map((e) => e.equipmentTypeId);
+    const windows = effectiveSessions.map((s) => ({ startAt: s.requested_start_at, endAt: s.requested_end_at }));
+    Promise.all([
+      checkEquipmentForSessions(bookingId, { equipmentTypeIds: typeIds, sessionWindows: windows }),
+      getArticleAvailability(bookingId, { sessionWindows: windows, equipmentTypeIds: typeIds }),
+    ])
+      .then(([availRes, artRes]) => {
+        onEquipAvailChange(availRes.availability);
+        onArticleGroupsChange(artRes.groups);
+        const hasSaved = Object.keys(selectedArticles).length > 0;
+        if (!hasSaved) {
+          const initSel: Record<number, string[]> = {};
+          typeIds.forEach((id) => { initSel[id] = []; });
+          onSelectedArticlesChange(initSel);
+        }
+      })
+      .catch(() => onError('Could not load inventory data.'))
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line
 
   function toggleArticle(typeId: number, articleId: string) {
     const cur = selectedArticles[typeId] ?? [];
@@ -624,12 +660,9 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
         {sessionDates.map((d) => fmtDate(d + 'T00:00:00')).join(', ')}.
         {effectiveSessions.length > 1 && ' Same quantities apply across all sessions.'}
       </div>
-      <button style={primaryBtn} disabled={checking} onClick={runCheck}>
-        {checking ? 'Checking…' : isChecked ? '🔄 Re-check' : '📦 Check Inventory & Select Articles'}
-      </button>
-
-      {isChecked && (
-        <div style={{ marginTop: 16 }}>
+      {loading && <p style={muted}>Loading inventory…</p>}
+      {isLoaded && (
+        <div>
           {requestedEquipment.map((item) => {
             const avail = availMap[item.equipmentTypeId];
             const coordQty = equipQty[item.equipmentTypeId] ?? item.quantity;
@@ -640,10 +673,8 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
             const selArts = selectedArticles[item.equipmentTypeId] ?? [];
             const selMismatch = coordQty > 0 && selArts.length !== coordQty;
             const isCollapsed = collapsed[item.equipmentTypeId] ?? false;
-
             return (
               <div key={item.equipmentTypeId} style={{ marginBottom: 12, border: `1px solid ${isShort || selMismatch ? '#fca5a5' : '#e5e7eb'}`, borderRadius: 8, overflow: 'hidden' }}>
-                {/* Collapsible header */}
                 <div style={{ padding: '10px 14px', background: '#f7f9fb', borderBottom: isCollapsed ? 'none' : '1px solid #e5e7eb', cursor: 'pointer', display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: 12 }}
                   onClick={() => setCollapsed((c) => ({ ...c, [item.equipmentTypeId]: !isCollapsed }))}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -659,9 +690,8 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
                     <span style={{ font: '600 15px var(--font-body)', minWidth: 24, textAlign: 'center' }}>{coordQty}</span>
                     <button style={qtyBtn} onClick={() => setQty(item.equipmentTypeId, coordQty + 1)}>+</button>
                   </div>
-                  <span style={{ fontSize: 16, color: '#5c6773', userSelect: 'none' }}>{isCollapsed ? '▶' : '▼'}</span>
+                  <span style={{ fontSize: 14, color: '#5c6773', userSelect: 'none' }}>{isCollapsed ? '▶' : '▼'}</span>
                 </div>
-
                 {!isCollapsed && (
                   <>
                     <div style={{ padding: '8px 14px', display: 'flex', gap: 20, fontSize: 13, borderBottom: '1px solid #f0f0f0' }}>
@@ -669,9 +699,9 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
                       <span style={{ color: (avail?.locked_on_date ?? 0) > 0 ? '#9a6412' : '#5c6773' }}>Locked on date(s): <strong>{avail?.locked_on_date ?? '—'}</strong></span>
                       <span style={{ color: isShort ? '#b3352b' : '#1f7a45', fontWeight: 700 }}>Net available: {avail?.net_available ?? '—'}</span>
                     </div>
-                    {isBelowReq && <div style={{ padding: '6px 14px', background: '#fdf1e3', borderBottom: '1px solid #f0e4b8', fontSize: 13, color: '#9a6412' }}>⚠ Allocating {coordQty} of {studentReq} requested — shortfall noted in send-back.</div>}
-                    {isShort && <div style={{ padding: '6px 14px', background: '#fef2f2', borderBottom: '1px solid #fca5a5', fontSize: 13, color: '#991b1b' }}>⚠ Net available ({avail?.net_available}) &lt; coordinator qty ({coordQty}). Reduce or send back.</div>}
-                    {selMismatch && <div style={{ padding: '6px 14px', background: '#fef2f2', borderBottom: '1px solid #fca5a5', fontSize: 13, color: '#991b1b' }}>⚠ Select exactly {coordQty} article{coordQty !== 1 ? 's' : ''} ({selArts.length} currently selected).</div>}
+                    {isBelowReq && <div style={{ padding: '6px 14px', background: '#fdf1e3', borderBottom: '1px solid #f0e4b8', fontSize: 13, color: '#9a6412' }}>Allocating {coordQty} of {studentReq} requested — shortfall noted in send-back.</div>}
+                    {isShort && <div style={{ padding: '6px 14px', background: '#fef2f2', borderBottom: '1px solid #fca5a5', fontSize: 13, color: '#991b1b' }}>Net available ({avail?.net_available}) is less than coordinator quantity ({coordQty}). Reduce or send back.</div>}
+                    {selMismatch && <div style={{ padding: '6px 14px', background: '#fef2f2', borderBottom: '1px solid #fca5a5', fontSize: 13, color: '#991b1b' }}>Select exactly {coordQty} article{coordQty !== 1 ? 's' : ''} — {selArts.length} currently selected.</div>}
                     {group && (
                       <div style={{ padding: '10px 14px' }}>
                         <div style={{ font: '500 12px var(--font-body)', color: '#26485f', marginBottom: 8 }}>Select articles to allocate ({selArts.length}/{coordQty}):</div>
@@ -698,15 +728,15 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
               </div>
             );
           })}
-          {hasShortfall && <div style={{ ...box.err, marginTop: 8 }}>⚠ Insufficient availability for some types. Reduce quantities or send back.</div>}
+          {hasShortfall && <div style={{ ...box.err, marginTop: 8 }}>Insufficient availability for some types. Reduce quantities or send back.</div>}
         </div>
       )}
-      {!isChecked && <p style={{ fontSize: 13, color: '#8a949f', marginTop: 12 }}>Run the inventory check to see article availability and select which items to allocate.</p>}
+      {!isLoaded && !loading && <p style={{ fontSize: 13, color: '#8a949f', marginTop: 12 }}>Loading inventory data…</p>}
     </div>
   );
 }
 
-// ── Step 4: Decision ─────────────────────────────────────────────────────────
+
 function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEquipment, selectedArticles, articleGroups, requesterName, onDone, onError, onBack }: {
   item: QueueBooking;
   detail: BookingDetailFull;
@@ -770,7 +800,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
         <div style={{ font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Review Summary</div>
         <div style={{ display: 'grid', gap: 8, fontSize: 13.5 }}>
           <div>
-            📅 <strong>Sessions:</strong>{' '}
+            <strong>Sessions:</strong>{' '}
             {proposedSessions ? (
               <span style={{ color: '#1e40af' }}>
                 {proposedSessions.length} proposed alternative — {proposedSessions.map((s) => `${fmtDate(s.startAt)} ${fmtTime(s.startAt)}–${fmtTime(s.endAt)}`).join('; ')}
@@ -781,7 +811,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
           </div>
           {requestedEquipment.length > 0 && (
             <div>
-              📦 <strong>Equipment:</strong>{' '}
+              <strong>Equipment:</strong>{' '}
               {equipChanges.map((e) => (
                 <span key={e.name} style={{ marginRight: 10 }}>
                   {e.name} ×{e.allocated}{e.below && <span style={{ color: '#c0392b', marginLeft: 4 }}>(requested {e.requested})</span>}
@@ -790,7 +820,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
             </div>
           )}
           {hasEquipChanges && (
-            <div style={{ color: '#c0392b' }}>⚠ Equipment shortfall — some items are being allocated below the requested quantity.</div>
+            <div style={{ color: '#c0392b' }}>Equipment shortfall — some items are being allocated below the requested quantity.</div>
           )}
         </div>
       </div>
@@ -804,7 +834,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
           <div style={actionRow}>
             <button style={acceptBtn} disabled={busy} onClick={forward}>Forward to Super Admin</button>
             <button style={rejectBtn} onClick={() => setMode('reject')}>Reject…</button>
-            <button style={warnBtn} onClick={() => setMode('sendback')}>↩ Send Back to {requesterName}…</button>
+            <button style={warnBtn} onClick={() => setMode('sendback')}>Send Back to {requesterName}…</button>
             <button style={ghostBtn} onClick={onBack}>← Back to queue</button>
           </div>
         </div>
@@ -815,7 +845,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
           <label style={lbl}>Rejection reason (shown to {requesterName})</label>
           <textarea style={{ ...textarea, width: '100%', borderColor: rejectErr ? '#c0392b' : undefined }} rows={3} value={reason}
             onChange={(e) => { setReason(e.target.value); if (rejectErr) setRejectErr(''); }} />
-          {rejectErr && <div style={{ color: '#c0392b', fontSize: 13, marginTop: 4, fontWeight: 500 }}>⚠ {rejectErr}</div>}
+          {rejectErr && <div style={{ color: '#c0392b', fontSize: 13, marginTop: 4, fontWeight: 500 }}>{rejectErr}</div>}
           <div style={actionRow}>
             <button style={rejectBtn} disabled={!reason.trim() || busy} onClick={reject}>Confirm rejection</button>
             <button style={ghostBtn} onClick={() => setMode('none')}>Cancel</button>
@@ -825,14 +855,14 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
 
       {mode === 'sendback' && (
         <div style={{ border: '1px solid #fcd34d', borderRadius: 8, background: '#fffbeb', padding: 20 }}>
-          <div style={{ font: '600 15px var(--font-body)', color: '#92400e', marginBottom: 6 }}>↩ Send Back to {requesterName}</div>
+          <div style={{ font: '600 15px var(--font-body)', color: '#92400e', marginBottom: 6 }}>Send Back to {requesterName}</div>
 
           {/* Compiled summary of what's changing */}
           <div style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: 6, padding: '12px 14px', marginBottom: 14 }}>
             <div style={{ font: '600 12px var(--font-body)', color: '#78350f', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>Changes being communicated</div>
             {proposedSessions ? (
               <div style={{ marginBottom: 8 }}>
-                <span style={{ font: '600 13px var(--font-body)', color: '#333' }}>📅 Proposed alternative schedule:</span>
+                <span style={{ font: '600 13px var(--font-body)', color: '#333' }}>Proposed alternative schedule:</span>
                 {proposedSessions.map((s) => (
                   <div key={s.sessionNo} style={{ fontSize: 13, color: '#555', marginLeft: 14, marginTop: 2 }}>
                     Session {s.sessionNo}: {fmtDate(s.startAt)} · {fmtTime(s.startAt)}–{fmtTime(s.endAt)}
@@ -840,11 +870,11 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
                 ))}
               </div>
             ) : (
-              <div style={{ fontSize: 13, color: '#5c6773', marginBottom: 8 }}>📅 No schedule changes — original sessions remain.</div>
+              <div style={{ fontSize: 13, color: '#5c6773', marginBottom: 8 }}>No schedule changes — original sessions remain.</div>
             )}
             {hasEquipChanges ? (
               <div>
-                <span style={{ font: '600 13px var(--font-body)', color: '#333' }}>📦 Equipment shortfall:</span>
+                <span style={{ font: '600 13px var(--font-body)', color: '#333' }}>Equipment shortfall:</span>
                 {equipChanges.filter((e) => e.below).map((e) => (
                   <div key={e.name} style={{ fontSize: 13, color: '#c0392b', marginLeft: 14, marginTop: 2 }}>
                     {e.name}: university can provide {e.allocated} (you requested {e.requested})
@@ -852,7 +882,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
                 ))}
               </div>
             ) : requestedEquipment.length > 0 ? (
-              <div style={{ fontSize: 13, color: '#1f8a4c' }}>📦 Full equipment quantities can be provided.</div>
+              <div style={{ fontSize: 13, color: '#1f8a4c' }}>Full equipment quantities can be provided.</div>
             ) : null}
           </div>
 
@@ -863,7 +893,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
             value={sendBackNote}
             onChange={(e) => { setSendBackNote(e.target.value); if (noteErr) setNoteErr(''); }}
           />
-          {noteErr && <div style={{ color: '#c0392b', fontSize: 13, marginBottom: 10, fontWeight: 500 }}>⚠ {noteErr}</div>}
+          {noteErr && <div style={{ color: '#c0392b', fontSize: 13, marginBottom: 10, fontWeight: 500 }}>{noteErr}</div>}
           <div style={actionRow}>
             <button style={warnBtn} disabled={!sendBackNote.trim() || busy} onClick={doSendBack}>
               {busy ? 'Sending…' : `↩ Send Back to ${requesterName}`}

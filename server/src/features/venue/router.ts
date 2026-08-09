@@ -179,7 +179,8 @@ venueRouter.get('/calendar', requireAuth, asyncHandler(async (req, res) => {
 // ── equipment allocation (VENUE-13/15/16/17, EQUIP-AVAIL-11..21) ──
 venueRouter.post('/bookings/:id/equipment', ...coordinatorOnly, asyncHandler(async (req, res) => {
   const input = parse(v.planAllocationSchema, req.body);
-  const result = await eq.planAllocation(reqId(req), req.user!.userId, input.allocations);
+  const selectedArticles = req.body.selectedArticles as Array<{ equipmentTypeId: number; articleIds: string[] }> | undefined;
+  const result = await eq.planAllocation(reqId(req), req.user!.userId, input.allocations, selectedArticles);
   res.json({
     ...result,
     message: result.shortfalls.length > 0

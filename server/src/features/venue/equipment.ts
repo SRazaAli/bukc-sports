@@ -42,7 +42,12 @@ async function notifyRequester(type: import('../../db/index.js').NotificationTyp
 // ── planning (VENUE-13) ──
 export interface AllocationInput { requestSessionId: string; equipmentTypeId: number; quantity: number }
 
-export async function planAllocation(bookingId: string, coordinatorId: string, allocations: AllocationInput[]) {
+export async function planAllocation(
+  bookingId: string,
+  coordinatorId: string,
+  allocations: AllocationInput[],
+  selectedArticles?: Array<{ equipmentTypeId: number; articleIds: string[] }>,
+) {
   const b = await db.selectFrom('booking').select(['status', 'requested_by']).where('booking_id', '=', bookingId).executeTakeFirst();
   if (!b) throw notFound('Booking not found.');
   if (b.status !== 'PENDING') throw conflict(`Booking is ${b.status} — equipment can only be planned while PENDING.`);
@@ -66,6 +71,14 @@ export async function planAllocation(bookingId: string, coordinatorId: string, a
           .onConflict((oc) => oc.columns(['request_session_id', 'equipment_type_id']).doUpdateSet({
             quantity: a.quantity, needs_shortfall_confirmation: isShort, is_self_managed: false,
           }))
+          .execute();
+      }
+
+      // Persist selected article IDs so they survive send-back round-trips
+      if (selectedArticles && selectedArticles.length > 0) {
+        await trx.updateTable('booking')
+          .set({ coordinator_selected_articles: JSON.stringify(selectedArticles) })
+          .where('booking_id', '=', bookingId)
           .execute();
       }
 
