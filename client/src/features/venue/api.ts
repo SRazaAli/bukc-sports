@@ -197,6 +197,26 @@ export const acceptSentBack = (id: string) =>
 export const declineSentBack = (id: string) =>
   api<{ message: string }>(`/api/venue/bookings/${id}/decline-sent-back`, { method: 'POST', body: {} });
 
+export interface ArticleAvailEntry {
+  article_id: string;
+  barcode: string;
+  state: string;
+  condition: string;
+  expected_return_at: string | null;
+  locked_elsewhere: boolean;
+}
+export interface ArticleAvailGroup {
+  equipment_type_id: number;
+  equipment_type_name: string;
+  lending_unit: string;
+  articles: ArticleAvailEntry[];
+}
+
+export const getArticleAvailability = (bookingId: string, input: {
+  sessionWindows: Array<{ startAt: string; endAt: string }>;
+  equipmentTypeIds: number[];
+}) => api<{ groups: ArticleAvailGroup[] }>(`/api/venue/bookings/${bookingId}/article-availability`, { method: 'POST', body: input });
+
 export const checkEquipmentForSessions = (bookingId: string, input: {
   equipmentTypeIds: number[];
   sessionWindows: Array<{ startAt: string; endAt: string }>;

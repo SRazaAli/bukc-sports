@@ -139,7 +139,17 @@ venueRouter.get('/bookings/:id/full', ...anyStaff, asyncHandler(async (req, res)
   res.json(await svc.getBookingDetailFull(reqId(req)));
 }));
 
-// ── Equipment availability check for proposed session windows (coordinator tool) ──
+// ── Article-level availability for coordinator equipment selection ──
+venueRouter.post('/bookings/:id/article-availability', ...coordinatorOnly, asyncHandler(async (req, res) => {
+  const { sessionWindows, equipmentTypeIds } = req.body as {
+    sessionWindows: Array<{ startAt: string; endAt: string }>;
+    equipmentTypeIds: number[];
+  };
+  const result = await svc.getArticleAvailabilityForEvent(reqId(req), sessionWindows ?? [], equipmentTypeIds ?? []);
+  res.json({ groups: result });
+}));
+
+
 venueRouter.post('/bookings/:id/equipment-check', ...coordinatorOnly, asyncHandler(async (req, res) => {
   const { equipmentTypeIds, sessionWindows } = req.body as {
     equipmentTypeIds: number[];

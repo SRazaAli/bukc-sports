@@ -11,7 +11,7 @@ import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
 import {
   listAdminQueue, approveBooking, rejectBooking, returnForReeval,
-  listVenues, createVenue, updateVenue, deleteVenue,
+  listVenues, createVenue, updateVenue, deleteVenue, getBookingFull,
   type AdminQueueBooking, type Venue, type VenueAvailabilityStatus, SURFACE_TYPES,
 } from './api.js';
 import { listSportCategories, type SportCategory } from '../inventory/api.js';
@@ -224,6 +224,14 @@ function DecisionPanel({ item, onBack, onDone, onError }: {
   const [mode, setMode] = useState<'none' | 'reject' | 'return'>('none');
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState<import('./api.js').BookingDetailFull | null>(null);
+
+  useEffect(() => {
+    getBookingFull(item.booking_id).then(setDetail).catch(() => {});
+  }, [item.booking_id]);
+
+  const meta = detail?.booking_metadata as Record<string, unknown> | null | undefined;
+  const proposedSessions = detail?.coordinator_proposed_sessions;
 
   async function approve() {
     setBusy(true);
@@ -231,25 +239,69 @@ function DecisionPanel({ item, onBack, onDone, onError }: {
     catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
   async function reject() {
+    if (!text.trim()) { onError('Rejection reason required.'); return; }
     setBusy(true);
     try { await rejectBooking(item.booking_id, text); onDone('Booking rejected.'); }
     catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
   async function returnIt() {
+    if (!text.trim()) { onError('Note for coordinator required.'); return; }
     setBusy(true);
     try { await returnForReeval(item.booking_id, text); onDone('Returned to the Coordinator.'); }
     catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
 
   return (
-    <Panel title={`Decide — ${item.requester_name}`}>
+    <Panel title={`Decide — ${item.requester_name ?? 'BUKC Sports Dept.'}`}>
+      {/* Core fields */}
       <Row label="Venue" value={item.venue_name} />
       <Row label="Purpose" value={item.purpose} />
-      <Row label="Sessions" value={`${item.sessionCount} session${item.sessionCount !== 1 ? 's' : ''}${item.firstStart ? ` from ${new Date(item.firstStart).toLocaleDateString()}` : ''}`} />
+      <Row label="Participants" value={String(item.estimated_participants)} />
+      <Row label="Sessions" value={`${item.sessionCount}${item.firstStart ? ` · from ${new Date(item.firstStart).toLocaleDateString()}` : ''}`} />
+      <Row label="Forwarded at" value={item.forwarded_at ? new Date(item.forwarded_at).toLocaleString() : '—'} />
       <Row label="Coordinator's note" value={item.feasibility_note ?? '—'} />
+
+      {/* Coordinator's proposed schedule (if any) */}
+      {proposedSessions && proposedSessions.length > 0 && (
+        <div style={{ margin: '12px 0', padding: '10px 14px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6 }}>
+          <div style={{ font: '600 12px var(--font-body)', color: '#1e40af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Coordinator proposed alternative schedule</div>
+          {proposedSessions.map((s) => (
+            <div key={s.sessionNo} style={{ fontSize: 13.5, color: '#1e3a8a', marginBottom: 3 }}>
+              Session {s.sessionNo}: {new Date(s.startAt).toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short' })} · {new Date(s.startAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}–{new Date(s.endAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pitch metadata summary */}
+      {meta && (
+        <div style={{ margin: '12px 0', padding: '10px 14px', background: '#f7f9fb', border: '1px solid #e5e7eb', borderRadius: 6 }}>
+          <div style={{ font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>Booking Pitch Details</div>
+          <div style={{ display: 'grid', gap: 5 }}>
+            {([
+              ['Type', meta.bookingType === 'INTER_UNIVERSITY' ? 'Inter-University' : 'Internal Competition'],
+              ['Sport', String(meta.sport ?? '—')],
+              ['Format', `${String(meta.eventFormat ?? '').replace('_', ' ')} · ${String(meta.matchFormat ?? '').replace('_', ' ')}`],
+              ...(meta.bookingType === 'INTER_UNIVERSITY'
+                ? [['BUKC team', String(meta.bukcTeamName ?? '—')], ['Visiting team', `${meta.visitingTeamName ?? '—'} — ${meta.visitingUniversity ?? '—'}`]]
+                : [['Team A', String(meta.teamAName ?? '—')], ['Team B', String(meta.teamBName ?? '—')]]),
+              ['Equipment', meta.equipmentSupport === 'UNIVERSITY' ? 'University support required' : 'Teams supply own'],
+              ...((meta.equipmentItems as Array<{ name: string; quantity: number }> | undefined ?? []).length > 0
+                ? [['Requested eq.', (meta.equipmentItems as Array<{ name: string; quantity: number }>).map((e) => `${e.name} ×${e.quantity}`).join(', ')]]
+                : []),
+            ] as Array<[string, string]>).map(([k, v]) => (
+              <div key={k} style={{ display: 'grid', gridTemplateColumns: '150px 1fr', fontSize: 13.5 }}>
+                <span style={{ font: '600 11px var(--font-body)', color: '#5c6773', textTransform: 'uppercase', letterSpacing: '0.03em', paddingTop: 2 }}>{k}</span>
+                <span style={{ color: '#333' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {mode === 'none' && (
         <div style={actionRow}>
-          <button style={acceptBtn} disabled={busy} onClick={approve}>Approve</button>
+          <button style={acceptBtn} disabled={busy} onClick={approve}>✓ Approve</button>
           <button style={rejectBtn} onClick={() => setMode('reject')}>Reject…</button>
           <button style={ghostBtn} onClick={() => setMode('return')}>Return to Coordinator…</button>
           <button style={ghostBtn} onClick={onBack}>Back</button>
@@ -257,12 +309,12 @@ function DecisionPanel({ item, onBack, onDone, onError }: {
       )}
       {mode !== 'none' && (
         <div style={{ marginTop: 14 }}>
-          <label style={lbl}>{mode === 'reject' ? 'Rejection reason' : 'Note for the Coordinator'}</label>
+          <label style={lbl}>{mode === 'reject' ? 'Rejection reason (shown to requester)' : 'Note for the Coordinator'}</label>
           <textarea style={textarea} rows={3} value={text} onChange={(e) => setText(e.target.value)} />
           <div style={actionRow}>
             <button style={mode === 'reject' ? rejectBtn : acceptBtn} disabled={!text.trim() || busy}
               onClick={mode === 'reject' ? reject : returnIt}>
-              {mode === 'reject' ? 'Confirm rejection' : 'Send back'}
+              {mode === 'reject' ? 'Confirm rejection' : 'Return to Coordinator'}
             </button>
             <button style={ghostBtn} onClick={() => setMode('none')}>Cancel</button>
           </div>

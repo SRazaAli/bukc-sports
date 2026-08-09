@@ -15,13 +15,13 @@
  *   VENUE-07: one active request at a time (backend also enforces)
  *   VENUE-24/25: session conflict pre-check against approved calendar
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Fragment } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
 import {
   listVenues, submitBooking, listMyBookings, confirmShortfall, listCalendar,
-  acceptSentBack, declineSentBack,
+  acceptSentBack, declineSentBack, getBookingFull,
   type Venue, type MyBooking,
 } from './api.js';
 import { listTypes, type EquipmentType } from '../inventory/api.js';
@@ -102,7 +102,8 @@ export default function MyBookingsScreen() {
               </thead>
               <tbody>
                 {bookings.map((b) => (
-                  <tr key={b.booking_id}>
+                  <Fragment key={b.booking_id}>
+                  <tr>
                     <td style={td}><div style={{ fontWeight: 600 }}>{b.venue_name}</div><div style={{ fontSize: 12, color: '#5c6773' }}>{b.purpose}</div></td>
                     <td style={td}>{b.sessionCount > 1 ? `${b.sessionCount} sessions · ` : ''}{b.firstStart ? new Date(b.firstStart).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</td>
                     <td style={td}><StatusBadge status={b.status} /></td>
@@ -120,6 +121,15 @@ export default function MyBookingsScreen() {
                       )}
                     </td>
                   </tr>
+                  {/* Sent-back detail row — show coordinator's note and proposed schedule */}
+                  {b.status === 'SENT_BACK' && (
+                    <tr>
+                      <td colSpan={5} style={{ padding: '0 8px 12px', background: '#fffbeb' }}>
+                        <SentBackDetail bookingId={b.booking_id} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -798,6 +808,32 @@ function StatusBadge({ status }: { status: string }) {
     : status === 'SENT_BACK' ? 'Coordinator sent back — review required'
     : status;
   return <span style={{ font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4, ...s }}>{label}</span>;
+}
+function SentBackDetail({ bookingId }: { bookingId: string }) {
+  const [detail, setDetail] = useState<import('./api.js').BookingDetailFull | null>(null);
+  useEffect(() => { getBookingFull(bookingId).then(setDetail).catch(() => {}); }, [bookingId]);
+  if (!detail) return <div style={{ padding: '8px 10px', fontSize: 13, color: '#8a949f' }}>Loading coordinator note…</div>;
+
+  const proposed = detail.coordinator_proposed_sessions;
+  const note = detail.sent_back_note;
+
+  return (
+    <div style={{ border: '1px solid #fcd34d', borderRadius: 6, padding: '12px 14px', background: '#fffbeb', marginTop: 4 }}>
+      <div style={{ font: '600 13px var(--font-body)', color: '#92400e', marginBottom: 8 }}>📋 Coordinator's message</div>
+      {note && <p style={{ margin: '0 0 10px', fontSize: 14, color: '#78350f', lineHeight: 1.6 }}>{note}</p>}
+      {proposed && proposed.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ font: '600 12px var(--font-body)', color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Proposed alternative schedule</div>
+          {proposed.map((s) => (
+            <div key={s.sessionNo} style={{ fontSize: 13.5, color: '#78350f', marginBottom: 3 }}>
+              Session {s.sessionNo}: {new Date(s.startAt).toLocaleDateString('en-PK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {new Date(s.startAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })} – {new Date(s.endAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+            </div>
+          ))}
+          <p style={{ margin: '8px 0 0', fontSize: 13, color: '#9a6412' }}>If you accept, your booking will be resubmitted with this schedule.</p>
+        </div>
+      )}
+    </div>
+  );
 }
 function SentBackActions({ booking, onDone, onError }: { booking: MyBooking; onDone: (m: string) => void; onError: (m: string) => void }) {
   const [busy, setBusy] = useState(false);

@@ -732,7 +732,102 @@ export async function getBookingDetailFull(bookingId: string) {
   };
 }
 
-// VENUE-22: Super Admin can send back to Coordinator instead of rejecting outright.
+// ── Article availability for event planning (coordinator equipment selector) ──
+// For each equipment type in the booking's metadata.equipmentItems, returns:
+//   available:  articles with state=AVAILABLE (can be selected right now)
+//   onLoan:     articles ON_LOAN with agreed_return_at (so coordinator sees
+//               when they return; excluded if they won't be back before session)
+//   lockedElsewhere: articles already in event_equipment_allocation for
+//               approved events overlapping the session windows (cannot pick these)
+export async function getArticleAvailabilityForEvent(
+  bookingId: string,
+  sessionWindows: Array<{ startAt: string; endAt: string }>,
+  equipmentTypeIds: number[],
+) {
+  if (equipmentTypeIds.length === 0) return [];
+
+  // Get article IDs locked in other approved events overlapping our windows
+  const lockedArticleIds = new Set<string>();
+  for (const win of sessionWindows) {
+    const locked = await db
+      .selectFrom('event_equipment_allocation as ea')
+      .innerJoin('booking_session as bs', 'bs.session_id', 'ea.session_id')
+      .innerJoin('booking as b', 'b.booking_id', 'bs.booking_id')
+      .select('ea.equipment_type_id')
+      .where('b.status', '=', 'APPROVED')
+      .where('b.booking_id', '!=', bookingId)
+      .where('ea.equipment_type_id', 'in', equipmentTypeIds)
+      .where(sql<boolean>`lower(bs.slot) < ${win.endAt}::timestamptz AND upper(bs.slot) > ${win.startAt}::timestamptz`)
+      .execute();
+    locked.forEach((r) => lockedArticleIds.add(String(r.equipment_type_id)));
+  }
+
+  // Get all non-decommissioned articles for these types
+  const articles = await db
+    .selectFrom('article as a')
+    .innerJoin('equipment_type as et', 'et.equipment_type_id', 'a.equipment_type_id')
+    .select([
+      'a.article_id', 'a.barcode', 'a.state', 'a.current_condition_label',
+      'a.equipment_type_id', 'et.name as equipment_type_name', 'et.lending_unit',
+    ])
+    .where('a.equipment_type_id', 'in', equipmentTypeIds)
+    .where('a.state', '!=', 'DECOMMISSIONED')
+    .where('a.state', '!=', 'DAMAGED')
+    .orderBy('a.equipment_type_id')
+    .orderBy('a.barcode')
+    .execute();
+
+  // For ON_LOAN articles, get their expected return date
+  const onLoanIds = articles.filter((a) => a.state === 'ON_LOAN').map((a) => a.article_id);
+  const returnDates: Record<string, string> = {};
+  if (onLoanIds.length > 0) {
+    const loans = await db
+      .selectFrom('borrow_transaction_article as bta')
+      .innerJoin('borrow_transaction as bt', 'bt.borrow_txn_id', 'bta.borrow_txn_id')
+      .select(['bta.article_id', 'bt.agreed_return_at'])
+      .where('bta.article_id', 'in', onLoanIds)
+      .where('bt.status', '=', 'ACTIVE')
+      .execute();
+    loans.forEach((l) => { returnDates[l.article_id] = new Date(l.agreed_return_at).toISOString(); });
+  }
+
+  // Group by equipment type
+  const grouped: Record<number, {
+    equipment_type_id: number;
+    equipment_type_name: string;
+    lending_unit: string;
+    articles: Array<{
+      article_id: string;
+      barcode: string;
+      state: string;
+      condition: string;
+      expected_return_at: string | null;
+      locked_elsewhere: boolean;
+    }>;
+  }> = {};
+
+  for (const a of articles) {
+    if (!grouped[a.equipment_type_id]) {
+      grouped[a.equipment_type_id] = {
+        equipment_type_id: a.equipment_type_id,
+        equipment_type_name: a.equipment_type_name,
+        lending_unit: a.lending_unit,
+        articles: [],
+      };
+    }
+    grouped[a.equipment_type_id]!.articles.push({
+      article_id: a.article_id,
+      barcode: a.barcode,
+      state: a.state,
+      condition: a.current_condition_label,
+      expected_return_at: returnDates[a.article_id] ?? null,
+      locked_elsewhere: lockedArticleIds.has(String(a.equipment_type_id)),
+    });
+  }
+
+  return Object.values(grouped);
+}
+
 export async function returnForReevaluation(bookingId: string, superAdminId: string, note: string) {
   try {
     const b = await db.selectFrom('booking').select('status').where('booking_id', '=', bookingId).executeTakeFirst();
