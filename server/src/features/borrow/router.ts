@@ -98,6 +98,20 @@ borrowRouter.post('/lend/walkin/guest', ...coordinatorOnly, asyncHandler(async (
   res.status(201).json({ transaction: created });
 }));
 
+// Registered walk-in: coordinator enters enrollment number, system resolves
+// the profile, then lends directly (no prior platform request needed).
+borrowRouter.get('/lend/walkin/registered/resolve', ...coordinatorOnly, asyncHandler(async (req, res) => {
+  const enrollmentNo = req.query['enrollmentNo'];
+  if (typeof enrollmentNo !== 'string' || !enrollmentNo.trim()) throw badRequest('enrollmentNo query param required.');
+  res.json({ borrower: await svc.resolveRegisteredBorrower(enrollmentNo.trim()) });
+}));
+
+borrowRouter.post('/lend/walkin/registered', ...coordinatorOnly, asyncHandler(async (req, res) => {
+  const input = parse(v.lendWalkinRegisteredSchema, req.body);
+  const created = await svc.lendWalkinRegistered(input, req.user!.userId);
+  res.status(201).json({ transaction: created });
+}));
+
 borrowRouter.get('/active', ...staffRead, asyncHandler(async (_req, res) => {
   await svc.checkOverdueBorrows();
   res.json({ transactions: await svc.listActiveBorrows() });

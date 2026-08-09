@@ -194,8 +194,74 @@ describe('Platform path (BORROW-01..14)', () => {
 });
 
 // ═══════════════════════════ WALK-IN ═══════════════════════════
-describe('Walk-in path (BORROW-07 Path B — unregistered guests only, per the actor model; a registered student always uses the platform path)', () => {
-  it('T-608 BORROW-25: two guest transactions are independent (no shared identity/history)', async () => {
+describe('Walk-in path (BORROW-07 Path B — two sub-types: registered student or unregistered guest)', () => {
+  // ── registered walk-in ──
+  it('T-608 BORROW-07/08: coordinator can lend directly to a registered student (no prior request)', async () => {
+    const stu = await studentAgent(staff);
+    const typeId = await makeSingleType(staff, 'Volleyball');
+    const articleId = await addArticle(staff, typeId, bc(208));
+    const { start, end } = todayWindow();
+    const res = await coord.post('/api/borrow/lend/walkin/registered').send({
+      enrollmentNo: `84-024000-${600 + studentCounter}`,
+      equipmentTypeId: typeId, articleIds: [articleId],
+      agreedStartAt: start, agreedReturnAt: end,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.transaction.borrowTxnId).toBeTruthy();
+    expect(res.body.transaction.borrower.userId).toBe(stu.userId);
+  });
+
+  it('T-609 BORROW-02: registered walk-in blocked if student already has an active borrow', async () => {
+    const stu = await studentAgent(staff);
+    const typeId = await makeSingleType(staff, 'Basketball');
+    const a1 = await addArticle(staff, typeId, bc(209));
+    const a2 = await addArticle(staff, typeId, bc(210));
+    const { start, end } = todayWindow();
+    const enrollmentNo = `84-024000-${600 + studentCounter}`;
+    // first walk-in lend
+    await coord.post('/api/borrow/lend/walkin/registered').send({
+      enrollmentNo, equipmentTypeId: typeId, articleIds: [a1], agreedStartAt: start, agreedReturnAt: end,
+    });
+    // second walk-in while first is still ACTIVE — must be blocked
+    const second = await coord.post('/api/borrow/lend/walkin/registered').send({
+      enrollmentNo, equipmentTypeId: typeId, articleIds: [a2], agreedStartAt: start, agreedReturnAt: end,
+    });
+    expect(second.status).toBe(409);
+    expect(second.body.code).toBe('ACTIVE_BORROW');
+  });
+
+  it('T-610: resolve endpoint returns borrower details for a valid enrollment number', async () => {
+    const stu = await studentAgent(staff);
+    const enrollmentNo = `84-024000-${600 + studentCounter}`;
+    const res = await coord.get(`/api/borrow/lend/walkin/registered/resolve?enrollmentNo=${enrollmentNo}`);
+    expect(res.status).toBe(200);
+    expect(res.body.borrower.userId).toBe(stu.userId);
+    expect(res.body.borrower.fullName).toBeTruthy();
+  });
+
+  it('T-611: resolve endpoint returns 404 for an unknown enrollment number', async () => {
+    const res = await coord.get('/api/borrow/lend/walkin/registered/resolve?enrollmentNo=00-000000-000');
+    expect(res.status).toBe(404);
+  });
+
+  it('T-612: registered walk-in transaction appears in the student\'s active borrows', async () => {
+    const stu = await studentAgent(staff);
+    const typeId = await makeSingleType(staff, 'Handball');
+    const articleId = await addArticle(staff, typeId, bc(211));
+    const { start, end } = todayWindow();
+    const enrollmentNo = `84-024000-${600 + studentCounter}`;
+    await coord.post('/api/borrow/lend/walkin/registered').send({
+      enrollmentNo, equipmentTypeId: typeId, articleIds: [articleId], agreedStartAt: start, agreedReturnAt: end,
+    });
+    // transaction links to the student's borrower_user_id — it should show in listActive
+    const active = await coord.get('/api/borrow/active');
+    const found = (active.body.transactions as Array<{ borrower_name: string | null }>)
+      .some((t) => t.borrower_name !== null);
+    expect(found).toBe(true);
+  });
+
+  // ── unregistered guest ──
+  it('T-613 BORROW-25: two guest transactions are independent (no shared identity/history)', async () => {
     const typeId = await makeSingleType(staff, 'Badminton Shuttlecock Set');
     const a1 = await addArticle(staff, typeId, bc(208));
     const a2 = await addArticle(staff, typeId, bc(209));
@@ -228,7 +294,7 @@ describe('Return processing (BORROW-20..24)', () => {
     return { stu, typeId, articleId, txnId: lend.body.transaction.borrowTxnId as string, agreedReturnAt: end };
   }
 
-  it('T-610: scan mode with a high score returns GOOD, article AVAILABLE, txn COMPLETED', async () => {
+  it('T-615a: scan mode with a high score returns GOOD, article AVAILABLE, txn COMPLETED', async () => {
     const { articleId, txnId } = await lendOne('Netball', bc(212));
     const res = await coord.post(`/api/borrow/${txnId}/return`).send({ articleIds: [articleId], mode: 'scan', score: 90 });
     expect(res.status).toBe(200);
@@ -238,7 +304,7 @@ describe('Return processing (BORROW-20..24)', () => {
     expect(art?.current_condition_label).toBe('GOOD');
   });
 
-  it('T-611: manual mode with DAMAGED label raises a damage flag and COMPLETED_DAMAGED', async () => {
+  it('T-615b: manual mode with DAMAGED label raises a damage flag and COMPLETED_DAMAGED', async () => {
     const { articleId, txnId } = await lendOne('Frisbee', bc(213));
     const res = await coord.post(`/api/borrow/${txnId}/return`).send({ articleIds: [articleId], mode: 'manual', label: 'DAMAGED' });
     expect(res.body.status).toBe('COMPLETED_DAMAGED');
@@ -248,7 +314,7 @@ describe('Return processing (BORROW-20..24)', () => {
     expect(flag).toBeTruthy();
   });
 
-  it('T-612: dismiss mode returns the article to AVAILABLE without touching its condition, and warns staff', async () => {
+  it('T-615c: dismiss mode returns the article to AVAILABLE without touching its condition, and warns staff', async () => {
     const { articleId, txnId } = await lendOne('Dodgeball', bc(214));
     const before = await db.selectFrom('article').select('current_condition_label').where('article_id', '=', articleId).executeTakeFirst();
     const res = await coord.post(`/api/borrow/${txnId}/return`).send({ articleIds: [articleId], mode: 'dismiss' });
@@ -261,7 +327,7 @@ describe('Return processing (BORROW-20..24)', () => {
     expect(warn).toBeTruthy();
   });
 
-  it('T-613: a late return is COMPLETED_LATE and notifies both coordinator and student', async () => {
+  it('T-614a: a late return is COMPLETED_LATE and notifies both coordinator and student', async () => {
     const stu = await studentAgent(staff);
     const typeId = await makeSingleType(staff, 'Water Polo Ball');
     const articleId = await addArticle(staff, typeId, bc(210));
@@ -283,7 +349,7 @@ describe('Return processing (BORROW-20..24)', () => {
     expect(studentNotif).toBeTruthy();
   });
 
-  it('T-614: three late returns flags BAD_SPORT_FLAGGED for staff (informational only)', async () => {
+  it('T-616: three late returns flags BAD_SPORT_FLAGGED for staff (informational only)', async () => {
     const stu = await studentAgent(staff);
     const typeId = await makeSingleType(staff, 'Lacrosse Stick');
     for (let i = 0; i < 3; i++) {
@@ -306,7 +372,7 @@ describe('Return processing (BORROW-20..24)', () => {
     expect(flagged).toBeTruthy();
   });
 
-  it('T-614b: a student can view their own reputation but not another student\'s', async () => {
+  it('T-617: a student can view their own reputation but not another student\'s', async () => {
     const stuA = await studentAgent(staff);
     const stuB = await studentAgent(staff);
 

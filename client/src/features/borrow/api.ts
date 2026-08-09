@@ -44,6 +44,17 @@ export const lendWalkinGuest = (input: {
   equipmentTypeId: number; articleIds: string[]; agreedStartAt: string; agreedReturnAt: string;
 }) => api<{ transaction: { borrowTxnId: string } }>('/api/borrow/lend/walkin/guest', { method: 'POST', body: input });
 
+export interface RegisteredBorrower {
+  userId: string; fullName: string; email: string; enrollmentNo: string; department: string | null;
+}
+export const resolveRegisteredBorrower = (enrollmentNo: string) =>
+  api<{ borrower: RegisteredBorrower }>(`/api/borrow/lend/walkin/registered/resolve?enrollmentNo=${encodeURIComponent(enrollmentNo)}`);
+
+export const lendWalkinRegistered = (input: {
+  enrollmentNo: string;
+  equipmentTypeId: number; articleIds: string[]; agreedStartAt: string; agreedReturnAt: string;
+}) => api<{ transaction: { borrowTxnId: string; borrower: RegisteredBorrower } }>('/api/borrow/lend/walkin/registered', { method: 'POST', body: input });
+
 export const listActive = () => api<{ transactions: ActiveBorrow[] }>('/api/borrow/active');
 export const getTransaction = (id: string) => api<TxnDetail>(`/api/borrow/${id}`);
 export const returnArticles = (id: string, input: { articleIds: string[]; mode: 'scan' | 'manual' | 'dismiss'; score?: number; label?: string }) =>

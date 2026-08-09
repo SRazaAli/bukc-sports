@@ -12,7 +12,8 @@ import { PortalShell } from '../auth/PortalShell.js';
 import { listArticles, listTypes, type Article, type EquipmentType } from '../inventory/api.js';
 import {
   listQueue, approveRequest, rejectRequest, lendPlatform, lendWalkinGuest,
-  type QueueItem,
+  lendWalkinRegistered, resolveRegisteredBorrower,
+  type QueueItem, type RegisteredBorrower,
 } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
 
@@ -162,7 +163,7 @@ export default function BorrowQueueScreen() {
 
             {/* ── Walk-in ── */}
             <Panel
-              title="Walk-in Guest"
+              title="Walk-in Lending"
               action={
                 <button style={ghostBtn} onClick={() => setShowWalkin((v) => !v)}>
                   {showWalkin ? 'Close' : 'New Walk-in'}
@@ -170,8 +171,8 @@ export default function BorrowQueueScreen() {
               }
             >
               {showWalkin
-                ? <WalkinForm onDone={(m) => { flash.ok(m); setShowWalkin(false); }} onError={flash.err} />
-                : <p style={muted}>Lend equipment directly to an unregistered guest, no prior request needed.</p>}
+                ? <WalkinFormTabbed onDone={(m) => { flash.ok(m); setShowWalkin(false); }} onError={flash.err} />
+                : <p style={muted}>Lend equipment directly to a registered student or unregistered guest — no prior platform request needed.</p>}
             </Panel>
           </>
         )}
@@ -463,9 +464,156 @@ function ApproveAllButton({ queue, onDone, onError }: {
   );
 }
 
-// ─── Walk-in form ─────────────────────────────────────────────────────────────
+// ─── Walk-in tabbed wrapper ──────────────────────────────────────────────────
 
-function WalkinForm({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
+function WalkinFormTabbed({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
+  const [tab, setTab] = useState<'registered' | 'guest'>('registered');
+  return (
+    <div>
+      <div style={tabBar}>
+        <button
+          style={tab === 'registered' ? activeTab : inactiveTab}
+          onClick={() => setTab('registered')}
+        >
+          Registered Student
+        </button>
+        <button
+          style={tab === 'guest' ? activeTab : inactiveTab}
+          onClick={() => setTab('guest')}
+        >
+          Unregistered Guest
+        </button>
+      </div>
+      {tab === 'registered'
+        ? <WalkinRegisteredForm onDone={onDone} onError={onError} />
+        : <WalkinGuestForm onDone={onDone} onError={onError} />}
+    </div>
+  );
+}
+
+// ─── Registered walk-in form ──────────────────────────────────────────────────
+
+function WalkinRegisteredForm({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
+  const [types, setTypes] = useState<EquipmentType[]>([]);
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [typeId, setTypeId] = useState(0);
+  const [articleIds, setArticleIds] = useState<string[]>([]);
+  const [enrollmentNo, setEnrollmentNo] = useState('');
+  const [resolvedBorrower, setResolvedBorrower] = useState<RegisteredBorrower | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [startAt, setStartAt] = useState('');
+  const [endAt, setEndAt] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    listTypes().then((r) => setTypes(r.types)).catch(() => onError('Could not load equipment types.'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!typeId) { setArticles([]); setArticleIds([]); return; }
+    listArticles({ equipmentTypeId: typeId, state: 'AVAILABLE' })
+      .then((r) => setArticles(r.articles))
+      .catch(() => onError('Could not load articles.'));
+  }, [typeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function resolve() {
+    if (!enrollmentNo.trim()) return;
+    setResolving(true);
+    setResolvedBorrower(null);
+    try {
+      const r = await resolveRegisteredBorrower(enrollmentNo.trim());
+      setResolvedBorrower(r.borrower);
+    } catch (e) { onError(errMsg(e)); } finally { setResolving(false); }
+  }
+
+  function toggleArticle(id: string) {
+    setArticleIds((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
+  }
+
+  async function submit() {
+    if (!resolvedBorrower) { onError('Look up a student first.'); return; }
+    if (!typeId) { onError('Select equipment type.'); return; }
+    if (articleIds.length === 0) { onError('Select at least one article.'); return; }
+    setBusy(true);
+    try {
+      await lendWalkinRegistered({
+        enrollmentNo: resolvedBorrower.enrollmentNo,
+        equipmentTypeId: typeId, articleIds,
+        agreedStartAt: new Date(startAt).toISOString(),
+        agreedReturnAt: new Date(endAt).toISOString(),
+      });
+      onDone(`Walk-in lend recorded for ${resolvedBorrower.fullName}.`);
+    } catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={walkinGrid}>
+      {/* Enrollment lookup */}
+      <div style={{ ...formField, gridColumn: '1 / -1' }}>
+        <label style={fieldLabel}>Enrollment number</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            style={{ ...fieldInput, flex: 1 }}
+            placeholder="84-024000-123"
+            value={enrollmentNo}
+            onChange={(e) => { setEnrollmentNo(e.target.value); setResolvedBorrower(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') void resolve(); }}
+          />
+          <button style={resolveBtn} disabled={resolving || !enrollmentNo.trim()} onClick={() => void resolve()}>
+            {resolving ? 'Looking up…' : 'Look up'}
+          </button>
+        </div>
+        {resolvedBorrower && (
+          <div style={resolvedCard}>
+            <span style={resolvedName}>{resolvedBorrower.fullName}</span>
+            <span style={resolvedDetail}>{resolvedBorrower.enrollmentNo} · {resolvedBorrower.department ?? 'N/A'}</span>
+            <span style={resolvedDetail}>{resolvedBorrower.email}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Equipment */}
+      <div style={formField}>
+        <label style={fieldLabel}>Equipment type</label>
+        <select style={fieldInput} value={typeId} onChange={(e) => setTypeId(Number(e.target.value))}>
+          <option value={0}>— select —</option>
+          {types.map((t) => <option key={t.equipment_type_id} value={t.equipment_type_id}>{t.name}</option>)}
+        </select>
+      </div>
+      <div style={formField} />
+      {articles.length > 0 && (
+        <div style={{ ...formField, gridColumn: '1 / -1' }}>
+          <label style={fieldLabel}>Articles</label>
+          <div style={articleList}>
+            {articles.map((a) => (
+              <label key={a.article_id} style={articleRow}>
+                <input type="checkbox" checked={articleIds.includes(a.article_id)} onChange={() => toggleArticle(a.article_id)} />
+                {a.barcode}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={formField}>
+        <label style={fieldLabel}>Start</label>
+        <input type="datetime-local" style={fieldInput} value={startAt} onChange={(e) => setStartAt(e.target.value)} />
+      </div>
+      <div style={formField}>
+        <label style={fieldLabel}>Return by</label>
+        <input type="datetime-local" style={fieldInput} value={endAt} onChange={(e) => setEndAt(e.target.value)} />
+      </div>
+      <div style={{ gridColumn: '1 / -1' }}>
+        <button style={busy ? { ...approveBtn, opacity: 0.6 } : approveBtn} disabled={busy || !resolvedBorrower} onClick={() => void submit()}>
+          {busy ? 'Recording…' : 'Record Walk-in Lend'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Guest walk-in form ───────────────────────────────────────────────────────
+
+function WalkinGuestForm({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
   const [types, setTypes] = useState<EquipmentType[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [typeId, setTypeId] = useState(0);
@@ -548,7 +696,7 @@ function WalkinForm({ onDone, onError }: { onDone: (m: string) => void; onError:
         Faculty member
       </label>
       <div style={{ gridColumn: '1 / -1' }}>
-        <button style={busy ? { ...approveBtn, opacity: 0.6 } : approveBtn} disabled={busy} onClick={submit}>
+        <button style={busy ? { ...approveBtn, opacity: 0.6 } : approveBtn} disabled={busy} onClick={() => void submit()}>
           {busy ? 'Recording…' : 'Record Walk-in Lend'}
         </button>
       </div>
@@ -648,3 +796,14 @@ const walkinGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 
 const formField: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4 };
 const fieldLabel: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: '#374151' };
 const fieldInput: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14 };
+
+// Walk-in tabs
+const tabBar: React.CSSProperties = { display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid #e5e7eb' };
+const activeTab: React.CSSProperties = { background: 'none', border: 'none', borderBottom: '2px solid #1d4ed8', color: '#1d4ed8', fontWeight: 700, fontSize: 13, padding: '8px 18px', cursor: 'pointer', marginBottom: -1 };
+const inactiveTab: React.CSSProperties = { background: 'none', border: 'none', borderBottom: '2px solid transparent', color: '#6b7280', fontWeight: 500, fontSize: 13, padding: '8px 18px', cursor: 'pointer', marginBottom: -1 };
+
+// Registered borrower lookup
+const resolveBtn: React.CSSProperties = { background: '#374151', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' };
+const resolvedCard: React.CSSProperties = { marginTop: 8, padding: '10px 14px', borderRadius: 7, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 2 };
+const resolvedName: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: '#065f46' };
+const resolvedDetail: React.CSSProperties = { fontSize: 12, color: '#047857' };

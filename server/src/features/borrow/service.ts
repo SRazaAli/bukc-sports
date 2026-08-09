@@ -282,6 +282,79 @@ export async function lendWalkinGuest(input: {
   } catch (e) { throw mapDbError(e); }
 }
 
+// ── registered walk-in lookup (BORROW-08) ──
+// Coordinator types an enrollment number; we resolve it to an ACTIVE student
+// profile and return enough display info for the UI to confirm before lending.
+export async function resolveRegisteredBorrower(enrollmentNo: string) {
+  const row = await db.selectFrom('student_profile as sp')
+    .innerJoin('app_user as u', 'u.user_id', 'sp.user_id')
+    .select(['u.user_id', 'u.full_name', 'u.email', 'sp.enrollment_no', 'sp.department', 'u.status'])
+    .where('sp.enrollment_no', '=', enrollmentNo)
+    .executeTakeFirst();
+
+  if (!row) throw notFound('No student found with that enrollment number.');
+  if (row.status !== 'ACTIVE') {
+    throw conflict('This student account is not active and cannot borrow equipment.', 'INACTIVE');
+  }
+  return {
+    userId: row.user_id,
+    fullName: row.full_name,
+    email: row.email,
+    enrollmentNo: row.enrollment_no,
+    department: row.department,
+  };
+}
+
+export async function lendWalkinRegistered(input: {
+  enrollmentNo: string;
+  equipmentTypeId: number; articleIds: string[]; agreedStartAt: string; agreedReturnAt: string;
+}, coordinatorId: string) {
+  try {
+    // Resolve borrower — must be ACTIVE.
+    const borrower = await resolveRegisteredBorrower(input.enrollmentNo);
+
+    // BORROW-02: one active borrow at a time (the DB unique index
+    // uq_one_active_borrow_registered already enforces this; check here first
+    // to return a clear message instead of a raw constraint error).
+    const existing = await db.selectFrom('borrow_transaction')
+      .select('borrow_txn_id')
+      .where('borrower_user_id', '=', borrower.userId)
+      .where('status', 'in', ['ACTIVE', 'OVERDUE', 'INCOMPLETE'])
+      .executeTakeFirst();
+    if (existing) {
+      throw conflict('This student already has an active borrow. It must be returned before lending again.', 'ACTIVE_BORROW');
+    }
+
+    // BORROW-14: no lending if zero stock.
+    const avail = await db.selectFrom('v_article_availability').select('available_units')
+      .where('equipment_type_id', '=', input.equipmentTypeId).executeTakeFirst();
+    if (!avail || Number(avail.available_units) <= 0) {
+      throw conflict('No units of this equipment are currently available.', 'NO_STOCK');
+    }
+
+    const txnId = await db.transaction().execute(async (trx) => {
+      const txn = await trx.insertInto('borrow_transaction').values({
+        path: 'WALK_IN',
+        borrower_user_id: borrower.userId,
+        equipment_type_id: input.equipmentTypeId,
+        agreed_start_at: input.agreedStartAt,
+        agreed_return_at: input.agreedReturnAt,
+        lent_by: coordinatorId,
+      }).returning('borrow_txn_id').executeTakeFirstOrThrow();
+
+      for (const articleId of input.articleIds) {
+        await trx.insertInto('borrow_transaction_article').values({
+          borrow_txn_id: txn.borrow_txn_id, article_id: articleId, selection_method: 'MANUAL_SELECT',
+        }).execute();
+      }
+      await markArticlesOnLoan(trx, input.articleIds);
+      return txn.borrow_txn_id;
+    });
+
+    return { borrowTxnId: txnId, borrower };
+  } catch (e) { throw mapDbError(e); }
+}
+
 export async function listActiveBorrows() {
   return db.selectFrom('borrow_transaction as bt')
     .innerJoin('equipment_type as et', 'et.equipment_type_id', 'bt.equipment_type_id')

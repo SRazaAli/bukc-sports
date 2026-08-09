@@ -39,6 +39,12 @@ export const lendWalkinGuestSchema = walkinCommon.extend({
   guestIsFaculty: z.boolean(),
 });
 
+// BORROW-08: registered walk-in — coordinator supplies enrollment number,
+// system resolves to a verified ACTIVE user profile and links the transaction.
+export const lendWalkinRegisteredSchema = walkinCommon.extend({
+  enrollmentNo: z.string().min(1).max(60),
+});
+
 // BORROW-22: on return, acceptable / damaged / trigger-a-scan / dismiss.
 export const returnSchema = z.object({
   articleIds: z.array(z.string().uuid()).min(1).max(2),
