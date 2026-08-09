@@ -177,7 +177,12 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
     : detail.sessions;
 
   const hasConflicts = Object.values(sessionConflicts).some((c) => c.length > 0);
-  const equipStep3Pass = equipmentSupport === 'SELF' || equipChecked;
+  const hasSelectionMismatch = equipmentSupport !== 'SELF' && requestedEquipment.some((item) => {
+    const coordQty = equipQty[item.equipmentTypeId] ?? item.quantity;
+    const selCount = (selectedArticles[item.equipmentTypeId] ?? []).length;
+    return coordQty > 0 && selCount !== coordQty;
+  });
+  const equipStep3Pass = equipmentSupport === 'SELF' || (equipChecked && !hasSelectionMismatch);
 
   const STEPS = [
     { n: 1, label: 'Booking Details', pass: true },
@@ -264,7 +269,20 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
           <button
             style={{ ...primaryBtn, opacity: STEPS[step - 1]!.pass ? 1 : 0.4, cursor: STEPS[step - 1]!.pass ? 'pointer' : 'not-allowed' }}
             disabled={!STEPS[step - 1]!.pass}
-            onClick={() => setStep((s) => (s + 1) as StepN)}>
+            onClick={async () => {
+              // Auto-save equipment plan when leaving step 3
+              if (step === 3 && equipmentSupport !== 'SELF' && requestedEquipment.length > 0) {
+                const allocations: Array<{ requestSessionId: string; equipmentTypeId: number; quantity: number }> = [];
+                for (const s of effectiveSessions) {
+                  for (const item of requestedEquipment) {
+                    const qty = equipQty[item.equipmentTypeId] ?? 0;
+                    if (qty > 0) allocations.push({ requestSessionId: s.request_session_id, equipmentTypeId: item.equipmentTypeId, quantity: qty });
+                  }
+                }
+                try { await planAllocation(detail.booking_id, allocations); } catch { /* non-fatal */ }
+              }
+              setStep((s) => (s + 1) as StepN);
+            }}>
             Next →
           </button>
         )}
@@ -544,10 +562,8 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
   onError: (m: string) => void;
 }) {
   const [checking, setChecking] = useState(false);
-  const [savingPlan, setSavingPlan] = useState(false);
-  const [planNotice, setPlanNotice] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
   const isChecked = equipAvail.length > 0 || articleGroups.length > 0;
-
   const availMap = Object.fromEntries(equipAvail.map((a) => [a.equipment_type_id, a]));
 
   async function runCheck() {
@@ -562,7 +578,6 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
       ]);
       onEquipAvailChange(availRes.availability);
       onArticleGroupsChange(artRes.groups);
-      // Init selected articles to empty for each type
       const initSel: Record<number, string[]> = {};
       typeIds.forEach((id) => { initSel[id] = selectedArticles[id] ?? []; });
       onSelectedArticlesChange(initSel);
@@ -572,44 +587,18 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
   function toggleArticle(typeId: number, articleId: string) {
     const cur = selectedArticles[typeId] ?? [];
     const maxQty = equipQty[typeId] ?? 0;
-    let next: string[];
-    if (cur.includes(articleId)) {
-      next = cur.filter((id) => id !== articleId);
-    } else {
-      if (cur.length >= maxQty) return; // cap at coordinator qty
-      next = [...cur, articleId];
-    }
+    const next = cur.includes(articleId)
+      ? cur.filter((id) => id !== articleId)
+      : cur.length >= maxQty ? cur : [...cur, articleId];
     onSelectedArticlesChange({ ...selectedArticles, [typeId]: next });
   }
 
   function setQty(typeId: number, val: number) {
-    const studentReq = requestedEquipment.find((e) => e.equipmentTypeId === typeId)?.quantity ?? 0;
-    const capped = Math.min(studentReq, Math.max(0, val));
-    // If reducing, deselect excess articles
+    const max = requestedEquipment.find((e) => e.equipmentTypeId === typeId)?.quantity ?? 0;
+    const capped = Math.min(max, Math.max(0, val));
     const curSel = selectedArticles[typeId] ?? [];
-    if (curSel.length > capped) {
-      onSelectedArticlesChange({ ...selectedArticles, [typeId]: curSel.slice(0, capped) });
-    }
+    if (curSel.length > capped) onSelectedArticlesChange({ ...selectedArticles, [typeId]: curSel.slice(0, capped) });
     onEquipQtyChange({ ...equipQty, [typeId]: capped });
-  }
-
-  async function saveEquipmentPlan() {
-    // Build allocations from selected articles per session
-    const allocations: Array<{ requestSessionId: string; equipmentTypeId: number; quantity: number }> = [];
-    for (const s of effectiveSessions) {
-      for (const item of requestedEquipment) {
-        const qty = equipQty[item.equipmentTypeId] ?? 0;
-        if (qty > 0) allocations.push({ requestSessionId: s.request_session_id, equipmentTypeId: item.equipmentTypeId, quantity: qty });
-      }
-    }
-    if (allocations.length === 0) { onError('Set at least one equipment quantity.'); return; }
-    setSavingPlan(true); setPlanNotice(null);
-    try {
-      const res = await planAllocation(bookingId, allocations);
-      setPlanNotice(res.shortfalls.length > 0
-        ? `Plan saved with shortfalls: ${res.shortfalls.map((s) => `${s.equipmentTypeId}: need ${s.requested}, have ${s.available}`).join('; ')}`
-        : 'Equipment plan saved.');
-    } catch (e) { onError(errMsg(e)); } finally { setSavingPlan(false); }
   }
 
   if (equipmentSupport === 'SELF') {
@@ -630,15 +619,13 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
   return (
     <div>
       <h3 style={stepTitle}>Step 3 — Equipment Allocation</h3>
-
       <div style={{ ...infoBox, marginBottom: 16 }}>
-        <strong>Session date{sessionDates.length > 1 ? 's' : ''}:</strong> {sessionDates.map((d) => fmtDate(d + 'T00:00:00')).join(', ')}.
-        {' '}Equipment is locked 24h before each session. The inventory check shows availability after accounting for other approved events on these dates.
+        <strong>Session date{sessionDates.length > 1 ? 's' : ''}:</strong>{' '}
+        {sessionDates.map((d) => fmtDate(d + 'T00:00:00')).join(', ')}.
         {effectiveSessions.length > 1 && ' Same quantities apply across all sessions.'}
       </div>
-
       <button style={primaryBtn} disabled={checking} onClick={runCheck}>
-        {checking ? 'Checking inventory…' : isChecked ? '🔄 Re-check' : '📦 Check Inventory & Select Articles'}
+        {checking ? 'Checking…' : isChecked ? '🔄 Re-check' : '📦 Check Inventory & Select Articles'}
       </button>
 
       {isChecked && (
@@ -650,88 +637,71 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
             const isShort = avail && avail.net_available < coordQty;
             const isBelowReq = coordQty < studentReq;
             const group = articleGroups.find((g) => g.equipment_type_id === item.equipmentTypeId);
-            const selArticles = selectedArticles[item.equipmentTypeId] ?? [];
+            const selArts = selectedArticles[item.equipmentTypeId] ?? [];
+            const selMismatch = coordQty > 0 && selArts.length !== coordQty;
+            const isCollapsed = collapsed[item.equipmentTypeId] ?? false;
 
             return (
-              <div key={item.equipmentTypeId} style={{ marginBottom: 16, border: `1px solid ${isShort ? '#fca5a5' : '#e5e7eb'}`, borderRadius: 8, overflow: 'hidden' }}>
-                {/* Header row */}
-                <div style={{ padding: '10px 14px', background: '#f7f9fb', borderBottom: '1px solid #e5e7eb', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center' }}>
-                  <div>
-                    <span style={{ font: '600 14px var(--font-body)', color: '#26485f' }}>{item.name}</span>
-                    {group && <span style={{ fontSize: 12, color: '#5c6773', marginLeft: 6 }}>({group.lending_unit.toLowerCase()})</span>}
-                  </div>
+              <div key={item.equipmentTypeId} style={{ marginBottom: 12, border: `1px solid ${isShort || selMismatch ? '#fca5a5' : '#e5e7eb'}`, borderRadius: 8, overflow: 'hidden' }}>
+                {/* Collapsible header */}
+                <div style={{ padding: '10px 14px', background: '#f7f9fb', borderBottom: isCollapsed ? 'none' : '1px solid #e5e7eb', cursor: 'pointer', display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: 12 }}
+                  onClick={() => setCollapsed((c) => ({ ...c, [item.equipmentTypeId]: !isCollapsed }))}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ font: '600 14px var(--font-body)', color: '#26485f' }}>{item.name}</span>
+                    {group && <span style={{ fontSize: 12, color: '#5c6773' }}>({group.lending_unit.toLowerCase()})</span>}
+                    <span style={{ fontSize: 12, fontWeight: 600, color: selMismatch ? '#c0392b' : selArts.length === coordQty && coordQty > 0 ? '#1f8a4c' : '#5c6773' }}>
+                      {selArts.length}/{coordQty} selected{selMismatch ? ' — must match qty' : ''}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={(e) => e.stopPropagation()}>
                     <span style={{ fontSize: 12, color: '#5c6773' }}>Qty (max {studentReq}):</span>
                     <button style={qtyBtn} onClick={() => setQty(item.equipmentTypeId, coordQty - 1)}>−</button>
-                    <span style={{ font: '600 16px var(--font-body)', minWidth: 24, textAlign: 'center' }}>{coordQty}</span>
+                    <span style={{ font: '600 15px var(--font-body)', minWidth: 24, textAlign: 'center' }}>{coordQty}</span>
                     <button style={qtyBtn} onClick={() => setQty(item.equipmentTypeId, coordQty + 1)}>+</button>
                   </div>
+                  <span style={{ fontSize: 16, color: '#5c6773', userSelect: 'none' }}>{isCollapsed ? '▶' : '▼'}</span>
                 </div>
 
-                {/* Availability summary */}
-                <div style={{ padding: '8px 14px', display: 'flex', gap: 20, fontSize: 13, borderBottom: '1px solid #f0f0f0' }}>
-                  <span>Available now: <strong>{avail?.available_now ?? '—'}</strong></span>
-                  <span style={{ color: (avail?.locked_on_date ?? 0) > 0 ? '#9a6412' : '#5c6773' }}>Locked on date(s): <strong>{avail?.locked_on_date ?? '—'}</strong></span>
-                  <span style={{ color: isShort ? '#b3352b' : '#1f7a45', fontWeight: 700 }}>Net available: {avail?.net_available ?? '—'}</span>
-                </div>
-
-                {/* Warnings */}
-                {isBelowReq && (
-                  <div style={{ padding: '6px 14px', background: '#fdf1e3', borderBottom: '1px solid #f0e4b8', fontSize: 13, color: '#9a6412' }}>
-                    ⚠ Allocating {coordQty} of {studentReq} requested — student requested {studentReq}. The shortfall will be noted in the send-back.
-                  </div>
-                )}
-                {isShort && (
-                  <div style={{ padding: '6px 14px', background: '#fef2f2', borderBottom: '1px solid #fca5a5', fontSize: 13, color: '#991b1b' }}>
-                    ⚠ Net available ({avail?.net_available}) is less than coordinator quantity ({coordQty}). Reduce the quantity or send back.
-                  </div>
-                )}
-
-                {/* Article picker */}
-                {group && (
-                  <div style={{ padding: '10px 14px' }}>
-                    <div style={{ font: '500 12px var(--font-body)', color: '#26485f', marginBottom: 8 }}>
-                      Select articles to allocate ({selArticles.length}/{coordQty} selected):
+                {!isCollapsed && (
+                  <>
+                    <div style={{ padding: '8px 14px', display: 'flex', gap: 20, fontSize: 13, borderBottom: '1px solid #f0f0f0' }}>
+                      <span>Available now: <strong>{avail?.available_now ?? '—'}</strong></span>
+                      <span style={{ color: (avail?.locked_on_date ?? 0) > 0 ? '#9a6412' : '#5c6773' }}>Locked on date(s): <strong>{avail?.locked_on_date ?? '—'}</strong></span>
+                      <span style={{ color: isShort ? '#b3352b' : '#1f7a45', fontWeight: 700 }}>Net available: {avail?.net_available ?? '—'}</span>
                     </div>
-                    <div style={{ display: 'grid', gap: 6 }}>
-                      {group.articles.map((art) => {
-                        const isLocked = art.locked_elsewhere;
-                        const isSelected = selArticles.includes(art.article_id);
-                        const canSelect = !isLocked && (isSelected || selArticles.length < coordQty);
-                        return (
-                          <label key={art.article_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 6, border: `1px solid ${isSelected ? '#26485f' : '#e5e7eb'}`, background: isLocked ? '#f9fafb' : isSelected ? '#f0f4f8' : '#fff', cursor: isLocked || (!canSelect && !isSelected) ? 'not-allowed' : 'pointer', opacity: isLocked ? 0.55 : 1 }}>
-                            <input type="checkbox" checked={isSelected} disabled={isLocked || (!canSelect && !isSelected)} onChange={() => toggleArticle(item.equipmentTypeId, art.article_id)} />
-                            <span style={{ font: '500 13px var(--font-mono)', color: '#26485f' }}>{art.barcode}</span>
-                            <span style={{ ...stateTag(art.state), fontSize: 11 }}>{art.state === 'ON_LOAN' ? 'On Loan' : 'Available'}</span>
-                            {art.state === 'ON_LOAN' && art.expected_return_at && (
-                              <span style={{ fontSize: 12, color: '#9a6412' }}>returns {fmtDT(art.expected_return_at)}</span>
-                            )}
-                            {isLocked && <span style={{ fontSize: 12, color: '#b3352b' }}>locked by another event</span>}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
+                    {isBelowReq && <div style={{ padding: '6px 14px', background: '#fdf1e3', borderBottom: '1px solid #f0e4b8', fontSize: 13, color: '#9a6412' }}>⚠ Allocating {coordQty} of {studentReq} requested — shortfall noted in send-back.</div>}
+                    {isShort && <div style={{ padding: '6px 14px', background: '#fef2f2', borderBottom: '1px solid #fca5a5', fontSize: 13, color: '#991b1b' }}>⚠ Net available ({avail?.net_available}) &lt; coordinator qty ({coordQty}). Reduce or send back.</div>}
+                    {selMismatch && <div style={{ padding: '6px 14px', background: '#fef2f2', borderBottom: '1px solid #fca5a5', fontSize: 13, color: '#991b1b' }}>⚠ Select exactly {coordQty} article{coordQty !== 1 ? 's' : ''} ({selArts.length} currently selected).</div>}
+                    {group && (
+                      <div style={{ padding: '10px 14px' }}>
+                        <div style={{ font: '500 12px var(--font-body)', color: '#26485f', marginBottom: 8 }}>Select articles to allocate ({selArts.length}/{coordQty}):</div>
+                        <div style={{ display: 'grid', gap: 6 }}>
+                          {group.articles.map((art) => {
+                            const isLocked = art.locked_elsewhere;
+                            const isSelected = selArts.includes(art.article_id);
+                            const canSelect = !isLocked && (isSelected || selArts.length < coordQty);
+                            return (
+                              <label key={art.article_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 6, border: `1px solid ${isSelected ? '#26485f' : '#e5e7eb'}`, background: isLocked ? '#f9fafb' : isSelected ? '#f0f4f8' : '#fff', cursor: isLocked || (!canSelect && !isSelected) ? 'not-allowed' : 'pointer', opacity: isLocked ? 0.55 : 1 }}>
+                                <input type="checkbox" checked={isSelected} disabled={isLocked || (!canSelect && !isSelected)} onChange={() => toggleArticle(item.equipmentTypeId, art.article_id)} />
+                                <span style={{ font: '500 13px var(--font-mono)', color: '#26485f' }}>{art.barcode}</span>
+                                <span style={{ ...stateTag(art.state), fontSize: 11 }}>{art.state === 'ON_LOAN' ? 'On Loan' : 'Available'}</span>
+                                {art.state === 'ON_LOAN' && art.expected_return_at && <span style={{ fontSize: 12, color: '#9a6412' }}>returns {fmtDT(art.expected_return_at)}</span>}
+                                {isLocked && <span style={{ fontSize: 12, color: '#b3352b' }}>locked by another event</span>}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             );
           })}
-
-          {planNotice && <div style={planNotice.includes('shortfall') ? box.err : box.ok}>{planNotice}</div>}
-
-          {hasShortfall && (
-            <div style={{ ...box.err, marginTop: 8 }}>
-              ⚠ Insufficient net availability for some types. Reduce quantities or send back to the student.
-            </div>
-          )}
-
-          <button style={acceptBtn} disabled={savingPlan} onClick={saveEquipmentPlan}>
-            {savingPlan ? 'Saving…' : '💾 Save Equipment Plan'}
-          </button>
+          {hasShortfall && <div style={{ ...box.err, marginTop: 8 }}>⚠ Insufficient availability for some types. Reduce quantities or send back.</div>}
         </div>
       )}
-
-      {!isChecked && <p style={{ fontSize: 13, color: '#8a949f', marginTop: 12 }}>Run the inventory check to see article-level availability and select which items to allocate.</p>}
+      {!isChecked && <p style={{ fontSize: 13, color: '#8a949f', marginTop: 12 }}>Run the inventory check to see article availability and select which items to allocate.</p>}
     </div>
   );
 }
