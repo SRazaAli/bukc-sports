@@ -47,7 +47,7 @@ function mapDbError(e: unknown): AppError {
 
 export interface SessionInput {
   sessionNo: number; requestedStartAt: string; requestedEndAt: string;
-  teamName: string; participantDetails?: string;
+  teamName?: string; participantDetails?: string;
 }
 
 // ── notifications ──
@@ -250,9 +250,9 @@ export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXT
   const meta = input.metadata;
   let purposeSummary: string;
   if (meta.bookingType === 'INTER_UNIVERSITY') {
-    purposeSummary = `Inter-University ${meta.matchFormat === 'FRIENDLY' ? 'Friendly' : meta.matchFormat} — ${meta.sport} vs ${meta.visitingUniversity}`;
+    purposeSummary = `Inter-University ${meta.matchFormat} — ${meta.sport} vs ${meta.visitingUniversity}`;
   } else {
-    purposeSummary = `Internal ${meta.matchFormat === 'FRIENDLY' ? 'Match' : meta.matchFormat} — ${meta.sport}: ${meta.teamAName}${meta.teamBName ? ` vs ${meta.teamBName}` : ''}`;
+    purposeSummary = `Internal ${meta.matchFormat} — ${meta.sport}: ${meta.teamAName} vs ${meta.teamBName}`;
   }
 
   // VENUE-07: one active booking (PENDING/FORWARDED) at a time.
@@ -284,7 +284,7 @@ export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXT
         await trx.insertInto('booking_session_request').values({
           booking_id: row.booking_id, session_no: s.sessionNo,
           requested_start_at: s.requestedStartAt, requested_end_at: s.requestedEndAt,
-          team_name: s.teamName || sessionTeamName,
+          team_name: s.teamName || sessionTeamName || '',
           participant_details: s.participantDetails ?? null,
         }).execute();
       }
@@ -330,7 +330,7 @@ export async function initiateAcademicEvent(coordinatorId: string, input: {
         await trx.insertInto('booking_session_request').values({
           booking_id: row.booking_id, session_no: s.sessionNo,
           requested_start_at: s.requestedStartAt, requested_end_at: s.requestedEndAt,
-          team_name: s.teamName, participant_details: s.participantDetails ?? null,
+          team_name: s.teamName ?? '', participant_details: s.participantDetails ?? null,
         }).execute();
       }
 

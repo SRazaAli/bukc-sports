@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-// VENUE-01: casual-vs-official thresholds surfaced as guidance, not hard blocks.
 export const INDOOR_THRESHOLD = 6;
 export const OUTDOOR_THRESHOLD = 10;
 
@@ -32,21 +31,27 @@ export const updateVenueSchema = z.object({
   availabilityStatus: z.enum(['AVAILABLE', 'UNDER_MAINTENANCE', 'CLOSED']).optional(),
 }).refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
-// ── Session schema (shared by all booking types) ──
+// ── Session schema ──
 const sessionSchema = z.object({
   sessionNo: z.number().int().min(1).max(30),
   requestedStartAt: z.string().datetime(),
   requestedEndAt: z.string().datetime(),
-  teamName: z.string().min(1).max(120),
+  teamName: z.string().max(120).optional().default(''),
   participantDetails: z.string().max(2000).optional(),
 }).refine((v) => new Date(v.requestedEndAt) > new Date(v.requestedStartAt), {
   message: 'End time must be after start time', path: ['requestedEndAt'],
 });
 
-// ── Player entry (BUKC roster) ──
+// ── Player entries ──
 const bukcPlayerSchema = z.object({
   enrollmentNo: z.string().min(1).max(30),
   fullName: z.string().min(2).max(100),
+});
+const visitingPlayerSchema = z.object({ fullName: z.string().min(2).max(100) });
+const equipmentItemSchema = z.object({
+  equipmentTypeId: z.number().int().positive(),
+  name: z.string().min(1).max(120),
+  quantity: z.number().int().positive(),
 });
 
 // ── Inter-University metadata ──
@@ -55,17 +60,24 @@ const interUniversityMetaSchema = z.object({
   sport: z.string().min(1).max(80),
   eventFormat: z.enum(['SINGLE_MATCH', 'TOURNAMENT']),
   matchFormat: z.enum(['FRIENDLY', 'LEAGUE', 'KNOCKOUT', 'ROUND_ROBIN']),
+  // BUKC team
+  bukcTeamName: z.string().min(1).max(120),
+  bukcHasCaptain: z.boolean(),
+  bukcCaptainName: z.string().min(2).max(100).optional(),
+  bukcCaptainEnrollment: z.string().min(1).max(30).optional(),
+  bukcCaptainContact: z.string().min(6).max(20).optional(),
+  bukcPlayers: z.array(bukcPlayerSchema).min(1).max(30),
+  // Visiting team
   visitingUniversity: z.string().min(2).max(150),
   visitingCity: z.string().min(1).max(80),
   visitingTeamName: z.string().min(1).max(120),
-  visitingCaptainName: z.string().min(2).max(100),
-  visitingCaptainContact: z.string().min(6).max(20),
-  bukcTeamName: z.string().min(1).max(120),
-  bukcCaptainName: z.string().min(2).max(100),
-  bukcCaptainEnrollment: z.string().min(1).max(30),
-  bukcCaptainContact: z.string().min(6).max(20),
-  bukcPlayers: z.array(bukcPlayerSchema).min(1).max(30),
+  visitingHasCaptain: z.boolean(),
+  visitingCaptainName: z.string().min(2).max(100).optional(),
+  visitingCaptainContact: z.string().min(6).max(20).optional(),
+  visitingPlayers: z.array(visitingPlayerSchema).min(1).max(30),
+  // Equipment
   equipmentSupport: z.enum(['SELF', 'UNIVERSITY']),
+  equipmentItems: z.array(equipmentItemSchema),
   specialRequirements: z.string().max(500).optional(),
 });
 
@@ -75,14 +87,23 @@ const internalMetaSchema = z.object({
   sport: z.string().min(1).max(80),
   eventFormat: z.enum(['SINGLE_MATCH', 'TOURNAMENT']),
   matchFormat: z.enum(['FRIENDLY', 'LEAGUE', 'KNOCKOUT', 'ROUND_ROBIN']),
+  // Team A (BUKC)
   teamAName: z.string().min(1).max(120),
-  teamACaptainName: z.string().min(2).max(100),
-  teamACaptainEnrollment: z.string().min(1).max(30),
-  teamACaptainContact: z.string().min(6).max(20),
-  teamBName: z.string().max(120).optional(),
-  teamBCaptainEnrollment: z.string().max(30).optional(),
+  teamAHasCaptain: z.boolean(),
+  teamACaptainName: z.string().min(2).max(100).optional(),
+  teamACaptainEnrollment: z.string().min(1).max(30).optional(),
+  teamACaptainContact: z.string().min(6).max(20).optional(),
+  teamAPlayers: z.array(bukcPlayerSchema).min(1).max(30),
+  // Team B
+  teamBName: z.string().min(1).max(120),
+  teamBHasCaptain: z.boolean(),
+  teamBCaptainName: z.string().min(2).max(100).optional(),
+  teamBCaptainContact: z.string().min(6).max(20).optional(),
+  teamBPlayers: z.array(visitingPlayerSchema).min(1).max(30),
   organizingEntity: z.string().min(1).max(120),
+  // Equipment
   equipmentSupport: z.enum(['SELF', 'UNIVERSITY']),
+  equipmentItems: z.array(equipmentItemSchema),
   specialRequirements: z.string().max(500).optional(),
 });
 
@@ -91,7 +112,6 @@ const bookingMetaSchema = z.discriminatedUnion('bookingType', [
   internalMetaSchema,
 ]);
 
-// ── Submit booking (structured pitch) ──
 export const submitBookingSchema = z.object({
   venueId: z.number().int().positive(),
   estimatedParticipants: z.number().int().positive(),
@@ -99,7 +119,6 @@ export const submitBookingSchema = z.object({
   metadata: bookingMetaSchema,
 });
 
-// VENUE-28/29: Coordinator academic event (legacy simple shape)
 export const academicEventSchema = z.object({
   venueId: z.number().int().positive(),
   purpose: z.string().min(2).max(300),
@@ -110,7 +129,6 @@ export const academicEventSchema = z.object({
 export const feasibilityNoteSchema = z.object({ note: z.string().max(500).optional() });
 export const rejectBookingSchema = z.object({ reason: z.string().min(1).max(300) });
 export const returnForReevalSchema = z.object({ note: z.string().min(1).max(500) });
-
 export const planAllocationSchema = z.object({
   allocations: z.array(z.object({
     requestSessionId: z.string().uuid(),
@@ -118,9 +136,7 @@ export const planAllocationSchema = z.object({
     quantity: z.number().int().positive(),
   })).min(1),
 });
-
 export const confirmShortfallSchema = z.object({ confirm: z.boolean() });
-
 export const performSwapSchema = z.object({
   outgoingArticleId: z.string().uuid(),
   incomingArticleId: z.string().uuid(),

@@ -1,29 +1,19 @@
 /**
- * Student — Book a Venue (VENUE-01..14, multi-session VENUE-06/35/36).
+ * Student — Book a Venue (VENUE-01..14, VENUE-05/06/35/36).
  *
- * Four-step wizard:
- *   Step 1 — Booking type, venue, sport, participant counts per team,
- *             event format, match format, equipment support decision
- *   Step 2 — Team & match details (type-specific)
- *             Inter-University: visiting team + BUKC team with captain name
- *             Internal: Team A + optional Team B
- *   Step 3 — Sessions with pre-submit conflict checks:
- *             · past date → error
- *             · weekend → error (matches only on weekdays per policy)
- *             · time window overlaps an already-approved session at same
- *               venue → error (client-side pre-check via /api/venue/calendar)
- *             · end time ≤ start time → error
- *   Step 4 — Review & submit
+ * Five-step wizard:
+ *   Step 1 — Booking type, venue, sport, participant counts, event/match format
+ *   Step 2 — Team rosters (both teams, BRS VENUE-05: participating team(s) and member details)
+ *   Step 3 — Equipment (type + quantity per type, scoped to venue's sport)
+ *   Step 4 — Sessions (dates + times, with conflict pre-check)
+ *   Step 5 — Review & submit
  *
- * Participant counts:
- *   Two fields in Step 1: BUKC team count + visiting/opponent team count.
- *   BUKC player roster in Step 2 auto-expands to match BUKC team count.
- *   Roster cannot exceed the stated BUKC count.
- *
- * Equipment:
- *   Radio in Step 1: "Both teams supply own equipment" vs
- *   "University support needed". Stored in booking metadata.
- *   Detailed equipment planning is done by the Coordinator after approval.
+ * BRS rules enforced client-side:
+ *   VENUE-01: threshold advisory (6 indoor / 10 outdoor)
+ *   VENUE-05: team details + participant count required
+ *   VENUE-06: single or multi-session
+ *   VENUE-07: one active request at a time (backend also enforces)
+ *   VENUE-24/25: session conflict pre-check against approved calendar
  */
 import { useEffect, useState, useCallback } from 'react';
 import { Navigate } from 'react-router-dom';
@@ -31,8 +21,9 @@ import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
 import {
   listVenues, submitBooking, listMyBookings, confirmShortfall, listCalendar,
-  type Venue, type MyBooking, type CalendarSession,
+  type Venue, type MyBooking,
 } from './api.js';
+import { listTypes, type EquipmentType } from '../inventory/api.js';
 import { useSessionRows, SessionRowsEditor } from './SessionsBuilder.js';
 import { ApiRequestError } from '../../lib/api.js';
 
@@ -45,18 +36,8 @@ type EventFormat = 'SINGLE_MATCH' | 'TOURNAMENT';
 type MatchFormat = 'FRIENDLY' | 'LEAGUE' | 'KNOCKOUT' | 'ROUND_ROBIN';
 type EquipmentSupport = 'SELF' | 'UNIVERSITY';
 
-interface BukcPlayer { enrollmentNo: string; fullName: string }
-
-const EVENT_FORMAT_LABEL: Record<EventFormat, string> = {
-  SINGLE_MATCH: 'Single Match',
-  TOURNAMENT: 'Multi-day Tournament',
-};
-const MATCH_FORMAT_LABEL: Record<MatchFormat, string> = {
-  FRIENDLY: 'Friendly',
-  LEAGUE: 'League',
-  KNOCKOUT: 'Knockout',
-  ROUND_ROBIN: 'Round Robin',
-};
+interface Player { enrollmentNo: string; fullName: string }
+interface EquipmentItem { equipmentTypeId: number; name: string; quantity: number }
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -99,49 +80,37 @@ export default function MyBookingsScreen() {
         <Panel title="My Booking Requests" action={
           !hasActive && !showForm
             ? <button style={primaryBtn} onClick={() => setShowForm(true)}>New Booking Request</button>
-            : showForm
-              ? <button style={ghostBtn} onClick={() => setShowForm(false)}>Cancel</button>
-              : null
+            : showForm ? <button style={ghostBtn} onClick={() => setShowForm(false)}>Cancel</button>
+            : null
         }>
           {bookings.length === 0 && !showForm && (
             <div style={emptyState}>
-              <div style={emptyIcon}>🏟</div>
-              <p style={emptyTitle}>No booking requests yet.</p>
-              <p style={emptySubtitle}>Submit a request to book a venue for your match or tournament.</p>
+              <div style={{ fontSize: 44, marginBottom: 12 }}>🏟</div>
+              <p style={{ margin: '0 0 6px', font: '600 16px var(--font-body)', color: '#333' }}>No booking requests yet.</p>
+              <p style={{ margin: '0 0 20px', font: '14px var(--font-body)', color: '#5c6773' }}>Submit a request to book a venue for your match or tournament.</p>
               <button style={primaryBtn} onClick={() => setShowForm(true)}>New Booking Request</button>
             </div>
           )}
           {bookings.length > 0 && (
-            <table style={table}>
+            <table style={tbl}>
               <thead>
                 <tr>
-                  <th style={th}>Booking</th>
-                  <th style={th}>Sessions</th>
-                  <th style={th}>Status</th>
-                  <th style={th}>Note</th>
-                  <th style={th} />
+                  <th style={th}>Booking</th><th style={th}>Sessions</th>
+                  <th style={th}>Status</th><th style={th}>Note</th><th style={th} />
                 </tr>
               </thead>
               <tbody>
                 {bookings.map((b) => (
                   <tr key={b.booking_id}>
-                    <td style={td}>
-                      <div style={{ fontWeight: 600 }}>{b.venue_name}</div>
-                      <div style={{ fontSize: 12, color: '#5c6773', marginTop: 2 }}>{b.purpose}</div>
-                    </td>
-                    <td style={td}>
-                      {b.sessionCount > 1 ? `${b.sessionCount} sessions · ` : ''}
-                      {b.firstStart
-                        ? new Date(b.firstStart).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })
-                        : '—'}
-                    </td>
+                    <td style={td}><div style={{ fontWeight: 600 }}>{b.venue_name}</div><div style={{ fontSize: 12, color: '#5c6773' }}>{b.purpose}</div></td>
+                    <td style={td}>{b.sessionCount > 1 ? `${b.sessionCount} sessions · ` : ''}{b.firstStart ? new Date(b.firstStart).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</td>
                     <td style={td}><StatusBadge status={b.status} /></td>
                     <td style={{ ...td, color: '#8f2323', fontSize: 13 }}>{b.rejection_reason ?? ''}</td>
                     <td style={{ ...td, textAlign: 'right' }}>
                       {b.status === 'SHORTFALL_PENDING' && (
                         <ShortfallActions bookingId={b.booking_id}
-                          onDone={(m) => { setNotice(m); setError(null); void load(); }}
-                          onError={(m) => { setError(m); setNotice(null); }} />
+                          onDone={(m) => { setNotice(m); void load(); }}
+                          onError={(m) => setError(m)} />
                       )}
                     </td>
                   </tr>
@@ -153,232 +122,256 @@ export default function MyBookingsScreen() {
 
         {hasActive && !showForm && (
           <div style={infoBox}>
-            <strong>One active request at a time.</strong> You have a pending or forwarded booking.
-            Once it's resolved you can submit a new one.
+            <strong>One active request at a time.</strong> You have a pending or forwarded booking request. Once resolved you can submit a new one.
           </div>
         )}
-
         {showForm && (
-          <BookingWizard
-            venues={venues}
+          <BookingWizard venues={venues}
             onDone={(m) => { setNotice(m); setShowForm(false); void load(); }}
-            onError={(m) => { setError(m); setNotice(null); }}
-            onCancel={() => setShowForm(false)}
-          />
+            onError={(m) => setError(m)}
+            onCancel={() => setShowForm(false)} />
         )}
       </div>
     </PortalShell>
   );
 }
 
-// ── Booking wizard ──
+// ── Wizard ──
 function BookingWizard({ venues, onDone, onError, onCancel }: {
   venues: Venue[];
   onDone: (m: string) => void;
   onError: (m: string) => void;
   onCancel: () => void;
 }) {
+  const TOTAL = 5;
   const [step, setStep] = useState(1);
-  const TOTAL = 4;
 
-  // ── Step 1 state ──
+  // Step 1
   const [bookingType, setBookingType] = useState<BookingType | ''>('');
   const [venueId, setVenueId] = useState(0);
   const [sport, setSport] = useState('');
   const [eventFormat, setEventFormat] = useState<EventFormat>('SINGLE_MATCH');
   const [matchFormat, setMatchFormat] = useState<MatchFormat>('FRIENDLY');
-  const [bukcCount, setBukcCount] = useState('');        // BUKC team participant count
-  const [opponentCount, setOpponentCount] = useState(''); // Opposing team count
-  const [equipmentSupport, setEquipmentSupport] = useState<EquipmentSupport>('SELF');
-  const [step1Err, setStep1Err] = useState<Record<string, string>>({});
+  const [bukcCount, setBukcCount] = useState('');
+  const [opponentCount, setOpponentCount] = useState('');
+  const [s1Err, setS1Err] = useState<Record<string, string>>({});
 
-  // ── Step 2 state — Inter-University ──
-  const [visitingUniversity, setVU] = useState('');
-  const [visitingCity, setVC] = useState('');
-  const [visitingTeamName, setVTN] = useState('');
-  const [visitingCaptainName, setVCN] = useState('');
-  const [visitingCaptainContact, setVCC] = useState('');
+  // Step 2 — BUKC team
   const [bukcTeamName, setBTN] = useState('');
+  const [bukcHasCaptain, setBHC] = useState(true);
   const [bukcCaptainName, setBCN] = useState('');
   const [bukcCaptainEnrollment, setBCE] = useState('');
   const [bukcCaptainContact, setBCC] = useState('');
-  const [bukcPlayers, setBukcPlayers] = useState<BukcPlayer[]>([{ enrollmentNo: '', fullName: '' }]);
+  const [bukcPlayers, setBukcPlayers] = useState<Player[]>([]);
 
-  // ── Step 2 state — Internal ──
-  const [teamAName, setTAN] = useState('');
-  const [teamACaptainName, setTACN] = useState('');
-  const [teamACaptainEnrollment, setTACE] = useState('');
-  const [teamACaptainContact, setTACC] = useState('');
-  const [teamBName, setTBN] = useState('');
-  const [teamBCaptainEnrollment, setTBCE] = useState('');
+  // Step 2 — Opponent team (visiting for inter-uni, Team B for internal)
+  const [opponentTeamName, setOTN] = useState('');
+  const [opponentUniversity, setOU] = useState('');
+  const [opponentCity, setOC] = useState('');
+  const [opponentHasCaptain, setOHC] = useState(true);
+  const [opponentCaptainName, setOCN] = useState('');
+  const [opponentCaptainContact, setOCC] = useState('');
+  const [opponentPlayers, setOpponentPlayers] = useState<Player[]>([]);
   const [organizingEntity, setOE] = useState('');
-  const [step2Err, setStep2Err] = useState<Record<string, string>>({});
+  const [s2Err, setS2Err] = useState<Record<string, string>>({});
 
-  // ── Step 3 state ──
+  // Step 3 — Equipment
+  const [equipmentSupport, setEquipmentSupport] = useState<EquipmentSupport>('SELF');
+  const [equipmentItems, setEquipmentItems] = useState<EquipmentItem[]>([]);
+  const [allTypes, setAllTypes] = useState<EquipmentType[]>([]);
+  const [typesLoading, setTypesLoading] = useState(false);
+
+  // Step 4 — Sessions
   const { rows: sessions, addRow, removeRow, updateRow, toSessionInputs } = useSessionRows();
   const [sessionErrors, setSessionErrors] = useState<Record<number, string>>({});
+  const [approvedSessions, setApprovedSessions] = useState<Array<{ starts_at: string; ends_at: string }>>([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
   const [specialRequirements, setSpecialReq] = useState('');
-  const [checkingConflicts, setCheckingConflicts] = useState(false);
-  const [approvedSessions, setApprovedSessions] = useState<CalendarSession[]>([]);
 
   const [busy, setBusy] = useState(false);
 
   const selectedVenue = venues.find((v) => v.venue_id === venueId);
   const sportOptions = selectedVenue?.sports.map((s) => s.sport_name) ?? [];
-
   const bukcCountNum = parseInt(bukcCount, 10) || 0;
   const opponentCountNum = parseInt(opponentCount, 10) || 0;
   const totalParticipants = bukcCountNum + opponentCountNum;
   const threshold = selectedVenue?.is_indoor ? 6 : 10;
   const belowThreshold = totalParticipants > 0 && totalParticipants < threshold;
 
-  // When BUKC count changes, expand/trim roster to match
+  // Sync player arrays to counts
   useEffect(() => {
     if (bukcCountNum < 1) return;
-    setBukcPlayers((prev) => {
-      if (prev.length === bukcCountNum) return prev;
-      if (prev.length < bukcCountNum) {
-        return [...prev, ...Array(bukcCountNum - prev.length).fill(null).map(() => ({ enrollmentNo: '', fullName: '' }))];
-      }
-      return prev.slice(0, bukcCountNum);
+    setBukcPlayers((p) => {
+      if (p.length === bukcCountNum) return p;
+      if (p.length < bukcCountNum) return [...p, ...Array(bukcCountNum - p.length).fill(null).map(() => ({ enrollmentNo: '', fullName: '' }))];
+      return p.slice(0, bukcCountNum);
     });
   }, [bukcCountNum]);
 
-  // Fetch approved sessions for this venue when we reach step 3
   useEffect(() => {
-    if (step !== 3 || !venueId) return;
-    setCheckingConflicts(true);
+    if (opponentCountNum < 1) return;
+    setOpponentPlayers((p) => {
+      if (p.length === opponentCountNum) return p;
+      if (p.length < opponentCountNum) return [...p, ...Array(opponentCountNum - p.length).fill(null).map(() => ({ enrollmentNo: '', fullName: '' }))];
+      return p.slice(0, opponentCountNum);
+    });
+  }, [opponentCountNum]);
+
+  // Load equipment types when reaching step 3
+  useEffect(() => {
+    if (step !== 3) return;
+    setTypesLoading(true);
+    listTypes()
+      .then((res) => {
+        setAllTypes(res.types);
+        // Filter to types matching the selected venue's sport categories and chosen sport
+        const venueSportNames = (selectedVenue?.sports ?? []).map((s) => s.sport_name.toLowerCase());
+        const chosenSport = sport.toLowerCase();
+        const relevant = res.types.filter((t) => {
+          const typeSport = t.sport_category_name.toLowerCase();
+          return typeSport === chosenSport || venueSportNames.includes(typeSport);
+        });
+        setEquipmentItems(
+          relevant.map((t) => ({ equipmentTypeId: t.equipment_type_id, name: t.name, quantity: 0 })),
+        );
+      })
+      .catch(() => setAllTypes([]))
+      .finally(() => setTypesLoading(false));
+  }, [step, selectedVenue, sport]);
+
+  // Load calendar for conflict check on step 4
+  useEffect(() => {
+    if (step !== 4 || !venueId) return;
+    setCalendarLoading(true);
     listCalendar({ venueId })
       .then((r) => setApprovedSessions(r.sessions))
       .catch(() => setApprovedSessions([]))
-      .finally(() => setCheckingConflicts(false));
+      .finally(() => setCalendarLoading(false));
   }, [step, venueId]);
 
-  // ── Validation ──
-  function validateStep1(): boolean {
+  // ── Validators ──
+  function validateS1(): boolean {
     const e: Record<string, string> = {};
     if (!bookingType) e.bookingType = 'Select a booking type.';
     if (!venueId) e.venueId = 'Select a venue.';
     if (!sport.trim()) e.sport = 'Specify the sport.';
     if (!bukcCount || bukcCountNum < 1) e.bukcCount = 'Enter BUKC team participant count.';
-    if (!opponentCount || opponentCountNum < 1) e.opponentCount = 'Enter opposing team participant count.';
-    setStep1Err(e);
+    if (!opponentCount || opponentCountNum < 1) e.opponentCount = 'Enter opponent team participant count.';
+    setS1Err(e);
     return Object.keys(e).length === 0;
   }
 
-  function validateStep2(): boolean {
+  function validateS2(): boolean {
     const e: Record<string, string> = {};
+    // BUKC team
+    if (!bukcTeamName.trim()) e.bukcTeamName = 'Required.';
+    if (bukcHasCaptain) {
+      if (!bukcCaptainName.trim()) e.bukcCaptainName = 'Required when captain is specified.';
+      if (!bukcCaptainEnrollment.trim()) e.bukcCaptainEnrollment = 'Required when captain is specified.';
+      if (!bukcCaptainContact.trim()) e.bukcCaptainContact = 'Required when captain is specified.';
+    }
+    const validBukc = bukcPlayers.filter((p) => p.enrollmentNo.trim() && p.fullName.trim());
+    if (validBukc.length < bukcCountNum) e.bukcPlayers = `Fill in all ${bukcCountNum} BUKC player entries.`;
+
+    // Opponent / visiting team
+    if (!opponentTeamName.trim()) e.opponentTeamName = 'Required.';
     if (bookingType === 'INTER_UNIVERSITY') {
-      if (!visitingUniversity.trim()) e.visitingUniversity = 'Required.';
-      if (!visitingCity.trim()) e.visitingCity = 'Required.';
-      if (!visitingTeamName.trim()) e.visitingTeamName = 'Required.';
-      if (!visitingCaptainName.trim()) e.visitingCaptainName = 'Required.';
-      if (!visitingCaptainContact.trim()) e.visitingCaptainContact = 'Required.';
-      if (!bukcTeamName.trim()) e.bukcTeamName = 'Required.';
-      if (!bukcCaptainName.trim()) e.bukcCaptainName = 'Required.';
-      if (!bukcCaptainEnrollment.trim()) e.bukcCaptainEnrollment = 'Required.';
-      if (!bukcCaptainContact.trim()) e.bukcCaptainContact = 'Required.';
-      const valid = bukcPlayers.filter((p) => p.enrollmentNo.trim() && p.fullName.trim());
-      if (valid.length < bukcCountNum) {
-        e.bukcPlayers = `Fill in all ${bukcCountNum} player entries (enrollment no. + name required for each).`;
-      }
+      if (!opponentUniversity.trim()) e.opponentUniversity = 'Required for inter-university competition.';
+      if (!opponentCity.trim()) e.opponentCity = 'Required.';
     } else {
-      if (!teamAName.trim()) e.teamAName = 'Required.';
-      if (!teamACaptainName.trim()) e.teamACaptainName = 'Required.';
-      if (!teamACaptainEnrollment.trim()) e.teamACaptainEnrollment = 'Required.';
-      if (!teamACaptainContact.trim()) e.teamACaptainContact = 'Required.';
       if (!organizingEntity.trim()) e.organizingEntity = 'Required.';
     }
-    setStep2Err(e);
+    if (opponentHasCaptain) {
+      if (!opponentCaptainName.trim()) e.opponentCaptainName = 'Required when captain is specified.';
+      if (!opponentCaptainContact.trim()) e.opponentCaptainContact = 'Required when captain is specified.';
+    }
+    const validOpp = opponentPlayers.filter((p) => p.fullName.trim());
+    if (validOpp.length < opponentCountNum) e.opponentPlayers = `Fill in all ${opponentCountNum} opponent player entries.`;
+
+    // Two teams cannot have the same name
+    if (bukcTeamName.trim() && opponentTeamName.trim() &&
+        bukcTeamName.trim().toLowerCase() === opponentTeamName.trim().toLowerCase()) {
+      e.opponentTeamName = 'Team names must be different.';
+    }
+    setS2Err(e);
     return Object.keys(e).length === 0;
   }
 
-  async function validateStep3(): Promise<boolean> {
-    const now = new Date();
-    const today = now.toISOString().slice(0, 10);
+  async function validateS4(): Promise<boolean> {
+    const today = new Date().toISOString().slice(0, 10);
     const errs: Record<number, string> = {};
-
     for (const row of sessions) {
-      // 1. Past date check
-      if (row.date < today) {
-        errs[row.sessionNo] = `Date ${row.date} is in the past. Please select a future date.`;
-        continue;
-      }
-
-      // 2. Weekend check
-      const dow = new Date(row.date + 'T12:00:00').getDay(); // noon to avoid TZ issues
-      if (dow === 0 || dow === 6) {
-        errs[row.sessionNo] = `${DAYS[dow]}s are not permitted for matches. Please select a weekday (Mon–Fri).`;
-        continue;
-      }
-
-      // 3. End time must be after start time
-      if (row.endTime <= row.startTime) {
-        errs[row.sessionNo] = `End time must be after start time.`;
-        continue;
-      }
-
-      // 4. Duplicate session date within same request
-      const sameDateCount = sessions.filter((s) => s.date === row.date && s.sessionNo !== row.sessionNo).length;
-      if (sameDateCount > 0) {
-        errs[row.sessionNo] = `Duplicate date — another session in this request is already on ${row.date}.`;
-        continue;
-      }
-
-      // 5. Conflict with existing approved sessions at this venue
+      if (row.date < today) { errs[row.sessionNo] = `${row.date} is in the past. Select a future date.`; continue; }
+      const dow = new Date(row.date + 'T12:00:00').getDay();
+      if (dow === 0 || dow === 6) { errs[row.sessionNo] = `${DAYS[dow]}s are not permitted. Matches must be on weekdays (Mon–Fri).`; continue; }
+      if (row.endTime <= row.startTime) { errs[row.sessionNo] = 'End time must be after start time.'; continue; }
+      const dup = sessions.filter((s) => s.date === row.date && s.sessionNo !== row.sessionNo).length > 0;
+      if (dup) { errs[row.sessionNo] = `Duplicate date — another session in this request is already on ${row.date}.`; continue; }
       const reqStart = new Date(`${row.date}T${row.startTime}:00`);
       const reqEnd = new Date(`${row.date}T${row.endTime}:00`);
-      const conflicting = approvedSessions.find((s) => {
-        const sStart = new Date(s.starts_at);
-        const sEnd = new Date(s.ends_at);
-        return reqStart < sEnd && reqEnd > sStart;
-      });
-      if (conflicting) {
-        const cs = new Date(conflicting.starts_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
-        const ce = new Date(conflicting.ends_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
-        errs[row.sessionNo] = `This venue is already booked on ${row.date} from ${cs}–${ce}. Please choose a different time or date.`;
+      const conflict = approvedSessions.find((s) => reqStart < new Date(s.ends_at) && reqEnd > new Date(s.starts_at));
+      if (conflict) {
+        const cs = new Date(conflict.starts_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+        const ce = new Date(conflict.ends_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+        errs[row.sessionNo] = `Venue already booked on ${row.date} from ${cs}–${ce}. Choose a different time or date.`;
       }
     }
-
     setSessionErrors(errs);
     return Object.keys(errs).length === 0;
   }
 
   async function nextStep() {
-    if (step === 1 && !validateStep1()) return;
-    if (step === 2 && !validateStep2()) return;
-    if (step === 3) {
-      const ok = await validateStep3();
-      if (!ok) return;
-    }
+    if (step === 1 && !validateS1()) return;
+    if (step === 2 && !validateS2()) return;
+    if (step === 4 && !(await validateS4())) return;
     setStep((s) => Math.min(s + 1, TOTAL));
   }
 
   async function submit() {
-    // Re-run step 3 validation right before submit in case calendar changed
-    const ok = await validateStep3();
-    if (!ok) { setStep(3); return; }
-
+    const ok = await validateS4();
+    if (!ok) { setStep(4); return; }
     setBusy(true);
     try {
-      const validPlayers = bukcPlayers.filter((p) => p.enrollmentNo.trim() && p.fullName.trim());
+      const validBukc = bukcPlayers.filter((p) => p.enrollmentNo.trim() && p.fullName.trim());
+      const validOpp = opponentPlayers.filter((p) => p.fullName.trim());
+      const usedEquipment = equipmentSupport === 'UNIVERSITY'
+        ? equipmentItems.filter((e) => e.quantity > 0).map((e) => ({ equipmentTypeId: e.equipmentTypeId, name: e.name, quantity: e.quantity }))
+        : [];
+
       const meta = bookingType === 'INTER_UNIVERSITY' ? {
         bookingType: 'INTER_UNIVERSITY' as const,
         sport, eventFormat, matchFormat,
-        visitingUniversity, visitingCity, visitingTeamName,
-        visitingCaptainName, visitingCaptainContact,
-        bukcTeamName, bukcCaptainName, bukcCaptainEnrollment, bukcCaptainContact,
-        bukcPlayers: validPlayers,
+        bukcTeamName,
+        bukcHasCaptain, bukcCaptainName: bukcHasCaptain ? bukcCaptainName : undefined,
+        bukcCaptainEnrollment: bukcHasCaptain ? bukcCaptainEnrollment : undefined,
+        bukcCaptainContact: bukcHasCaptain ? bukcCaptainContact : undefined,
+        bukcPlayers: validBukc,
+        visitingUniversity: opponentUniversity, visitingCity: opponentCity,
+        visitingTeamName: opponentTeamName,
+        visitingHasCaptain: opponentHasCaptain,
+        visitingCaptainName: opponentHasCaptain ? opponentCaptainName : undefined,
+        visitingCaptainContact: opponentHasCaptain ? opponentCaptainContact : undefined,
+        visitingPlayers: validOpp,
         equipmentSupport,
+        equipmentItems: usedEquipment,
         specialRequirements: specialRequirements.trim() || undefined,
       } : {
         bookingType: 'INTERNAL' as const,
         sport, eventFormat, matchFormat,
-        teamAName, teamACaptainName, teamACaptainEnrollment, teamACaptainContact,
-        teamBName: teamBName.trim() || undefined,
-        teamBCaptainEnrollment: teamBCaptainEnrollment.trim() || undefined,
+        teamAName: bukcTeamName,
+        teamAHasCaptain: bukcHasCaptain,
+        teamACaptainName: bukcHasCaptain ? bukcCaptainName : undefined,
+        teamACaptainEnrollment: bukcHasCaptain ? bukcCaptainEnrollment : undefined,
+        teamACaptainContact: bukcHasCaptain ? bukcCaptainContact : undefined,
+        teamAPlayers: validBukc,
+        teamBName: opponentTeamName,
+        teamBHasCaptain: opponentHasCaptain,
+        teamBCaptainName: opponentHasCaptain ? opponentCaptainName : undefined,
+        teamBCaptainContact: opponentHasCaptain ? opponentCaptainContact : undefined,
+        teamBPlayers: validOpp,
         organizingEntity,
         equipmentSupport,
+        equipmentItems: usedEquipment,
         specialRequirements: specialRequirements.trim() || undefined,
       };
 
@@ -394,412 +387,379 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
   }
 
   const fi = (hasErr: boolean): React.CSSProperties => ({
-    ...inp,
-    ...(hasErr ? { borderColor: '#c0392b', background: '#fff8f8' } : {}),
+    ...inp, ...(hasErr ? { borderColor: '#c0392b', background: '#fff8f8' } : {}),
   });
+
+  const STEP_LABELS = ['Basics', 'Teams & Rosters', 'Equipment', 'Sessions', 'Review'];
 
   return (
     <Panel title="New Booking Request">
       {/* Progress bar */}
       <div style={progressBar}>
-        {(['Basics', 'Teams', 'Sessions', 'Review'] as const).map((label, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, flex: i < 3 ? 1 : 0 }}>
+        {STEP_LABELS.map((label, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, flex: i < TOTAL - 1 ? 1 : 0 }}>
             <div style={{
-              width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', font: '600 13px var(--font-body)', flexShrink: 0,
+              width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              font: '600 12px var(--font-body)', flexShrink: 0,
               background: step > i + 1 ? '#1f8a4c' : step === i + 1 ? '#26485f' : '#e5e5e5',
               color: step >= i + 1 ? '#fff' : '#888',
             }}>
               {step > i + 1 ? '✓' : i + 1}
             </div>
-            <span style={{ fontSize: 12, color: step === i + 1 ? '#26485f' : '#888', fontWeight: step === i + 1 ? 600 : 400 }}>
-              {label}
-            </span>
-            {i < 3 && <div style={{ flex: 1, height: 2, background: step > i + 1 ? '#1f8a4c' : '#e5e5e5', margin: '0 4px' }} />}
+            <span style={{ fontSize: 11, color: step === i + 1 ? '#26485f' : '#888', fontWeight: step === i + 1 ? 600 : 400, whiteSpace: 'nowrap' }}>{label}</span>
+            {i < TOTAL - 1 && <div style={{ flex: 1, height: 2, background: step > i + 1 ? '#1f8a4c' : '#e5e5e5', margin: '0 3px' }} />}
           </div>
         ))}
       </div>
 
-      {/* ── STEP 1 ── */}
+      {/* ── STEP 1: Basics ── */}
       {step === 1 && (
         <div style={stepBody}>
           <h3 style={stepTitle}>Step 1 — Booking Basics</h3>
-
-          {/* Booking type picker */}
           <div style={{ marginBottom: 18 }}>
-            <span style={{ ...lbl, ...(step1Err.bookingType ? { color: '#c0392b' } : {}) }}>
-              Booking type *
-            </span>
+            <span style={{ ...lbl, ...(s1Err.bookingType ? { color: '#c0392b' } : {}) }}>Booking type *</span>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
-              {([
+              {[
                 { type: 'INTER_UNIVERSITY' as BookingType, icon: '🏆', title: 'Inter-University Competition', desc: 'BUKC hosts a visiting university team for an official match or tournament.' },
-                { type: 'INTERNAL' as BookingType, icon: '🎯', title: 'Internal / Practice', desc: 'Intra-campus match, inter-department competition, or team practice session.' },
-              ] as const).map(({ type, icon, title, desc }) => (
+                { type: 'INTERNAL' as BookingType, icon: '🎯', title: 'Internal Competition', desc: 'Intra-campus or inter-department competition between two BUKC teams.' },
+              ].map(({ type, icon, title, desc }) => (
                 <button key={type} type="button"
-                  style={{ ...typeCard, ...(bookingType === type ? typeCardActive : {}), ...(step1Err.bookingType ? { borderColor: '#c0392b' } : {}) }}
-                  onClick={() => { setBookingType(type); setStep1Err((p) => ({ ...p, bookingType: '' })); }}>
+                  style={{ ...typeCard, ...(bookingType === type ? typeCardActive : {}), ...(s1Err.bookingType ? { borderColor: '#c0392b' } : {}) }}
+                  onClick={() => { setBookingType(type); setS1Err((p) => ({ ...p, bookingType: '' })); }}>
                   <div style={{ fontSize: 26, marginBottom: 6 }}>{icon}</div>
                   <div style={{ font: '600 14px var(--font-body)', color: '#26485f', marginBottom: 4 }}>{title}</div>
                   <div style={{ fontSize: 12, color: '#5c6773', lineHeight: 1.4 }}>{desc}</div>
                 </button>
               ))}
             </div>
-            {step1Err.bookingType && <span style={fieldErr}>{step1Err.bookingType}</span>}
+            {s1Err.bookingType && <span style={ferr}>{s1Err.bookingType}</span>}
           </div>
 
-          <div style={formGrid}>
-            {/* Venue */}
+          <div style={fgrid}>
             <L label="Venue *">
-              <select style={fi(!!step1Err.venueId)} value={venueId}
-                onChange={(e) => { setVenueId(Number(e.target.value)); setSport(''); setStep1Err((p) => ({ ...p, venueId: '' })); }}>
+              <select style={fi(!!s1Err.venueId)} value={venueId} onChange={(e) => { setVenueId(Number(e.target.value)); setSport(''); setS1Err((p) => ({ ...p, venueId: '' })); }}>
                 <option value={0}>Select a venue…</option>
                 {venues.filter((v) => v.availability_status === 'AVAILABLE').map((v) => (
-                  <option key={v.venue_id} value={v.venue_id}>
-                    {v.name}{v.location ? ` · ${v.location}` : ''} (cap. {v.capacity})
-                  </option>
+                  <option key={v.venue_id} value={v.venue_id}>{v.name}{v.location ? ` · ${v.location}` : ''} (cap. {v.capacity})</option>
                 ))}
               </select>
-              {step1Err.venueId && <span style={fieldErr}>{step1Err.venueId}</span>}
+              {s1Err.venueId && <span style={ferr}>{s1Err.venueId}</span>}
             </L>
-
-            {/* Sport */}
             <L label="Sport *">
               {selectedVenue && sportOptions.length > 0 ? (
-                <select style={fi(!!step1Err.sport)} value={sport}
-                  onChange={(e) => { setSport(e.target.value); setStep1Err((p) => ({ ...p, sport: '' })); }}>
+                <select style={fi(!!s1Err.sport)} value={sport} onChange={(e) => { setSport(e.target.value); setS1Err((p) => ({ ...p, sport: '' })); }}>
                   <option value="">Select sport…</option>
                   {sportOptions.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               ) : (
-                <input style={fi(!!step1Err.sport)} value={sport}
-                  onChange={(e) => { setSport(e.target.value); setStep1Err((p) => ({ ...p, sport: '' })); }}
-                  placeholder="e.g. Football, Cricket…" />
+                <input style={fi(!!s1Err.sport)} value={sport} onChange={(e) => { setSport(e.target.value); setS1Err((p) => ({ ...p, sport: '' })); }} placeholder="e.g. Football" />
               )}
-              {step1Err.sport && <span style={fieldErr}>{step1Err.sport}</span>}
+              {s1Err.sport && <span style={ferr}>{s1Err.sport}</span>}
             </L>
-
-            {/* BUKC participant count */}
-            <L label="BUKC team — no. of participants *">
-              <input type="number" min={1} style={fi(!!step1Err.bukcCount)}
-                value={bukcCount}
-                onChange={(e) => { setBukcCount(e.target.value); setStep1Err((p) => ({ ...p, bukcCount: '' })); }}
-                placeholder="e.g. 11" />
-              {step1Err.bukcCount && <span style={fieldErr}>{step1Err.bukcCount}</span>}
-              {bukcCountNum > 0 && (
-                <span style={{ fontSize: 12, color: '#5c6773', marginTop: 3 }}>
-                  Roster in Step 2 will have {bukcCountNum} player slot{bukcCountNum !== 1 ? 's' : ''}.
-                </span>
-              )}
+            <L label="BUKC team — participants *">
+              <input type="number" min={1} style={fi(!!s1Err.bukcCount)} value={bukcCount} onChange={(e) => { setBukcCount(e.target.value); setS1Err((p) => ({ ...p, bukcCount: '' })); }} placeholder="e.g. 11" />
+              {s1Err.bukcCount && <span style={ferr}>{s1Err.bukcCount}</span>}
+              {bukcCountNum > 0 && <span style={{ fontSize: 11, color: '#5c6773' }}>Roster in Step 2 will have {bukcCountNum} entries</span>}
             </L>
-
-            {/* Opponent participant count */}
-            <L label={bookingType === 'INTER_UNIVERSITY' ? 'Visiting team — no. of participants *' : 'Opponent team — no. of participants *'}>
-              <input type="number" min={1} style={fi(!!step1Err.opponentCount)}
-                value={opponentCount}
-                onChange={(e) => { setOpponentCount(e.target.value); setStep1Err((p) => ({ ...p, opponentCount: '' })); }}
-                placeholder="e.g. 11" />
-              {step1Err.opponentCount && <span style={fieldErr}>{step1Err.opponentCount}</span>}
+            <L label={bookingType === 'INTER_UNIVERSITY' ? 'Visiting team — participants *' : 'Team B — participants *'}>
+              <input type="number" min={1} style={fi(!!s1Err.opponentCount)} value={opponentCount} onChange={(e) => { setOpponentCount(e.target.value); setS1Err((p) => ({ ...p, opponentCount: '' })); }} placeholder="e.g. 11" />
+              {s1Err.opponentCount && <span style={ferr}>{s1Err.opponentCount}</span>}
             </L>
-
-            {/* Event format */}
             <L label="Event format *">
               <select style={inp} value={eventFormat} onChange={(e) => setEventFormat(e.target.value as EventFormat)}>
-                {(Object.entries(EVENT_FORMAT_LABEL) as [EventFormat, string][]).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
+                <option value="SINGLE_MATCH">Single Match</option>
+                <option value="TOURNAMENT">Multi-day Tournament</option>
               </select>
             </L>
-
-            {/* Match format */}
             <L label="Match format *">
               <select style={inp} value={matchFormat} onChange={(e) => setMatchFormat(e.target.value as MatchFormat)}>
-                {(Object.entries(MATCH_FORMAT_LABEL) as [MatchFormat, string][]).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
+                <option value="FRIENDLY">Friendly</option>
+                <option value="LEAGUE">League</option>
+                <option value="KNOCKOUT">Knockout</option>
+                <option value="ROUND_ROBIN">Round Robin</option>
               </select>
             </L>
-
-            {/* VENUE-01 threshold advisory */}
             {belowThreshold && (
-              <div style={{ gridColumn: '1 / -1', ...warningBox }}>
-                ⚠ VENUE-01: {selectedVenue?.is_indoor ? 'Indoor' : 'Outdoor'} venues require{' '}
-                {selectedVenue?.is_indoor ? '6+' : '10+'} total participants. Your request may be questioned
-                by the Coordinator. Ensure you have a valid justification ready.
+              <div style={{ gridColumn: '1 / -1', ...warnBox }}>
+                ⚠ VENUE-01: {selectedVenue?.is_indoor ? 'Indoor' : 'Outdoor'} venues require {selectedVenue?.is_indoor ? '6+' : '10+'} total participants. Ensure you have a valid justification for the Coordinator.
               </div>
             )}
-
-            {/* Venue info */}
             {selectedVenue && (
-              <div style={{ gridColumn: '1 / -1', ...venueInfoBox }}>
-                <strong>{selectedVenue.name}</strong>
-                {selectedVenue.location && <> · {selectedVenue.location}</>}
-                {' · '}Capacity {selectedVenue.capacity}
-                {' · '}{selectedVenue.is_indoor ? 'Indoor' : 'Outdoor'}
-                {selectedVenue.surface_type && <> · {selectedVenue.surface_type}</>}
+              <div style={{ gridColumn: '1 / -1', ...venueInfo }}>
+                <strong>{selectedVenue.name}</strong>{selectedVenue.location && <> · {selectedVenue.location}</>} · Cap. {selectedVenue.capacity} · {selectedVenue.is_indoor ? 'Indoor' : 'Outdoor'}{selectedVenue.surface_type && <> · {selectedVenue.surface_type}</>}
               </div>
             )}
-
-            {/* Equipment support */}
-            <div style={{ gridColumn: '1 / -1' }}>
-              <span style={lbl}>Equipment *</span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
-                {([
-                  { value: 'SELF', label: 'Both teams will supply their own equipment', desc: 'Each team is responsible for bringing the equipment needed for the match.' },
-                  { value: 'UNIVERSITY', label: 'University support required', desc: 'We need the university to provide equipment for this match. The Coordinator will check inventory and plan allocation after approval.' },
-                ] as const).map(({ value, label, desc }) => (
-                  <label key={value} style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer',
-                    padding: '10px 14px', border: `2px solid ${equipmentSupport === value ? '#26485f' : '#e5e5e5'}`,
-                    borderRadius: 8, background: equipmentSupport === value ? '#f0f4f8' : '#fafafa',
-                    transition: 'all 0.15s',
-                  }}>
-                    <input type="radio" name="equipmentSupport" value={value}
-                      checked={equipmentSupport === value}
-                      onChange={() => setEquipmentSupport(value)}
-                      style={{ marginTop: 3 }} />
-                    <div>
-                      <div style={{ font: '600 14px var(--font-body)', color: '#26485f' }}>{label}</div>
-                      <div style={{ font: '12px var(--font-body)', color: '#5c6773', marginTop: 2 }}>{desc}</div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       )}
 
-      {/* ── STEP 2: Inter-University ── */}
-      {step === 2 && bookingType === 'INTER_UNIVERSITY' && (
+      {/* ── STEP 2: Teams & Rosters ── */}
+      {step === 2 && (
         <div style={stepBody}>
-          <h3 style={stepTitle}>Step 2 — Team Details: Inter-University</h3>
+          <h3 style={stepTitle}>Step 2 — Teams & Rosters</h3>
 
-          <SectionHeading>Visiting Team ({opponentCountNum} participant{opponentCountNum !== 1 ? 's' : ''})</SectionHeading>
-          <div style={formGrid}>
-            <L label="University name *"><input style={fi(!!step2Err.visitingUniversity)} value={visitingUniversity} onChange={(e) => { setVU(e.target.value); setStep2Err((p) => ({ ...p, visitingUniversity: '' })); }} placeholder="e.g. FAST NUCES" />{step2Err.visitingUniversity && <span style={fieldErr}>{step2Err.visitingUniversity}</span>}</L>
-            <L label="City *"><input style={fi(!!step2Err.visitingCity)} value={visitingCity} onChange={(e) => { setVC(e.target.value); setStep2Err((p) => ({ ...p, visitingCity: '' })); }} placeholder="e.g. Karachi" />{step2Err.visitingCity && <span style={fieldErr}>{step2Err.visitingCity}</span>}</L>
-            <L label="Team name *"><input style={fi(!!step2Err.visitingTeamName)} value={visitingTeamName} onChange={(e) => { setVTN(e.target.value); setStep2Err((p) => ({ ...p, visitingTeamName: '' })); }} placeholder="e.g. FAST Lions" />{step2Err.visitingTeamName && <span style={fieldErr}>{step2Err.visitingTeamName}</span>}</L>
-            <L label="Captain name *"><input style={fi(!!step2Err.visitingCaptainName)} value={visitingCaptainName} onChange={(e) => { setVCN(e.target.value); setStep2Err((p) => ({ ...p, visitingCaptainName: '' })); }} placeholder="Full name" />{step2Err.visitingCaptainName && <span style={fieldErr}>{step2Err.visitingCaptainName}</span>}</L>
-            <L label="Captain contact *"><input style={fi(!!step2Err.visitingCaptainContact)} value={visitingCaptainContact} onChange={(e) => { setVCC(e.target.value); setStep2Err((p) => ({ ...p, visitingCaptainContact: '' })); }} placeholder="e.g. 0312-3456789" />{step2Err.visitingCaptainContact && <span style={fieldErr}>{step2Err.visitingCaptainContact}</span>}</L>
+          {/* BUKC Team */}
+          <SecHead>BUKC Team ({bukcCountNum} player{bukcCountNum !== 1 ? 's' : ''})</SecHead>
+          <div style={fgrid}>
+            <L label="Team name *">
+              <input style={fi(!!s2Err.bukcTeamName)} value={bukcTeamName} onChange={(e) => { setBTN(e.target.value); setS2Err((p) => ({ ...p, bukcTeamName: '' })); }} placeholder="e.g. BUKC Warriors" />
+              {s2Err.bukcTeamName && <span style={ferr}>{s2Err.bukcTeamName}</span>}
+            </L>
+            {bookingType === 'INTERNAL' && (
+              <L label="Organizing department / society *">
+                <input style={fi(!!s2Err.organizingEntity)} value={organizingEntity} onChange={(e) => { setOE(e.target.value); setS2Err((p) => ({ ...p, organizingEntity: '' })); }} placeholder="e.g. CS Department, Sports Society" />
+                {s2Err.organizingEntity && <span style={ferr}>{s2Err.organizingEntity}</span>}
+              </L>
+            )}
           </div>
-
-          <SectionHeading>BUKC Team ({bukcCountNum} participant{bukcCountNum !== 1 ? 's' : ''})</SectionHeading>
-          <div style={formGrid}>
-            <L label="Team name *"><input style={fi(!!step2Err.bukcTeamName)} value={bukcTeamName} onChange={(e) => { setBTN(e.target.value); setStep2Err((p) => ({ ...p, bukcTeamName: '' })); }} placeholder="e.g. BUKC Warriors" />{step2Err.bukcTeamName && <span style={fieldErr}>{step2Err.bukcTeamName}</span>}</L>
-            <L label="Captain name *"><input style={fi(!!step2Err.bukcCaptainName)} value={bukcCaptainName} onChange={(e) => { setBCN(e.target.value); setStep2Err((p) => ({ ...p, bukcCaptainName: '' })); }} placeholder="Full name" />{step2Err.bukcCaptainName && <span style={fieldErr}>{step2Err.bukcCaptainName}</span>}</L>
-            <L label="Captain enrollment no. *"><input style={fi(!!step2Err.bukcCaptainEnrollment)} value={bukcCaptainEnrollment} onChange={(e) => { setBCE(e.target.value); setStep2Err((p) => ({ ...p, bukcCaptainEnrollment: '' })); }} placeholder="e.g. 84-024000-321" />{step2Err.bukcCaptainEnrollment && <span style={fieldErr}>{step2Err.bukcCaptainEnrollment}</span>}</L>
-            <L label="Captain contact *"><input style={fi(!!step2Err.bukcCaptainContact)} value={bukcCaptainContact} onChange={(e) => { setBCC(e.target.value); setStep2Err((p) => ({ ...p, bukcCaptainContact: '' })); }} placeholder="e.g. 0311-2345678" />{step2Err.bukcCaptainContact && <span style={fieldErr}>{step2Err.bukcCaptainContact}</span>}</L>
-          </div>
-
-          {/* BUKC Player roster — fixed to bukcCountNum entries */}
-          <div style={{ marginTop: 18 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={lbl}>BUKC Player Roster * ({bukcCountNum} player{bukcCountNum !== 1 ? 's' : ''} — matches count entered in Step 1)</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: '10px 0 6px', font: '14px var(--font-body)' }}>
+            <input type="checkbox" checked={bukcHasCaptain} onChange={(e) => setBHC(e.target.checked)} />
+            This team has a designated captain
+          </label>
+          {bukcHasCaptain && (
+            <div style={{ ...fgrid, marginBottom: 12 }}>
+              <L label="Captain name *"><input style={fi(!!s2Err.bukcCaptainName)} value={bukcCaptainName} onChange={(e) => { setBCN(e.target.value); setS2Err((p) => ({ ...p, bukcCaptainName: '' })); }} placeholder="Full name" />{s2Err.bukcCaptainName && <span style={ferr}>{s2Err.bukcCaptainName}</span>}</L>
+              <L label="Captain enrollment no. *"><input style={fi(!!s2Err.bukcCaptainEnrollment)} value={bukcCaptainEnrollment} onChange={(e) => { setBCE(e.target.value); setS2Err((p) => ({ ...p, bukcCaptainEnrollment: '' })); }} placeholder="e.g. 84-024000-321" />{s2Err.bukcCaptainEnrollment && <span style={ferr}>{s2Err.bukcCaptainEnrollment}</span>}</L>
+              <L label="Captain contact *"><input style={fi(!!s2Err.bukcCaptainContact)} value={bukcCaptainContact} onChange={(e) => { setBCC(e.target.value); setS2Err((p) => ({ ...p, bukcCaptainContact: '' })); }} placeholder="e.g. 0311-2345678" />{s2Err.bukcCaptainContact && <span style={ferr}>{s2Err.bukcCaptainContact}</span>}</L>
             </div>
-            {step2Err.bukcPlayers && <span style={{ ...fieldErr, display: 'block', marginBottom: 8 }}>{step2Err.bukcPlayers}</span>}
-            <div style={{ display: 'grid', gap: 8 }}>
-              {bukcPlayers.map((player, i) => (
-                <div key={i} style={playerRow}>
-                  <span style={{ fontSize: 12, color: '#8a949f', width: 24, flexShrink: 0, alignSelf: 'center' }}>#{i + 1}</span>
-                  <input style={{ ...inp, flex: 1 }} placeholder="Enrollment no." value={player.enrollmentNo}
-                    onChange={(e) => setBukcPlayers((prev) => prev.map((p, j) => j === i ? { ...p, enrollmentNo: e.target.value } : p))} />
-                  <input style={{ ...inp, flex: 2 }} placeholder="Full name" value={player.fullName}
-                    onChange={(e) => setBukcPlayers((prev) => prev.map((p, j) => j === i ? { ...p, fullName: e.target.value } : p))} />
-                </div>
-              ))}
-            </div>
-            <p style={{ margin: '8px 0 0', fontSize: 12, color: '#5c6773' }}>
-              To change the roster size, go back to Step 1 and update the BUKC participant count.
-            </p>
+          )}
+          {s2Err.bukcPlayers && <div style={{ ...ferr, marginBottom: 8 }}>{s2Err.bukcPlayers}</div>}
+          <RosterTable
+            players={bukcPlayers}
+            onChange={setBukcPlayers}
+            withEnrollment={true}
+            label="BUKC Player Roster"
+          />
+
+          {/* Opponent / Visiting Team */}
+          <SecHead style={{ marginTop: 24 }}>
+            {bookingType === 'INTER_UNIVERSITY' ? `Visiting Team (${opponentCountNum} player${opponentCountNum !== 1 ? 's' : ''})` : `Team B (${opponentCountNum} player${opponentCountNum !== 1 ? 's' : ''})`}
+          </SecHead>
+          <div style={fgrid}>
+            <L label={bookingType === 'INTER_UNIVERSITY' ? 'Team name *' : 'Team name *'}>
+              <input style={fi(!!s2Err.opponentTeamName)} value={opponentTeamName} onChange={(e) => { setOTN(e.target.value); setS2Err((p) => ({ ...p, opponentTeamName: '' })); }} placeholder={bookingType === 'INTER_UNIVERSITY' ? 'e.g. FAST Lions' : 'e.g. EE Department XI'} />
+              {s2Err.opponentTeamName && <span style={ferr}>{s2Err.opponentTeamName}</span>}
+            </L>
+            {bookingType === 'INTER_UNIVERSITY' && <>
+              <L label="University *"><input style={fi(!!s2Err.opponentUniversity)} value={opponentUniversity} onChange={(e) => { setOU(e.target.value); setS2Err((p) => ({ ...p, opponentUniversity: '' })); }} placeholder="e.g. FAST NUCES" />{s2Err.opponentUniversity && <span style={ferr}>{s2Err.opponentUniversity}</span>}</L>
+              <L label="City *"><input style={fi(!!s2Err.opponentCity)} value={opponentCity} onChange={(e) => { setOC(e.target.value); setS2Err((p) => ({ ...p, opponentCity: '' })); }} placeholder="e.g. Karachi" />{s2Err.opponentCity && <span style={ferr}>{s2Err.opponentCity}</span>}</L>
+            </>}
           </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: '10px 0 6px', font: '14px var(--font-body)' }}>
+            <input type="checkbox" checked={opponentHasCaptain} onChange={(e) => setOHC(e.target.checked)} />
+            This team has a designated captain
+          </label>
+          {opponentHasCaptain && (
+            <div style={{ ...fgrid, marginBottom: 12 }}>
+              <L label="Captain name *"><input style={fi(!!s2Err.opponentCaptainName)} value={opponentCaptainName} onChange={(e) => { setOCN(e.target.value); setS2Err((p) => ({ ...p, opponentCaptainName: '' })); }} placeholder="Full name" />{s2Err.opponentCaptainName && <span style={ferr}>{s2Err.opponentCaptainName}</span>}</L>
+              <L label="Captain contact *"><input style={fi(!!s2Err.opponentCaptainContact)} value={opponentCaptainContact} onChange={(e) => { setOCC(e.target.value); setS2Err((p) => ({ ...p, opponentCaptainContact: '' })); }} placeholder="e.g. 0312-3456789" />{s2Err.opponentCaptainContact && <span style={ferr}>{s2Err.opponentCaptainContact}</span>}</L>
+            </div>
+          )}
+          {s2Err.opponentPlayers && <div style={{ ...ferr, marginBottom: 8 }}>{s2Err.opponentPlayers}</div>}
+          <RosterTable
+            players={opponentPlayers}
+            onChange={setOpponentPlayers}
+            withEnrollment={bookingType === 'INTERNAL'}
+            label={bookingType === 'INTER_UNIVERSITY' ? 'Visiting Team Players' : 'Team B Player Roster'}
+          />
         </div>
       )}
 
-      {/* ── STEP 2: Internal ── */}
-      {step === 2 && bookingType === 'INTERNAL' && (
-        <div style={stepBody}>
-          <h3 style={stepTitle}>Step 2 — Team Details: Internal</h3>
-
-          <SectionHeading>Team A — Your Team ({bukcCountNum} participant{bukcCountNum !== 1 ? 's' : ''})</SectionHeading>
-          <div style={formGrid}>
-            <L label="Team name *"><input style={fi(!!step2Err.teamAName)} value={teamAName} onChange={(e) => { setTAN(e.target.value); setStep2Err((p) => ({ ...p, teamAName: '' })); }} placeholder="e.g. CS Department XI" />{step2Err.teamAName && <span style={fieldErr}>{step2Err.teamAName}</span>}</L>
-            <L label="Captain name *"><input style={fi(!!step2Err.teamACaptainName)} value={teamACaptainName} onChange={(e) => { setTACN(e.target.value); setStep2Err((p) => ({ ...p, teamACaptainName: '' })); }} placeholder="Full name" />{step2Err.teamACaptainName && <span style={fieldErr}>{step2Err.teamACaptainName}</span>}</L>
-            <L label="Captain enrollment no. *"><input style={fi(!!step2Err.teamACaptainEnrollment)} value={teamACaptainEnrollment} onChange={(e) => { setTACE(e.target.value); setStep2Err((p) => ({ ...p, teamACaptainEnrollment: '' })); }} placeholder="e.g. 84-024000-321" />{step2Err.teamACaptainEnrollment && <span style={fieldErr}>{step2Err.teamACaptainEnrollment}</span>}</L>
-            <L label="Captain contact *"><input style={fi(!!step2Err.teamACaptainContact)} value={teamACaptainContact} onChange={(e) => { setTACC(e.target.value); setStep2Err((p) => ({ ...p, teamACaptainContact: '' })); }} placeholder="e.g. 0311-2345678" />{step2Err.teamACaptainContact && <span style={fieldErr}>{step2Err.teamACaptainContact}</span>}</L>
-            <L label="Organizing department / society *"><input style={fi(!!step2Err.organizingEntity)} value={organizingEntity} onChange={(e) => { setOE(e.target.value); setStep2Err((p) => ({ ...p, organizingEntity: '' })); }} placeholder="e.g. CS Department, Sports Society" />{step2Err.organizingEntity && <span style={fieldErr}>{step2Err.organizingEntity}</span>}</L>
-          </div>
-
-          <SectionHeading>Team B — Opponent ({opponentCountNum} participant{opponentCountNum !== 1 ? 's' : ''}) — optional for solo practice</SectionHeading>
-          <div style={formGrid}>
-            <L label="Team name"><input style={inp} value={teamBName} onChange={(e) => setTBN(e.target.value)} placeholder="e.g. EE Department XI" /></L>
-            <L label="Captain enrollment no."><input style={inp} value={teamBCaptainEnrollment} onChange={(e) => setTBCE(e.target.value)} placeholder="e.g. 83-019000-111" /></L>
-          </div>
-        </div>
-      )}
-
-      {/* ── STEP 3: Sessions ── */}
+      {/* ── STEP 3: Equipment ── */}
       {step === 3 && (
         <div style={stepBody}>
-          <h3 style={stepTitle}>
-            Step 3 — {eventFormat === 'SINGLE_MATCH' ? 'Match Date & Time' : 'Tournament Schedule'}
-          </h3>
+          <h3 style={stepTitle}>Step 3 — Equipment</h3>
 
-          {checkingConflicts && (
-            <div style={{ ...infoBox, marginBottom: 14 }}>
-              Checking venue availability… please wait before adding sessions.
-            </div>
-          )}
-
-          <div style={{ background: '#f0f4f8', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#26485f' }}>
-            <strong>Date rules:</strong> Weekdays only (Mon–Fri) · Future dates only · No overlap with existing approved sessions at this venue
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 22 }}>
+            {[
+              { value: 'SELF' as EquipmentSupport, title: 'Both teams supply own equipment', desc: 'Each team brings the equipment needed. No university support required.' },
+              { value: 'UNIVERSITY' as EquipmentSupport, title: 'University support required', desc: 'The university will provide equipment. Specify what is needed below. The Coordinator will verify availability and plan allocation.' },
+            ].map(({ value, title, desc }) => (
+              <label key={value} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', padding: '10px 14px', border: `2px solid ${equipmentSupport === value ? '#26485f' : '#e5e5e5'}`, borderRadius: 8, background: equipmentSupport === value ? '#f0f4f8' : '#fafafa' }}>
+                <input type="radio" name="eqSupport" value={value} checked={equipmentSupport === value} onChange={() => setEquipmentSupport(value)} style={{ marginTop: 3 }} />
+                <div>
+                  <div style={{ font: '600 14px var(--font-body)', color: '#26485f' }}>{title}</div>
+                  <div style={{ font: '12px var(--font-body)', color: '#5c6773', marginTop: 2 }}>{desc}</div>
+                </div>
+              </label>
+            ))}
           </div>
 
-          {eventFormat === 'TOURNAMENT' && (
-            <p style={stepHint}>Add one session per match day. Sessions on the same date are not allowed.</p>
+          {equipmentSupport === 'UNIVERSITY' && (
+            <>
+              <div style={{ ...venueInfo, marginBottom: 14 }}>
+                Equipment types below are matched to <strong>{sport}</strong> at <strong>{selectedVenue?.name}</strong>. Set the quantity needed for each type. Leave at 0 if not required.
+              </div>
+              {typesLoading ? (
+                <p style={muted}>Loading equipment types…</p>
+              ) : equipmentItems.length === 0 ? (
+                <p style={muted}>No equipment types found for {sport} in the inventory. Contact the Sports Department directly.</p>
+              ) : (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {equipmentItems.map((item, i) => (
+                    <div key={item.equipmentTypeId} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 14px', border: '1px solid #e5e5e5', borderRadius: 8, background: item.quantity > 0 ? '#f0f4f8' : '#fafafa' }}>
+                      <div style={{ flex: 1, font: '500 14px var(--font-body)', color: '#333' }}>{item.name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button type="button" style={qtyBtn} onClick={() => setEquipmentItems((prev) => prev.map((e, j) => j === i ? { ...e, quantity: Math.max(0, e.quantity - 1) } : e))}>−</button>
+                        <span style={{ font: '600 16px var(--font-body)', minWidth: 28, textAlign: 'center', color: item.quantity > 0 ? '#26485f' : '#aaa' }}>{item.quantity}</span>
+                        <button type="button" style={qtyBtn} onClick={() => setEquipmentItems((prev) => prev.map((e, j) => j === i ? { ...e, quantity: e.quantity + 1 } : e))}>+</button>
+                      </div>
+                      {item.quantity > 0 && <span style={{ fontSize: 12, color: '#1f7a45', fontWeight: 600 }}>Requested</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
+        </div>
+      )}
 
+      {/* ── STEP 4: Sessions ── */}
+      {step === 4 && (
+        <div style={stepBody}>
+          <h3 style={stepTitle}>Step 4 — {eventFormat === 'SINGLE_MATCH' ? 'Match Date & Time' : 'Tournament Schedule'}</h3>
+          {calendarLoading && <div style={{ ...infoBox, marginBottom: 14 }}>Checking venue availability…</div>}
+          <div style={{ ...venueInfo, marginBottom: 14 }}>
+            <strong>Date rules:</strong> Weekdays only (Mon–Fri) · Future dates only · No overlap with existing approved sessions at this venue
+          </div>
+          {eventFormat === 'TOURNAMENT' && <p style={{ margin: '-4px 0 14px', fontSize: 13.5, color: '#5c6773' }}>Add one session per match day. Same-date sessions are not allowed.</p>}
           <SessionRowsEditor rows={sessions} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} errors={sessionErrors} />
-
           <div style={{ marginTop: 20 }}>
             <L label="Special requirements / notes (optional)">
-              <textarea style={{ ...inp, minHeight: 72, resize: 'vertical', width: '100%', boxSizing: 'border-box' }}
-                value={specialRequirements} onChange={(e) => setSpecialReq(e.target.value)}
-                placeholder="e.g. Will need scoreboard access, spectator seating for 50, referee required…" maxLength={500} />
+              <textarea style={{ ...inp, minHeight: 72, resize: 'vertical', width: '100%', boxSizing: 'border-box' }} value={specialRequirements} onChange={(e) => setSpecialReq(e.target.value)} placeholder="e.g. Scoreboard access, spectator seating for 50, referee required…" maxLength={500} />
               <span style={{ fontSize: 11, color: '#8a949f' }}>{specialRequirements.length}/500</span>
             </L>
           </div>
         </div>
       )}
 
-      {/* ── STEP 4: Review ── */}
-      {step === 4 && (
+      {/* ── STEP 5: Review ── */}
+      {step === 5 && (
         <div style={stepBody}>
-          <h3 style={stepTitle}>Step 4 — Review Your Request</h3>
-          <p style={stepHint}>Verify everything below before submitting. You cannot edit after submission.</p>
+          <h3 style={stepTitle}>Step 5 — Review Your Request</h3>
+          <p style={{ margin: '-8px 0 18px', fontSize: 13.5, color: '#5c6773' }}>Verify everything below before submitting. You cannot edit after submission.</p>
 
-          <ReviewSection title="Event Details">
-            <ReviewRow label="Type" value={bookingType === 'INTER_UNIVERSITY' ? 'Inter-University Competition' : 'Internal / Practice'} />
-            <ReviewRow label="Venue" value={selectedVenue?.name ?? '—'} />
-            <ReviewRow label="Sport" value={sport} />
-            <ReviewRow label="Format" value={`${EVENT_FORMAT_LABEL[eventFormat]} · ${MATCH_FORMAT_LABEL[matchFormat]}`} />
-            <ReviewRow label="Total participants" value={`${totalParticipants} (BUKC: ${bukcCountNum} · ${bookingType === 'INTER_UNIVERSITY' ? 'Visiting' : 'Opponent'}: ${opponentCountNum})`} />
-            <ReviewRow label="Equipment" value={equipmentSupport === 'SELF' ? 'Teams supply own equipment' : 'University support required'} />
-          </ReviewSection>
+          <RevSec title="Event Details">
+            <RevRow label="Type" value={bookingType === 'INTER_UNIVERSITY' ? 'Inter-University Competition' : 'Internal Competition'} />
+            <RevRow label="Venue" value={`${selectedVenue?.name ?? '—'}${selectedVenue?.location ? ` · ${selectedVenue.location}` : ''}`} />
+            <RevRow label="Sport" value={sport} />
+            <RevRow label="Format" value={`${eventFormat === 'SINGLE_MATCH' ? 'Single Match' : 'Multi-day Tournament'} · ${matchFormat.replace('_', ' ')}`} />
+            <RevRow label="Total participants" value={`${totalParticipants} (BUKC: ${bukcCountNum}, ${bookingType === 'INTER_UNIVERSITY' ? 'Visiting' : 'Team B'}: ${opponentCountNum})`} />
+          </RevSec>
 
-          {bookingType === 'INTER_UNIVERSITY' && (
-            <>
-              <ReviewSection title="Visiting Team">
-                <ReviewRow label="University" value={`${visitingUniversity}, ${visitingCity}`} />
-                <ReviewRow label="Team" value={visitingTeamName} />
-                <ReviewRow label="Captain" value={`${visitingCaptainName} · ${visitingCaptainContact}`} />
-              </ReviewSection>
-              <ReviewSection title="BUKC Team">
-                <ReviewRow label="Team" value={bukcTeamName} />
-                <ReviewRow label="Captain" value={`${bukcCaptainName} · ${bukcCaptainEnrollment} · ${bukcCaptainContact}`} />
-                <ReviewRow label="Roster" value={`${bukcPlayers.filter((p) => p.enrollmentNo.trim()).length}/${bukcCountNum} players listed`} />
-              </ReviewSection>
-            </>
-          )}
+          <RevSec title={`BUKC Team — ${bukcTeamName}`}>
+            {bukcHasCaptain && <RevRow label="Captain" value={`${bukcCaptainName} · ${bukcCaptainEnrollment} · ${bukcCaptainContact}`} />}
+            <RevRow label="Players" value={`${bukcPlayers.filter((p) => p.enrollmentNo.trim()).length} of ${bukcCountNum} entered`} />
+          </RevSec>
 
-          {bookingType === 'INTERNAL' && (
-            <ReviewSection title="Teams">
-              <ReviewRow label="Team A" value={`${teamAName} — ${teamACaptainName} (${teamACaptainEnrollment})`} />
-              {teamBName && <ReviewRow label="Team B" value={`${teamBName}${teamBCaptainEnrollment ? ` (${teamBCaptainEnrollment})` : ''}`} />}
-              <ReviewRow label="Organizer" value={organizingEntity} />
-            </ReviewSection>
-          )}
+          <RevSec title={bookingType === 'INTER_UNIVERSITY' ? `Visiting Team — ${opponentTeamName}` : `Team B — ${opponentTeamName}`}>
+            {bookingType === 'INTER_UNIVERSITY' && <RevRow label="University" value={`${opponentUniversity}, ${opponentCity}`} />}
+            {opponentHasCaptain && <RevRow label="Captain" value={`${opponentCaptainName} · ${opponentCaptainContact}`} />}
+            <RevRow label="Players" value={`${opponentPlayers.filter((p) => p.fullName.trim()).length} of ${opponentCountNum} entered`} />
+          </RevSec>
 
-          <ReviewSection title={`Sessions (${sessions.length})`}>
-            {sessions.map((s) => (
-              <ReviewRow key={s.sessionNo}
-                label={`Session ${s.sessionNo}`}
-                value={`${s.date} (${DAYS[new Date(s.date + 'T12:00:00').getDay()]}) · ${s.startTime}–${s.endTime}`} />
+          <RevSec title="Equipment">
+            <RevRow label="Support" value={equipmentSupport === 'SELF' ? 'Both teams supply own equipment' : 'University support required'} />
+            {equipmentSupport === 'UNIVERSITY' && equipmentItems.filter((e) => e.quantity > 0).map((e) => (
+              <RevRow key={e.equipmentTypeId} label={e.name} value={`${e.quantity} unit${e.quantity !== 1 ? 's' : ''}`} />
             ))}
-          </ReviewSection>
+            {equipmentSupport === 'UNIVERSITY' && equipmentItems.filter((e) => e.quantity > 0).length === 0 && (
+              <RevRow label="Note" value="No equipment types requested — coordinator will be notified of support need" />
+            )}
+          </RevSec>
+
+          <RevSec title={`Sessions (${sessions.length})`}>
+            {sessions.map((s) => (
+              <RevRow key={s.sessionNo} label={`Session ${s.sessionNo}`} value={`${s.date} (${DAYS[new Date(s.date + 'T12:00:00').getDay()]}) · ${s.startTime}–${s.endTime}`} />
+            ))}
+          </RevSec>
 
           {specialRequirements && (
-            <ReviewSection title="Special Requirements">
-              <p style={{ margin: 0, padding: '6px 14px', fontSize: 13.5, color: '#444', lineHeight: 1.5 }}>
-                {specialRequirements}
-              </p>
-            </ReviewSection>
+            <RevSec title="Special Requirements">
+              <div style={{ padding: '6px 14px', fontSize: 13.5, color: '#444', lineHeight: 1.5 }}>{specialRequirements}</div>
+            </RevSec>
           )}
 
           <div style={{ marginTop: 16, padding: '12px 14px', background: '#f0f4f8', borderRadius: 6, fontSize: 13, color: '#5c6773', lineHeight: 1.6 }}>
             By submitting, you confirm all information is accurate and this event complies with BUKC Sports Department policies.
-            Your request will be reviewed by the Sports Coordinator before any slot is confirmed.
           </div>
         </div>
       )}
 
-      {/* Navigation footer */}
-      <div style={wizardFooter}>
+      {/* Navigation */}
+      <div style={footer}>
         <div style={{ display: 'flex', gap: 10 }}>
           {step > 1 && <button type="button" style={ghostBtn} onClick={() => setStep((s) => s - 1)}>← Back</button>}
-          {step < TOTAL && (
-            <button type="button" style={primaryBtn} onClick={nextStep}>Continue →</button>
-          )}
-          {step === TOTAL && (
-            <button type="button" style={submitBtn} disabled={busy} onClick={submit}>
-              {busy ? 'Submitting…' : 'Submit Booking Request'}
-            </button>
-          )}
+          {step < TOTAL && <button type="button" style={primaryBtn} onClick={nextStep}>Continue →</button>}
+          {step === TOTAL && <button type="button" style={submitBtn} disabled={busy} onClick={submit}>{busy ? 'Submitting…' : 'Submit Booking Request'}</button>}
         </div>
-        <button type="button" style={{ ...ghostBtn, color: '#c0392b', borderColor: '#c0392b' }} onClick={onCancel}>
-          Cancel
-        </button>
+        <button type="button" style={{ ...ghostBtn, color: '#c0392b', borderColor: '#c0392b' }} onClick={onCancel}>Cancel</button>
       </div>
     </Panel>
   );
 }
 
-// ── Small shared components ──
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return <div style={{ font: '600 13px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '20px 0 10px', paddingBottom: 6, borderBottom: '2px solid #e7edf4' }}>{children}</div>;
-}
-function ReviewSection({ title, children }: { title: string; children: React.ReactNode }) {
+// ── Roster table component ──
+function RosterTable({ players, onChange, withEnrollment, label }: {
+  players: Player[];
+  onChange: React.Dispatch<React.SetStateAction<Player[]>>;
+  withEnrollment: boolean;
+  label: string;
+}) {
+  if (players.length === 0) return <p style={muted}>Enter participant count in Step 1 to populate the roster.</p>;
   return (
-    <div style={{ marginBottom: 14, border: '1px solid #e5e5e5', borderRadius: 6, overflow: 'hidden' }}>
-      <div style={{ padding: '8px 14px', background: '#f7f9fb', borderBottom: '1px solid #e5e5e5', font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</div>
-      <div style={{ padding: '4px 0' }}>{children}</div>
+    <div>
+      <span style={{ ...lbl, marginBottom: 8 }}>{label}</span>
+      <div style={{ display: 'grid', gap: 6 }}>
+        {players.map((player, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8f9fa', padding: '7px 10px', borderRadius: 6, border: '1px solid #e5e5e5' }}>
+            <span style={{ fontSize: 12, color: '#8a949f', width: 22, flexShrink: 0 }}>#{i + 1}</span>
+            {withEnrollment && (
+              <input style={{ ...inp, flex: 1 }} placeholder="Enrollment no." value={player.enrollmentNo}
+                onChange={(e) => onChange((prev) => prev.map((p, j) => j === i ? { ...p, enrollmentNo: e.target.value } : p))} />
+            )}
+            <input style={{ ...inp, flex: 2 }} placeholder="Full name" value={player.fullName}
+              onChange={(e) => onChange((prev) => prev.map((p, j) => j === i ? { ...p, fullName: e.target.value } : p))} />
+          </div>
+        ))}
+      </div>
+      <p style={{ margin: '6px 0 0', fontSize: 12, color: '#5c6773' }}>To change roster size, go back to Step 1 and update the participant count.</p>
     </div>
   );
 }
-function ReviewRow({ label, value }: { label: string; value: string }) {
+
+// ── Small reusable components ──
+function SecHead({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return <div style={{ font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '18px 0 10px', paddingBottom: 6, borderBottom: '2px solid #e7edf4', ...style }}>{children}</div>;
+}
+function RevSec({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', padding: '6px 14px', borderBottom: '1px solid #f4f4f4', fontSize: 13.5 }}>
+    <div style={{ marginBottom: 12, border: '1px solid #e5e5e5', borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ padding: '7px 14px', background: '#f7f9fb', borderBottom: '1px solid #e5e5e5', font: '600 11px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</div>
+      <div style={{ padding: '2px 0' }}>{children}</div>
+    </div>
+  );
+}
+function RevRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', padding: '5px 14px', borderBottom: '1px solid #f4f4f4', fontSize: 13.5 }}>
       <span style={{ color: '#8a949f', fontWeight: 600 }}>{label}</span>
       <span style={{ color: '#333' }}>{value}</span>
     </div>
   );
 }
 function StatusBadge({ status }: { status: string }) {
-  const s = ['APPROVED', 'COMPLETED'].includes(status) ? badge.ok
-    : ['REJECTED', 'CANCELLED'].includes(status) ? badge.danger
-    : badge.warn;
-  const label = status === 'SHORTFALL_PENDING' ? 'Awaiting your response' : status;
-  return <span style={{ ...badgeBase, ...s }}>{label}</span>;
+  const s = ['APPROVED', 'COMPLETED'].includes(status) ? { background: '#e6f4ec', color: '#1f7a45' }
+    : ['REJECTED', 'CANCELLED'].includes(status) ? { background: '#fbe9e7', color: '#b3352b' }
+    : { background: '#fdf1e3', color: '#9a6412' };
+  return <span style={{ font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4, ...s }}>{status === 'SHORTFALL_PENDING' ? 'Awaiting your response' : status}</span>;
 }
 function ShortfallActions({ bookingId, onDone, onError }: { bookingId: string; onDone: (m: string) => void; onError: (m: string) => void }) {
   const [busy, setBusy] = useState(false);
-  const [confirm, setConfirm] = useState(false);
-  async function respond(yes: boolean) {
-    setBusy(true);
-    try { await confirmShortfall(bookingId, yes); onDone(yes ? 'Confirmed.' : 'Declined.'); }
-    catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
-  }
-  if (confirm) return (
-    <span style={{ display: 'inline-flex', gap: 6 }}>
-      <button style={smallDanger} disabled={busy} onClick={() => respond(false)}>Yes, decline</button>
-      <button style={smallGhost} onClick={() => setConfirm(false)}>Cancel</button>
-    </span>
-  );
-  return (
-    <span style={{ display: 'inline-flex', gap: 6 }}>
-      <button style={smallAccept} disabled={busy} onClick={() => respond(true)}>I'll supply it</button>
-      <button style={smallGhost} onClick={() => setConfirm(true)}>Decline</button>
-    </span>
-  );
+  const [dec, setDec] = useState(false);
+  async function respond(yes: boolean) { setBusy(true); try { await confirmShortfall(bookingId, yes); onDone(yes ? 'Confirmed.' : 'Declined.'); } catch (e) { onError(errMsg(e)); } finally { setBusy(false); } }
+  if (dec) return <span style={{ display: 'inline-flex', gap: 6 }}><button style={smdanger} disabled={busy} onClick={() => respond(false)}>Yes, decline</button><button style={smghost} onClick={() => setDec(false)}>Cancel</button></span>;
+  return <span style={{ display: 'inline-flex', gap: 6 }}><button style={smaccept} disabled={busy} onClick={() => respond(true)}>I'll supply it</button><button style={smghost} onClick={() => setDec(true)}>Decline</button></span>;
 }
 function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return <section style={panel}><div style={panelHead}><span>{title}</span>{action}</div><div style={panelBody}>{children}</div></section>;
@@ -813,40 +773,31 @@ const wrap: React.CSSProperties = { maxWidth: 880, margin: '0 auto' };
 const panel: React.CSSProperties = { background: '#fff', border: '1px solid #ddd', borderRadius: 8, marginBottom: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.07)' };
 const panelHead: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid #e5e5e5', font: '600 16px var(--font-body)', color: '#26485f', background: 'linear-gradient(#fff,#f7f9fb)', borderRadius: '8px 8px 0 0' };
 const panelBody: React.CSSProperties = { padding: '20px 24px' };
-const table: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 14 };
+const tbl: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 14 };
 const th: React.CSSProperties = { textAlign: 'left', font: '600 11px var(--font-body)', color: '#888', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '0 8px 10px', borderBottom: '1px solid #e5e5e5' };
 const td: React.CSSProperties = { padding: '11px 8px', borderBottom: '1px solid #eee', color: '#333', verticalAlign: 'top' };
 const lbl: React.CSSProperties = { display: 'block', font: '500 12px var(--font-body)', color: '#26485f', marginBottom: 5, marginTop: 2 };
 const inp: React.CSSProperties = { width: '100%', font: '14px var(--font-body)', padding: '9px 11px', border: '1px solid #ccc', borderRadius: 6, boxSizing: 'border-box' };
-const formGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 };
-const fieldErr: React.CSSProperties = { display: 'block', fontSize: 12, color: '#c0392b', marginTop: 4 };
-const warningBox: React.CSSProperties = { padding: '8px 12px', background: '#fdf1e3', border: '1px solid #f0c060', borderRadius: 6, fontSize: 12.5, color: '#9a6412', lineHeight: 1.5 };
+const fgrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 };
+const ferr: React.CSSProperties = { display: 'block', fontSize: 12, color: '#c0392b', marginTop: 4 };
+const warnBox: React.CSSProperties = { padding: '8px 12px', background: '#fdf1e3', border: '1px solid #f0c060', borderRadius: 6, fontSize: 12.5, color: '#9a6412', lineHeight: 1.5 };
 const infoBox: React.CSSProperties = { padding: '10px 14px', background: '#e3f2ff', border: '1px solid #90caf9', borderRadius: 6, fontSize: 13.5, color: '#1565c0', marginBottom: 18 };
-const venueInfoBox: React.CSSProperties = { padding: '10px 14px', background: '#f0f4f8', borderRadius: 6, fontSize: 13, color: '#26485f' };
-const badgeBase: React.CSSProperties = { font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4 };
-const badge = {
-  ok: { background: '#e6f4ec', color: '#1f7a45' } as React.CSSProperties,
-  warn: { background: '#fdf1e3', color: '#9a6412' } as React.CSSProperties,
-  danger: { background: '#fbe9e7', color: '#b3352b' } as React.CSSProperties,
-};
+const venueInfo: React.CSSProperties = { padding: '10px 14px', background: '#f0f4f8', borderRadius: 6, fontSize: 13, color: '#26485f' };
+const muted: React.CSSProperties = { color: '#8a949f', fontSize: 14, margin: '8px 0' };
 const primaryBtn: React.CSSProperties = { background: '#26485f', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 20px', fontSize: 14, cursor: 'pointer', fontWeight: 600 };
 const submitBtn: React.CSSProperties = { background: '#1f8a4c', color: '#fff', border: 'none', borderRadius: 6, padding: '10px 24px', fontSize: 15, cursor: 'pointer', fontWeight: 700 };
 const ghostBtn: React.CSSProperties = { background: '#fff', color: '#555', border: '1px solid #ccc', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
-const smallAccept: React.CSSProperties = { background: '#1f8a4c', color: '#fff', border: 'none', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
-const smallDanger: React.CSSProperties = { background: '#c0392b', color: '#fff', border: 'none', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
-const smallGhost: React.CSSProperties = { background: '#fff', color: '#555', border: '1px solid #ccc', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
-const progressBar: React.CSSProperties = { display: 'flex', alignItems: 'center', marginBottom: 28, padding: '0 4px' };
+const smaccept: React.CSSProperties = { background: '#1f8a4c', color: '#fff', border: 'none', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
+const smdanger: React.CSSProperties = { background: '#c0392b', color: '#fff', border: 'none', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
+const smghost: React.CSSProperties = { background: '#fff', color: '#555', border: '1px solid #ccc', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
+const progressBar: React.CSSProperties = { display: 'flex', alignItems: 'center', marginBottom: 28 };
 const stepBody: React.CSSProperties = { paddingBottom: 8 };
 const stepTitle: React.CSSProperties = { margin: '0 0 18px', font: '700 18px var(--font-body)', color: '#26485f' };
-const stepHint: React.CSSProperties = { margin: '-8px 0 18px', font: '14px var(--font-body)', color: '#5c6773', lineHeight: 1.5 };
-const wizardFooter: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 20, marginTop: 20, borderTop: '1px solid #e5e5e5' };
-const typeCard: React.CSSProperties = { background: '#f8f9fa', border: '2px solid #e5e5e5', borderRadius: 10, padding: '16px 18px', cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s' };
+const footer: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 20, marginTop: 20, borderTop: '1px solid #e5e5e5' };
+const typeCard: React.CSSProperties = { background: '#f8f9fa', border: '2px solid #e5e5e5', borderRadius: 10, padding: '16px 18px', cursor: 'pointer', textAlign: 'center' };
 const typeCardActive: React.CSSProperties = { borderColor: '#26485f', background: '#f0f4f8' };
-const playerRow: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'flex-start', background: '#f8f9fa', padding: '8px 10px', borderRadius: 6, border: '1px solid #e5e5e5' };
 const emptyState: React.CSSProperties = { textAlign: 'center', padding: '40px 24px' };
-const emptyIcon: React.CSSProperties = { fontSize: 44, marginBottom: 12 };
-const emptyTitle: React.CSSProperties = { margin: '0 0 6px', font: '600 16px var(--font-body)', color: '#333' };
-const emptySubtitle: React.CSSProperties = { margin: '0 0 20px', font: '14px var(--font-body)', color: '#5c6773' };
+const qtyBtn: React.CSSProperties = { width: 30, height: 30, borderRadius: 6, border: '1px solid #ccc', background: '#fff', cursor: 'pointer', font: '600 16px var(--font-body)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#26485f' };
 const box = {
   err: { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
   ok: { background: '#eaf6ee', color: '#1e6b3a', border: '1px solid #c2e6cd', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
