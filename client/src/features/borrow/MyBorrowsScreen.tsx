@@ -253,7 +253,7 @@ export default function MyBorrowsScreen() {
         </Panel>
 
         {/* Kit pack request — expanded when arriving from the kit CTA */}
-        <Panel title="🎒 Request Full Kit" defaultOpen={!!incomingKit}>
+        <Panel title="Request Full Kit" defaultOpen={!!incomingKit}>
           <KitRequestForm
             cats={cats}
             initialSportId={incomingKit?.sportCategoryId}
@@ -283,7 +283,9 @@ export default function MyBorrowsScreen() {
                       {new Date(r.requested_start_at).toLocaleString()} → {new Date(r.requested_return_at).toLocaleTimeString()}
                     </td>
                     <td style={td}>
-                      <span style={{ ...badgeBase, ...statusBadge(r.status) }}>{r.status}</span>
+                      {isExpired(r.requested_start_at, r.status)
+                        ? <span style={{ ...badgeBase, background: '#f3f4f6', color: '#6b7280' }}>EXPIRED</span>
+                        : <span style={{ ...badgeBase, ...statusBadge(r.status) }}>{r.status}</span>}
                     </td>
                     <td style={{ ...td, color: '#8f2323' }}>{r.rejection_reason ?? '—'}</td>
                   </tr>
@@ -331,6 +333,9 @@ const table: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', 
 const th: React.CSSProperties = { padding: '8px 10px', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e5e7eb', color: '#374151', fontSize: 13 };
 const td: React.CSSProperties = { padding: '9px 10px', borderBottom: '1px solid #f3f4f6', verticalAlign: 'top' };
 const badgeBase: React.CSSProperties = { display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600 };
+function isExpired(requestedStartAt: string, status: string): boolean {
+  return status === 'PENDING' && new Date(requestedStartAt).getTime() < Date.now();
+}
 function statusBadge(s: string): React.CSSProperties {
   if (s === 'APPROVED') return { background: '#d1fae5', color: '#065f46' };
   if (s === 'REJECTED') return { background: '#fee2e2', color: '#991b1b' };
