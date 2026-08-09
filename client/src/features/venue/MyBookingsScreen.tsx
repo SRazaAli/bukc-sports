@@ -50,6 +50,7 @@ export default function MyBookingsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [reviewingBooking, setReviewingBooking] = useState<MyBooking | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -115,20 +116,12 @@ export default function MyBookingsScreen() {
                           onError={(m) => setError(m)} />
                       )}
                       {b.status === 'SENT_BACK' && (
-                        <SentBackActions booking={b}
-                          onDone={(m) => { setNotice(m); void load(); }}
-                          onError={(m) => setError(m)} />
+                        <button style={smaccept} onClick={() => setReviewingBooking(b)}>
+                          📋 Review Response
+                        </button>
                       )}
                     </td>
                   </tr>
-                  {/* Sent-back detail row — show coordinator's note and proposed schedule */}
-                  {b.status === 'SENT_BACK' && (
-                    <tr>
-                      <td colSpan={5} style={{ padding: '0 8px 12px', background: '#fffbeb' }}>
-                        <SentBackDetail bookingId={b.booking_id} />
-                      </td>
-                    </tr>
-                  )}
                   </Fragment>
                 ))}
               </tbody>
@@ -146,6 +139,13 @@ export default function MyBookingsScreen() {
             onDone={(m) => { setNotice(m); setShowForm(false); void load(); }}
             onError={(m) => setError(m)}
             onCancel={() => setShowForm(false)} />
+        )}
+        {reviewingBooking && (
+          <SentBackReviewModal
+            booking={reviewingBooking}
+            onDone={(m) => { setNotice(m); setError(null); setReviewingBooking(null); void load(); }}
+            onError={(m) => { setError(m); setNotice(null); }}
+            onClose={() => setReviewingBooking(null)} />
         )}
       </div>
     </PortalShell>
@@ -809,29 +809,131 @@ function StatusBadge({ status }: { status: string }) {
     : status;
   return <span style={{ font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4, ...s }}>{label}</span>;
 }
-function SentBackDetail({ bookingId }: { bookingId: string }) {
+function SentBackReviewModal({ booking, onDone, onError, onClose }: {
+  booking: MyBooking;
+  onDone: (m: string) => void;
+  onError: (m: string) => void;
+  onClose: () => void;
+}) {
   const [detail, setDetail] = useState<import('./api.js').BookingDetailFull | null>(null);
-  useEffect(() => { getBookingFull(bookingId).then(setDetail).catch(() => {}); }, [bookingId]);
-  if (!detail) return <div style={{ padding: '8px 10px', fontSize: 13, color: '#8a949f' }}>Loading coordinator note…</div>;
+  const [busy, setBusy] = useState(false);
+  const [declining, setDeclining] = useState(false);
 
-  const proposed = detail.coordinator_proposed_sessions;
-  const note = detail.sent_back_note;
+  useEffect(() => {
+    getBookingFull(booking.booking_id).then(setDetail).catch(() => onError('Could not load booking detail.'));
+  }, [booking.booking_id]); // eslint-disable-line
+
+  async function accept() {
+    setBusy(true);
+    try { await acceptSentBack(booking.booking_id); onDone('Booking resubmitted — back in the Coordinator\'s queue.'); onClose(); }
+    catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
+  }
+  async function decline() {
+    setBusy(true);
+    try { await declineSentBack(booking.booking_id); onDone('Booking declined and closed.'); onClose(); }
+    catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
+  }
+
+  const proposed = detail?.coordinator_proposed_sessions;
+  const note = detail?.sent_back_note;
 
   return (
-    <div style={{ border: '1px solid #fcd34d', borderRadius: 6, padding: '12px 14px', background: '#fffbeb', marginTop: 4 }}>
-      <div style={{ font: '600 13px var(--font-body)', color: '#92400e', marginBottom: 8 }}>📋 Coordinator's message</div>
-      {note && <p style={{ margin: '0 0 10px', fontSize: 14, color: '#78350f', lineHeight: 1.6 }}>{note}</p>}
-      {proposed && proposed.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ font: '600 12px var(--font-body)', color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Proposed alternative schedule</div>
-          {proposed.map((s) => (
-            <div key={s.sessionNo} style={{ fontSize: 13.5, color: '#78350f', marginBottom: 3 }}>
-              Session {s.sessionNo}: {new Date(s.startAt).toLocaleDateString('en-PK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {new Date(s.startAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })} – {new Date(s.endAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+      onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 10, padding: '28px 32px', maxWidth: 560, width: '94%', boxShadow: '0 8px 32px rgba(0,0,0,0.18)', maxHeight: '90vh', overflowY: 'auto' }}
+        onClick={(e) => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 19, color: '#26485f' }}>Coordinator's Response</h2>
+            <div style={{ fontSize: 13, color: '#5c6773', marginTop: 3 }}>
+              {booking.venue_name} · {booking.purpose}
             </div>
-          ))}
-          <p style={{ margin: '8px 0 0', fontSize: 13, color: '#9a6412' }}>If you accept, your booking will be resubmitted with this schedule.</p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#8a949f', lineHeight: 1 }}>×</button>
         </div>
-      )}
+
+        {!detail ? (
+          <p style={{ color: '#8a949f', fontSize: 14 }}>Loading…</p>
+        ) : (
+          <>
+            {/* Coordinator's note */}
+            {note && (
+              <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+                <div style={{ font: '600 12px var(--font-body)', color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+                  Coordinator's Note
+                </div>
+                <p style={{ margin: 0, fontSize: 14.5, color: '#78350f', lineHeight: 1.6 }}>{note}</p>
+              </div>
+            )}
+
+            {/* Proposed schedule */}
+            {proposed && proposed.length > 0 && (
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+                <div style={{ font: '600 12px var(--font-body)', color: '#1e40af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
+                  📅 Proposed Alternative Schedule
+                </div>
+                {proposed.map((s) => (
+                  <div key={s.sessionNo} style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: 8, marginBottom: 6, fontSize: 14 }}>
+                    <span style={{ font: '600 12px var(--font-mono)', color: '#3730a3' }}>Session {s.sessionNo}</span>
+                    <span style={{ color: '#1e3a8a' }}>
+                      {new Date(s.startAt).toLocaleDateString('en-PK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                      {' · '}
+                      {new Date(s.startAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+                      {' – '}
+                      {new Date(s.endAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                ))}
+                <p style={{ margin: '10px 0 0', fontSize: 13, color: '#3730a3' }}>
+                  If you accept, your booking will be resubmitted with this schedule.
+                </p>
+              </div>
+            )}
+
+            {/* Original sessions if no proposed */}
+            {(!proposed || proposed.length === 0) && detail.sessions.length > 0 && (
+              <div style={{ background: '#f7f9fb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+                <div style={{ font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+                  Original Sessions (unchanged)
+                </div>
+                {detail.sessions.map((s) => (
+                  <div key={s.request_session_id} style={{ fontSize: 14, color: '#333', marginBottom: 4 }}>
+                    Session {s.session_no}: {new Date(s.requested_start_at).toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short' })}
+                    {' · '}{new Date(s.requested_start_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+                    {' – '}{new Date(s.requested_end_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Decision */}
+            <div style={{ paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
+              <p style={{ margin: '0 0 14px', fontSize: 14, color: '#5c6773' }}>
+                {proposed && proposed.length > 0
+                  ? 'Accept the proposed schedule and resubmit, or decline to cancel this booking.'
+                  : 'Accept and resubmit your booking, or decline to cancel it.'}
+              </p>
+              {!declining ? (
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button style={smaccept2} disabled={busy} onClick={accept}>
+                    {busy ? 'Submitting…' : '✓ Accept & Resubmit'}
+                  </button>
+                  <button style={smdanger2} onClick={() => setDeclining(true)}>Decline & Cancel</button>
+                  <button style={smghost2} onClick={onClose}>Close</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <span style={{ fontSize: 14, color: '#991b1b', fontWeight: 600 }}>Cancel this booking permanently?</span>
+                  <button style={smdanger2} disabled={busy} onClick={decline}>{busy ? '…' : 'Yes, cancel'}</button>
+                  <button style={smghost2} onClick={() => setDeclining(false)}>No, go back</button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -910,3 +1012,6 @@ const box = {
   err: { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
   ok: { background: '#eaf6ee', color: '#1e6b3a', border: '1px solid #c2e6cd', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
 };
+const smaccept2: React.CSSProperties = { background: '#1f8a4c', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer', fontWeight: 600 };
+const smdanger2: React.CSSProperties = { background: '#c0392b', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
+const smghost2: React.CSSProperties = { background: '#fff', color: '#555', border: '1px solid #ccc', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };

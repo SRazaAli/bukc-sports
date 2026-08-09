@@ -17,7 +17,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../middleware/async.js';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
-import { badRequest } from '../../middleware/errors.js';
+import { badRequest, AppError } from '../../middleware/errors.js';
 import * as svc from './service.js';
 import * as eq from './equipment.js';
 import * as v from './validators.js';
@@ -134,9 +134,15 @@ venueRouter.post('/bookings/:id/decline-sent-back', ...requester, asyncHandler(a
   res.json({ message: 'Booking cancelled.' });
 }));
 
-// ── Full booking detail (coordinator review — includes metadata + sent_back fields) ──
-venueRouter.get('/bookings/:id/full', ...anyStaff, asyncHandler(async (req, res) => {
-  res.json(await svc.getBookingDetailFull(reqId(req)));
+// ── Full booking detail — staff OR the booking's own requester (for sent-back review) ──
+venueRouter.get('/bookings/:id/full', requireAuth, asyncHandler(async (req, res) => {
+  const detail = await svc.getBookingDetailFull(reqId(req));
+  const user = req.user!;
+  // Staff can always read; requester can only read their own booking
+  const isStaff = user.role === 'SUPER_ADMIN' || user.role === 'COORDINATOR';
+  const isOwner = detail.requested_by === user.userId;
+  if (!isStaff && !isOwner) throw new AppError(403, 'Not authorised.');
+  res.json(detail);
 }));
 
 // ── Article-level availability for coordinator equipment selection ──

@@ -169,6 +169,7 @@ export interface BookingDetailFull {
   booking_id: string; origin: string; status: string; purpose: string;
   estimated_participants: number; feasibility_note: string | null;
   rejection_reason: string | null; venue_id: number; venue_name: string;
+  requested_by: string | null;
   booking_type: string | null;
   booking_metadata: Record<string, unknown> | null;
   sent_back_note: string | null; sent_back_at: string | null;

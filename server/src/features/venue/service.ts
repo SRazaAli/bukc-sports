@@ -708,7 +708,7 @@ export async function getBookingDetailFull(bookingId: string) {
     .select([
       'b.booking_id', 'b.origin', 'b.status', 'b.purpose',
       'b.estimated_participants', 'b.feasibility_note', 'b.rejection_reason',
-      'b.venue_id', 'v.name as venue_name',
+      'b.venue_id', 'v.name as venue_name', 'b.requested_by',
       'b.booking_type', 'b.booking_metadata',
       'b.sent_back_note', 'b.sent_back_at',
       'b.coordinator_proposed_sessions',
