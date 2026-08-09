@@ -243,7 +243,7 @@ function AcademicEventForm({ venues, onDone, onError }: { venues: Venue[]; onDon
   const [purpose, setPurpose] = useState('');
   const [estimatedParticipants, setParticipants] = useState(50);
   const [busy, setBusy] = useState(false);
-  const { rows, addRow, removeRow, updateRow, toSessionInputs } = useSessionRows('BUKC Sports Department');
+  const { rows, addRow, removeRow, updateRow, toSessionInputs } = useSessionRows();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

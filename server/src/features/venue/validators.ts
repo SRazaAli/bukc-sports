@@ -61,10 +61,11 @@ const interUniversityMetaSchema = z.object({
   visitingCaptainName: z.string().min(2).max(100),
   visitingCaptainContact: z.string().min(6).max(20),
   bukcTeamName: z.string().min(1).max(120),
+  bukcCaptainName: z.string().min(2).max(100),
   bukcCaptainEnrollment: z.string().min(1).max(30),
   bukcCaptainContact: z.string().min(6).max(20),
   bukcPlayers: z.array(bukcPlayerSchema).min(1).max(30),
-  authorizationRef: z.string().max(200).optional(),
+  equipmentSupport: z.enum(['SELF', 'UNIVERSITY']),
   specialRequirements: z.string().max(500).optional(),
 });
 
@@ -75,11 +76,13 @@ const internalMetaSchema = z.object({
   eventFormat: z.enum(['SINGLE_MATCH', 'TOURNAMENT']),
   matchFormat: z.enum(['FRIENDLY', 'LEAGUE', 'KNOCKOUT', 'ROUND_ROBIN']),
   teamAName: z.string().min(1).max(120),
+  teamACaptainName: z.string().min(2).max(100),
   teamACaptainEnrollment: z.string().min(1).max(30),
   teamACaptainContact: z.string().min(6).max(20),
   teamBName: z.string().max(120).optional(),
   teamBCaptainEnrollment: z.string().max(30).optional(),
   organizingEntity: z.string().min(1).max(120),
+  equipmentSupport: z.enum(['SELF', 'UNIVERSITY']),
   specialRequirements: z.string().max(500).optional(),
 });
 

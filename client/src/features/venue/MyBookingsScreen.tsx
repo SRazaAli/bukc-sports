@@ -1,38 +1,49 @@
 /**
  * Student — Book a Venue (VENUE-01..14, multi-session VENUE-06/35/36).
  *
- * Two booking types:
- *   INTER_UNIVERSITY — BUKC hosts a visiting university.
- *     Requires: visiting team details, BUKC roster (captain + players),
- *     match format, sessions. Generates an official pitch for the Coordinator.
- *   INTERNAL — Intra-campus match or practice between BUKC teams.
- *     Requires: team names + captains, organizing entity, sessions.
- *
- * VENUE-01 threshold check (client-side advisory):
- *   Indoor:  ≥6 participants required for a booking to be justified.
- *   Outdoor: ≥10 participants required.
- *   External participant or official affiliation overrides the threshold.
- *
- * The form is a multi-step wizard:
- *   Step 1 — Booking type + venue + sport + event format
+ * Four-step wizard:
+ *   Step 1 — Booking type, venue, sport, participant counts per team,
+ *             event format, match format, equipment support decision
  *   Step 2 — Team & match details (type-specific)
- *   Step 3 — Sessions (date/time slots)
+ *             Inter-University: visiting team + BUKC team with captain name
+ *             Internal: Team A + optional Team B
+ *   Step 3 — Sessions with pre-submit conflict checks:
+ *             · past date → error
+ *             · weekend → error (matches only on weekdays per policy)
+ *             · time window overlaps an already-approved session at same
+ *               venue → error (client-side pre-check via /api/venue/calendar)
+ *             · end time ≤ start time → error
  *   Step 4 — Review & submit
+ *
+ * Participant counts:
+ *   Two fields in Step 1: BUKC team count + visiting/opponent team count.
+ *   BUKC player roster in Step 2 auto-expands to match BUKC team count.
+ *   Roster cannot exceed the stated BUKC count.
+ *
+ * Equipment:
+ *   Radio in Step 1: "Both teams supply own equipment" vs
+ *   "University support needed". Stored in booking metadata.
+ *   Detailed equipment planning is done by the Coordinator after approval.
  */
 import { useEffect, useState, useCallback } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
-import { listVenues, submitBooking, listMyBookings, confirmShortfall, type Venue, type MyBooking } from './api.js';
+import {
+  listVenues, submitBooking, listMyBookings, confirmShortfall, listCalendar,
+  type Venue, type MyBooking, type CalendarSession,
+} from './api.js';
 import { useSessionRows, SessionRowsEditor } from './SessionsBuilder.js';
 import { ApiRequestError } from '../../lib/api.js';
 
-function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
+function errMsg(e: unknown) {
+  return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.';
+}
 
-// ── Types ──
 type BookingType = 'INTER_UNIVERSITY' | 'INTERNAL';
 type EventFormat = 'SINGLE_MATCH' | 'TOURNAMENT';
 type MatchFormat = 'FRIENDLY' | 'LEAGUE' | 'KNOCKOUT' | 'ROUND_ROBIN';
+type EquipmentSupport = 'SELF' | 'UNIVERSITY';
 
 interface BukcPlayer { enrollmentNo: string; fullName: string }
 
@@ -47,6 +58,8 @@ const MATCH_FORMAT_LABEL: Record<MatchFormat, string> = {
   ROUND_ROBIN: 'Round Robin',
 };
 
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
 // ── Root screen ──
 export default function MyBookingsScreen() {
   const { user, loading } = useAuth();
@@ -59,7 +72,8 @@ export default function MyBookingsScreen() {
   const load = useCallback(async () => {
     try {
       const [v, b] = await Promise.all([listVenues(), listMyBookings()]);
-      setVenues(v.venues); setBookings(b.bookings);
+      setVenues(v.venues);
+      setBookings(b.bookings);
     } catch (e) { setError(errMsg(e)); }
   }, []);
 
@@ -72,8 +86,9 @@ export default function MyBookingsScreen() {
   if (!user) return <Navigate to="/" replace />;
   if (user.role !== 'STUDENT' && user.role !== 'EXTERNAL') return <Navigate to="/home" replace />;
 
-  // Students with an active request can't submit another (VENUE-07)
-  const hasActive = bookings.some((b) => ['PENDING', 'FORWARDED', 'SHORTFALL_PENDING'].includes(b.status));
+  const hasActive = bookings.some((b) =>
+    ['PENDING', 'FORWARDED', 'SHORTFALL_PENDING'].includes(b.status),
+  );
 
   return (
     <PortalShell title="Book a Venue" tint="sage">
@@ -81,7 +96,6 @@ export default function MyBookingsScreen() {
         {error && <div style={box.err}>{error}</div>}
         {notice && <div style={box.ok}>{notice}</div>}
 
-        {/* My bookings panel */}
         <Panel title="My Booking Requests" action={
           !hasActive && !showForm
             ? <button style={primaryBtn} onClick={() => setShowForm(true)}>New Booking Request</button>
@@ -93,11 +107,10 @@ export default function MyBookingsScreen() {
             <div style={emptyState}>
               <div style={emptyIcon}>🏟</div>
               <p style={emptyTitle}>No booking requests yet.</p>
-              <p style={emptySubtitle}>Submit a new request to book a venue for your match or tournament.</p>
+              <p style={emptySubtitle}>Submit a request to book a venue for your match or tournament.</p>
               <button style={primaryBtn} onClick={() => setShowForm(true)}>New Booking Request</button>
             </div>
           )}
-
           {bookings.length > 0 && (
             <table style={table}>
               <thead>
@@ -118,8 +131,9 @@ export default function MyBookingsScreen() {
                     </td>
                     <td style={td}>
                       {b.sessionCount > 1 ? `${b.sessionCount} sessions · ` : ''}
-                      {b.firstStart ? new Date(b.firstStart).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
-                      {b.lastEnd && b.sessionCount > 1 ? ` → ${new Date(b.lastEnd).toLocaleDateString('en-PK', { day: 'numeric', month: 'short' })}` : ''}
+                      {b.firstStart
+                        ? new Date(b.firstStart).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })
+                        : '—'}
                     </td>
                     <td style={td}><StatusBadge status={b.status} /></td>
                     <td style={{ ...td, color: '#8f2323', fontSize: 13 }}>{b.rejection_reason ?? ''}</td>
@@ -137,15 +151,13 @@ export default function MyBookingsScreen() {
           )}
         </Panel>
 
-        {/* Active booking notice */}
         {hasActive && !showForm && (
           <div style={infoBox}>
-            <strong>One active request at a time.</strong> You have a pending or forwarded booking request.
+            <strong>One active request at a time.</strong> You have a pending or forwarded booking.
             Once it's resolved you can submit a new one.
           </div>
         )}
 
-        {/* Booking wizard */}
         {showForm && (
           <BookingWizard
             venues={venues}
@@ -159,7 +171,7 @@ export default function MyBookingsScreen() {
   );
 }
 
-// ── Multi-step booking wizard ──
+// ── Booking wizard ──
 function BookingWizard({ venues, onDone, onError, onCancel }: {
   venues: Venue[];
   onDone: (m: string) => void;
@@ -167,131 +179,221 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
   onCancel: () => void;
 }) {
   const [step, setStep] = useState(1);
-  const TOTAL_STEPS = 4;
+  const TOTAL = 4;
 
-  // Step 1 state
+  // ── Step 1 state ──
   const [bookingType, setBookingType] = useState<BookingType | ''>('');
   const [venueId, setVenueId] = useState(0);
   const [sport, setSport] = useState('');
   const [eventFormat, setEventFormat] = useState<EventFormat>('SINGLE_MATCH');
   const [matchFormat, setMatchFormat] = useState<MatchFormat>('FRIENDLY');
-  const [estimatedParticipants, setParticipants] = useState('');
-  const [step1Errors, setStep1Errors] = useState<Record<string, string>>({});
+  const [bukcCount, setBukcCount] = useState('');        // BUKC team participant count
+  const [opponentCount, setOpponentCount] = useState(''); // Opposing team count
+  const [equipmentSupport, setEquipmentSupport] = useState<EquipmentSupport>('SELF');
+  const [step1Err, setStep1Err] = useState<Record<string, string>>({});
 
-  // Step 2 state — Inter-University
+  // ── Step 2 state — Inter-University ──
   const [visitingUniversity, setVU] = useState('');
   const [visitingCity, setVC] = useState('');
   const [visitingTeamName, setVTN] = useState('');
   const [visitingCaptainName, setVCN] = useState('');
   const [visitingCaptainContact, setVCC] = useState('');
   const [bukcTeamName, setBTN] = useState('');
+  const [bukcCaptainName, setBCN] = useState('');
   const [bukcCaptainEnrollment, setBCE] = useState('');
   const [bukcCaptainContact, setBCC] = useState('');
   const [bukcPlayers, setBukcPlayers] = useState<BukcPlayer[]>([{ enrollmentNo: '', fullName: '' }]);
-  const [authorizationRef, setAuthRef] = useState('');
 
-  // Step 2 state — Internal
+  // ── Step 2 state — Internal ──
   const [teamAName, setTAN] = useState('');
+  const [teamACaptainName, setTACN] = useState('');
   const [teamACaptainEnrollment, setTACE] = useState('');
   const [teamACaptainContact, setTACC] = useState('');
   const [teamBName, setTBN] = useState('');
   const [teamBCaptainEnrollment, setTBCE] = useState('');
   const [organizingEntity, setOE] = useState('');
-  const [step2Errors, setStep2Errors] = useState<Record<string, string>>({});
+  const [step2Err, setStep2Err] = useState<Record<string, string>>({});
 
-  // Step 3 state — sessions
+  // ── Step 3 state ──
   const { rows: sessions, addRow, removeRow, updateRow, toSessionInputs } = useSessionRows();
-
-  // Shared
+  const [sessionErrors, setSessionErrors] = useState<Record<number, string>>({});
   const [specialRequirements, setSpecialReq] = useState('');
+  const [checkingConflicts, setCheckingConflicts] = useState(false);
+  const [approvedSessions, setApprovedSessions] = useState<CalendarSession[]>([]);
+
   const [busy, setBusy] = useState(false);
 
   const selectedVenue = venues.find((v) => v.venue_id === venueId);
-
-  // VENUE-01 threshold advisory
-  const pCount = Number(estimatedParticipants);
-  const threshold = selectedVenue?.is_indoor ? 6 : 10;
-  const belowThreshold = pCount > 0 && pCount < threshold;
-
-  // Sport options from venue
   const sportOptions = selectedVenue?.sports.map((s) => s.sport_name) ?? [];
 
+  const bukcCountNum = parseInt(bukcCount, 10) || 0;
+  const opponentCountNum = parseInt(opponentCount, 10) || 0;
+  const totalParticipants = bukcCountNum + opponentCountNum;
+  const threshold = selectedVenue?.is_indoor ? 6 : 10;
+  const belowThreshold = totalParticipants > 0 && totalParticipants < threshold;
+
+  // When BUKC count changes, expand/trim roster to match
+  useEffect(() => {
+    if (bukcCountNum < 1) return;
+    setBukcPlayers((prev) => {
+      if (prev.length === bukcCountNum) return prev;
+      if (prev.length < bukcCountNum) {
+        return [...prev, ...Array(bukcCountNum - prev.length).fill(null).map(() => ({ enrollmentNo: '', fullName: '' }))];
+      }
+      return prev.slice(0, bukcCountNum);
+    });
+  }, [bukcCountNum]);
+
+  // Fetch approved sessions for this venue when we reach step 3
+  useEffect(() => {
+    if (step !== 3 || !venueId) return;
+    setCheckingConflicts(true);
+    listCalendar({ venueId })
+      .then((r) => setApprovedSessions(r.sessions))
+      .catch(() => setApprovedSessions([]))
+      .finally(() => setCheckingConflicts(false));
+  }, [step, venueId]);
+
+  // ── Validation ──
   function validateStep1(): boolean {
-    const errs: Record<string, string> = {};
-    if (!bookingType) errs.bookingType = 'Select a booking type.';
-    if (!venueId) errs.venueId = 'Select a venue.';
-    if (!sport.trim()) errs.sport = 'Specify the sport.';
-    if (!estimatedParticipants || isNaN(pCount) || pCount < 1) errs.participants = 'Enter the expected number of participants.';
-    setStep1Errors(errs);
-    return Object.keys(errs).length === 0;
+    const e: Record<string, string> = {};
+    if (!bookingType) e.bookingType = 'Select a booking type.';
+    if (!venueId) e.venueId = 'Select a venue.';
+    if (!sport.trim()) e.sport = 'Specify the sport.';
+    if (!bukcCount || bukcCountNum < 1) e.bukcCount = 'Enter BUKC team participant count.';
+    if (!opponentCount || opponentCountNum < 1) e.opponentCount = 'Enter opposing team participant count.';
+    setStep1Err(e);
+    return Object.keys(e).length === 0;
   }
 
   function validateStep2(): boolean {
-    const errs: Record<string, string> = {};
+    const e: Record<string, string> = {};
     if (bookingType === 'INTER_UNIVERSITY') {
-      if (!visitingUniversity.trim()) errs.visitingUniversity = 'Required.';
-      if (!visitingCity.trim()) errs.visitingCity = 'Required.';
-      if (!visitingTeamName.trim()) errs.visitingTeamName = 'Required.';
-      if (!visitingCaptainName.trim()) errs.visitingCaptainName = 'Required.';
-      if (!visitingCaptainContact.trim()) errs.visitingCaptainContact = 'Required.';
-      if (!bukcTeamName.trim()) errs.bukcTeamName = 'Required.';
-      if (!bukcCaptainEnrollment.trim()) errs.bukcCaptainEnrollment = 'Required.';
-      if (!bukcCaptainContact.trim()) errs.bukcCaptainContact = 'Required.';
-      const validPlayers = bukcPlayers.filter((p) => p.enrollmentNo.trim() && p.fullName.trim());
-      if (validPlayers.length === 0) errs.bukcPlayers = 'Add at least one BUKC player.';
+      if (!visitingUniversity.trim()) e.visitingUniversity = 'Required.';
+      if (!visitingCity.trim()) e.visitingCity = 'Required.';
+      if (!visitingTeamName.trim()) e.visitingTeamName = 'Required.';
+      if (!visitingCaptainName.trim()) e.visitingCaptainName = 'Required.';
+      if (!visitingCaptainContact.trim()) e.visitingCaptainContact = 'Required.';
+      if (!bukcTeamName.trim()) e.bukcTeamName = 'Required.';
+      if (!bukcCaptainName.trim()) e.bukcCaptainName = 'Required.';
+      if (!bukcCaptainEnrollment.trim()) e.bukcCaptainEnrollment = 'Required.';
+      if (!bukcCaptainContact.trim()) e.bukcCaptainContact = 'Required.';
+      const valid = bukcPlayers.filter((p) => p.enrollmentNo.trim() && p.fullName.trim());
+      if (valid.length < bukcCountNum) {
+        e.bukcPlayers = `Fill in all ${bukcCountNum} player entries (enrollment no. + name required for each).`;
+      }
     } else {
-      if (!teamAName.trim()) errs.teamAName = 'Required.';
-      if (!teamACaptainEnrollment.trim()) errs.teamACaptainEnrollment = 'Required.';
-      if (!teamACaptainContact.trim()) errs.teamACaptainContact = 'Required.';
-      if (!organizingEntity.trim()) errs.organizingEntity = 'Required.';
+      if (!teamAName.trim()) e.teamAName = 'Required.';
+      if (!teamACaptainName.trim()) e.teamACaptainName = 'Required.';
+      if (!teamACaptainEnrollment.trim()) e.teamACaptainEnrollment = 'Required.';
+      if (!teamACaptainContact.trim()) e.teamACaptainContact = 'Required.';
+      if (!organizingEntity.trim()) e.organizingEntity = 'Required.';
     }
-    setStep2Errors(errs);
+    setStep2Err(e);
+    return Object.keys(e).length === 0;
+  }
+
+  async function validateStep3(): Promise<boolean> {
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const errs: Record<number, string> = {};
+
+    for (const row of sessions) {
+      // 1. Past date check
+      if (row.date < today) {
+        errs[row.sessionNo] = `Date ${row.date} is in the past. Please select a future date.`;
+        continue;
+      }
+
+      // 2. Weekend check
+      const dow = new Date(row.date + 'T12:00:00').getDay(); // noon to avoid TZ issues
+      if (dow === 0 || dow === 6) {
+        errs[row.sessionNo] = `${DAYS[dow]}s are not permitted for matches. Please select a weekday (Mon–Fri).`;
+        continue;
+      }
+
+      // 3. End time must be after start time
+      if (row.endTime <= row.startTime) {
+        errs[row.sessionNo] = `End time must be after start time.`;
+        continue;
+      }
+
+      // 4. Duplicate session date within same request
+      const sameDateCount = sessions.filter((s) => s.date === row.date && s.sessionNo !== row.sessionNo).length;
+      if (sameDateCount > 0) {
+        errs[row.sessionNo] = `Duplicate date — another session in this request is already on ${row.date}.`;
+        continue;
+      }
+
+      // 5. Conflict with existing approved sessions at this venue
+      const reqStart = new Date(`${row.date}T${row.startTime}:00`);
+      const reqEnd = new Date(`${row.date}T${row.endTime}:00`);
+      const conflicting = approvedSessions.find((s) => {
+        const sStart = new Date(s.starts_at);
+        const sEnd = new Date(s.ends_at);
+        return reqStart < sEnd && reqEnd > sStart;
+      });
+      if (conflicting) {
+        const cs = new Date(conflicting.starts_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+        const ce = new Date(conflicting.ends_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
+        errs[row.sessionNo] = `This venue is already booked on ${row.date} from ${cs}–${ce}. Please choose a different time or date.`;
+      }
+    }
+
+    setSessionErrors(errs);
     return Object.keys(errs).length === 0;
   }
 
-  function nextStep() {
+  async function nextStep() {
     if (step === 1 && !validateStep1()) return;
     if (step === 2 && !validateStep2()) return;
-    setStep((s) => Math.min(s + 1, TOTAL_STEPS));
+    if (step === 3) {
+      const ok = await validateStep3();
+      if (!ok) return;
+    }
+    setStep((s) => Math.min(s + 1, TOTAL));
   }
 
   async function submit() {
+    // Re-run step 3 validation right before submit in case calendar changed
+    const ok = await validateStep3();
+    if (!ok) { setStep(3); return; }
+
     setBusy(true);
     try {
-      const sessionInputs = toSessionInputs();
       const validPlayers = bukcPlayers.filter((p) => p.enrollmentNo.trim() && p.fullName.trim());
-
-      const metadata = bookingType === 'INTER_UNIVERSITY' ? {
+      const meta = bookingType === 'INTER_UNIVERSITY' ? {
         bookingType: 'INTER_UNIVERSITY' as const,
         sport, eventFormat, matchFormat,
         visitingUniversity, visitingCity, visitingTeamName,
         visitingCaptainName, visitingCaptainContact,
-        bukcTeamName, bukcCaptainEnrollment, bukcCaptainContact,
+        bukcTeamName, bukcCaptainName, bukcCaptainEnrollment, bukcCaptainContact,
         bukcPlayers: validPlayers,
-        authorizationRef: authorizationRef.trim() || undefined,
+        equipmentSupport,
         specialRequirements: specialRequirements.trim() || undefined,
       } : {
         bookingType: 'INTERNAL' as const,
         sport, eventFormat, matchFormat,
-        teamAName, teamACaptainEnrollment, teamACaptainContact,
+        teamAName, teamACaptainName, teamACaptainEnrollment, teamACaptainContact,
         teamBName: teamBName.trim() || undefined,
         teamBCaptainEnrollment: teamBCaptainEnrollment.trim() || undefined,
         organizingEntity,
+        equipmentSupport,
         specialRequirements: specialRequirements.trim() || undefined,
       };
 
       await submitBooking({
         venueId,
-        estimatedParticipants: pCount,
-        sessions: sessionInputs,
-        metadata,
+        estimatedParticipants: totalParticipants,
+        sessions: toSessionInputs(),
+        metadata: meta as Parameters<typeof submitBooking>[0]['metadata'],
       });
-      onDone('Booking request submitted. You will be notified once the Coordinator reviews it.');
+      onDone('Booking request submitted. The Coordinator will review it and you will be notified.');
     } catch (e) { onError(errMsg(e)); }
     finally { setBusy(false); }
   }
 
-  const fieldInp = (hasErr: boolean): React.CSSProperties => ({
+  const fi = (hasErr: boolean): React.CSSProperties => ({
     ...inp,
     ...(hasErr ? { borderColor: '#c0392b', background: '#fff8f8' } : {}),
   });
@@ -300,57 +402,56 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
     <Panel title="New Booking Request">
       {/* Progress bar */}
       <div style={progressBar}>
-        {['Basics', 'Teams', 'Sessions', 'Review'].map((label, i) => (
+        {(['Basics', 'Teams', 'Sessions', 'Review'] as const).map((label, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, flex: i < 3 ? 1 : 0 }}>
             <div style={{
-              width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              font: '600 13px var(--font-body)',
+              width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', font: '600 13px var(--font-body)', flexShrink: 0,
               background: step > i + 1 ? '#1f8a4c' : step === i + 1 ? '#26485f' : '#e5e5e5',
               color: step >= i + 1 ? '#fff' : '#888',
-              flexShrink: 0,
             }}>
               {step > i + 1 ? '✓' : i + 1}
             </div>
-            <span style={{ fontSize: 12, color: step === i + 1 ? '#26485f' : '#888', fontWeight: step === i + 1 ? 600 : 400 }}>{label}</span>
+            <span style={{ fontSize: 12, color: step === i + 1 ? '#26485f' : '#888', fontWeight: step === i + 1 ? 600 : 400 }}>
+              {label}
+            </span>
             {i < 3 && <div style={{ flex: 1, height: 2, background: step > i + 1 ? '#1f8a4c' : '#e5e5e5', margin: '0 4px' }} />}
           </div>
         ))}
       </div>
 
-      {/* ── STEP 1: Basics ── */}
+      {/* ── STEP 1 ── */}
       {step === 1 && (
         <div style={stepBody}>
           <h3 style={stepTitle}>Step 1 — Booking Basics</h3>
 
-          {/* Booking type cards */}
+          {/* Booking type picker */}
           <div style={{ marginBottom: 18 }}>
-            <span style={lbl}>Booking type *</span>
+            <span style={{ ...lbl, ...(step1Err.bookingType ? { color: '#c0392b' } : {}) }}>
+              Booking type *
+            </span>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
               {([
                 { type: 'INTER_UNIVERSITY' as BookingType, icon: '🏆', title: 'Inter-University Competition', desc: 'BUKC hosts a visiting university team for an official match or tournament.' },
                 { type: 'INTERNAL' as BookingType, icon: '🎯', title: 'Internal / Practice', desc: 'Intra-campus match, inter-department competition, or team practice session.' },
               ] as const).map(({ type, icon, title, desc }) => (
                 <button key={type} type="button"
-                  style={{
-                    ...typeCard,
-                    ...(bookingType === type ? typeCardActive : {}),
-                    ...(step1Errors.bookingType ? { borderColor: '#c0392b' } : {}),
-                  }}
-                  onClick={() => { setBookingType(type); setStep1Errors((p) => ({ ...p, bookingType: '' })); }}>
+                  style={{ ...typeCard, ...(bookingType === type ? typeCardActive : {}), ...(step1Err.bookingType ? { borderColor: '#c0392b' } : {}) }}
+                  onClick={() => { setBookingType(type); setStep1Err((p) => ({ ...p, bookingType: '' })); }}>
                   <div style={{ fontSize: 26, marginBottom: 6 }}>{icon}</div>
                   <div style={{ font: '600 14px var(--font-body)', color: '#26485f', marginBottom: 4 }}>{title}</div>
                   <div style={{ fontSize: 12, color: '#5c6773', lineHeight: 1.4 }}>{desc}</div>
                 </button>
               ))}
             </div>
-            {step1Errors.bookingType && <span style={fieldErr}>{step1Errors.bookingType}</span>}
+            {step1Err.bookingType && <span style={fieldErr}>{step1Err.bookingType}</span>}
           </div>
 
           <div style={formGrid}>
             {/* Venue */}
             <L label="Venue *">
-              <select style={fieldInp(!!step1Errors.venueId)} value={venueId}
-                onChange={(e) => { setVenueId(Number(e.target.value)); setSport(''); setStep1Errors((p) => ({ ...p, venueId: '' })); }}>
+              <select style={fi(!!step1Err.venueId)} value={venueId}
+                onChange={(e) => { setVenueId(Number(e.target.value)); setSport(''); setStep1Err((p) => ({ ...p, venueId: '' })); }}>
                 <option value={0}>Select a venue…</option>
                 {venues.filter((v) => v.availability_status === 'AVAILABLE').map((v) => (
                   <option key={v.venue_id} value={v.venue_id}>
@@ -358,39 +459,46 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
                   </option>
                 ))}
               </select>
-              {step1Errors.venueId && <span style={fieldErr}>{step1Errors.venueId}</span>}
+              {step1Err.venueId && <span style={fieldErr}>{step1Err.venueId}</span>}
             </L>
 
             {/* Sport */}
             <L label="Sport *">
               {selectedVenue && sportOptions.length > 0 ? (
-                <select style={fieldInp(!!step1Errors.sport)} value={sport}
-                  onChange={(e) => { setSport(e.target.value); setStep1Errors((p) => ({ ...p, sport: '' })); }}>
+                <select style={fi(!!step1Err.sport)} value={sport}
+                  onChange={(e) => { setSport(e.target.value); setStep1Err((p) => ({ ...p, sport: '' })); }}>
                   <option value="">Select sport…</option>
                   {sportOptions.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               ) : (
-                <input style={fieldInp(!!step1Errors.sport)} value={sport}
-                  onChange={(e) => { setSport(e.target.value); setStep1Errors((p) => ({ ...p, sport: '' })); }}
+                <input style={fi(!!step1Err.sport)} value={sport}
+                  onChange={(e) => { setSport(e.target.value); setStep1Err((p) => ({ ...p, sport: '' })); }}
                   placeholder="e.g. Football, Cricket…" />
               )}
-              {step1Errors.sport && <span style={fieldErr}>{step1Errors.sport}</span>}
+              {step1Err.sport && <span style={fieldErr}>{step1Err.sport}</span>}
             </L>
 
-            {/* Estimated participants */}
-            <L label="Total participants (both teams) *">
-              <input type="number" min={1} style={fieldInp(!!step1Errors.participants)}
-                value={estimatedParticipants}
-                onChange={(e) => { setParticipants(e.target.value); setStep1Errors((p) => ({ ...p, participants: '' })); }}
-                placeholder={selectedVenue?.is_indoor ? 'Min. 6 for indoor' : 'Min. 10 for outdoor'} />
-              {step1Errors.participants && <span style={fieldErr}>{step1Errors.participants}</span>}
-              {belowThreshold && (
-                <div style={warningBox}>
-                  ⚠ VENUE-01: {selectedVenue?.is_indoor ? 'Indoor' : 'Outdoor'} venues require{' '}
-                  {selectedVenue?.is_indoor ? '6+' : '10+'} participants. Your request may be questioned.
-                  It will still be reviewed, but ensure you have a valid justification.
-                </div>
+            {/* BUKC participant count */}
+            <L label="BUKC team — no. of participants *">
+              <input type="number" min={1} style={fi(!!step1Err.bukcCount)}
+                value={bukcCount}
+                onChange={(e) => { setBukcCount(e.target.value); setStep1Err((p) => ({ ...p, bukcCount: '' })); }}
+                placeholder="e.g. 11" />
+              {step1Err.bukcCount && <span style={fieldErr}>{step1Err.bukcCount}</span>}
+              {bukcCountNum > 0 && (
+                <span style={{ fontSize: 12, color: '#5c6773', marginTop: 3 }}>
+                  Roster in Step 2 will have {bukcCountNum} player slot{bukcCountNum !== 1 ? 's' : ''}.
+                </span>
               )}
+            </L>
+
+            {/* Opponent participant count */}
+            <L label={bookingType === 'INTER_UNIVERSITY' ? 'Visiting team — no. of participants *' : 'Opponent team — no. of participants *'}>
+              <input type="number" min={1} style={fi(!!step1Err.opponentCount)}
+                value={opponentCount}
+                onChange={(e) => { setOpponentCount(e.target.value); setStep1Err((p) => ({ ...p, opponentCount: '' })); }}
+                placeholder="e.g. 11" />
+              {step1Err.opponentCount && <span style={fieldErr}>{step1Err.opponentCount}</span>}
             </L>
 
             {/* Event format */}
@@ -411,95 +519,84 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
               </select>
             </L>
 
-            {/* Venue info box */}
+            {/* VENUE-01 threshold advisory */}
+            {belowThreshold && (
+              <div style={{ gridColumn: '1 / -1', ...warningBox }}>
+                ⚠ VENUE-01: {selectedVenue?.is_indoor ? 'Indoor' : 'Outdoor'} venues require{' '}
+                {selectedVenue?.is_indoor ? '6+' : '10+'} total participants. Your request may be questioned
+                by the Coordinator. Ensure you have a valid justification ready.
+              </div>
+            )}
+
+            {/* Venue info */}
             {selectedVenue && (
               <div style={{ gridColumn: '1 / -1', ...venueInfoBox }}>
                 <strong>{selectedVenue.name}</strong>
                 {selectedVenue.location && <> · {selectedVenue.location}</>}
-                {' · '} Capacity {selectedVenue.capacity}
-                {' · '} {selectedVenue.is_indoor ? 'Indoor' : 'Outdoor'}
+                {' · '}Capacity {selectedVenue.capacity}
+                {' · '}{selectedVenue.is_indoor ? 'Indoor' : 'Outdoor'}
                 {selectedVenue.surface_type && <> · {selectedVenue.surface_type}</>}
               </div>
             )}
+
+            {/* Equipment support */}
+            <div style={{ gridColumn: '1 / -1' }}>
+              <span style={lbl}>Equipment *</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
+                {([
+                  { value: 'SELF', label: 'Both teams will supply their own equipment', desc: 'Each team is responsible for bringing the equipment needed for the match.' },
+                  { value: 'UNIVERSITY', label: 'University support required', desc: 'We need the university to provide equipment for this match. The Coordinator will check inventory and plan allocation after approval.' },
+                ] as const).map(({ value, label, desc }) => (
+                  <label key={value} style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer',
+                    padding: '10px 14px', border: `2px solid ${equipmentSupport === value ? '#26485f' : '#e5e5e5'}`,
+                    borderRadius: 8, background: equipmentSupport === value ? '#f0f4f8' : '#fafafa',
+                    transition: 'all 0.15s',
+                  }}>
+                    <input type="radio" name="equipmentSupport" value={value}
+                      checked={equipmentSupport === value}
+                      onChange={() => setEquipmentSupport(value)}
+                      style={{ marginTop: 3 }} />
+                    <div>
+                      <div style={{ font: '600 14px var(--font-body)', color: '#26485f' }}>{label}</div>
+                      <div style={{ font: '12px var(--font-body)', color: '#5c6773', marginTop: 2 }}>{desc}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* ── STEP 2: Team Details ── */}
+      {/* ── STEP 2: Inter-University ── */}
       {step === 2 && bookingType === 'INTER_UNIVERSITY' && (
         <div style={stepBody}>
           <h3 style={stepTitle}>Step 2 — Team Details: Inter-University</h3>
 
-          <SectionHeading>Visiting Team</SectionHeading>
+          <SectionHeading>Visiting Team ({opponentCountNum} participant{opponentCountNum !== 1 ? 's' : ''})</SectionHeading>
           <div style={formGrid}>
-            <L label="Visiting university *">
-              <input style={fieldInp(!!step2Errors.visitingUniversity)} value={visitingUniversity}
-                onChange={(e) => { setVU(e.target.value); setStep2Errors((p) => ({ ...p, visitingUniversity: '' })); }}
-                placeholder="e.g. FAST NUCES" />
-              {step2Errors.visitingUniversity && <span style={fieldErr}>{step2Errors.visitingUniversity}</span>}
-            </L>
-            <L label="City *">
-              <input style={fieldInp(!!step2Errors.visitingCity)} value={visitingCity}
-                onChange={(e) => { setVC(e.target.value); setStep2Errors((p) => ({ ...p, visitingCity: '' })); }}
-                placeholder="e.g. Karachi" />
-              {step2Errors.visitingCity && <span style={fieldErr}>{step2Errors.visitingCity}</span>}
-            </L>
-            <L label="Team name *">
-              <input style={fieldInp(!!step2Errors.visitingTeamName)} value={visitingTeamName}
-                onChange={(e) => { setVTN(e.target.value); setStep2Errors((p) => ({ ...p, visitingTeamName: '' })); }}
-                placeholder="e.g. FAST Lions" />
-              {step2Errors.visitingTeamName && <span style={fieldErr}>{step2Errors.visitingTeamName}</span>}
-            </L>
-            <L label="Captain name *">
-              <input style={fieldInp(!!step2Errors.visitingCaptainName)} value={visitingCaptainName}
-                onChange={(e) => { setVCN(e.target.value); setStep2Errors((p) => ({ ...p, visitingCaptainName: '' })); }}
-                placeholder="Full name" />
-              {step2Errors.visitingCaptainName && <span style={fieldErr}>{step2Errors.visitingCaptainName}</span>}
-            </L>
-            <L label="Captain contact *">
-              <input style={fieldInp(!!step2Errors.visitingCaptainContact)} value={visitingCaptainContact}
-                onChange={(e) => { setVCC(e.target.value); setStep2Errors((p) => ({ ...p, visitingCaptainContact: '' })); }}
-                placeholder="e.g. 0312-3456789" />
-              {step2Errors.visitingCaptainContact && <span style={fieldErr}>{step2Errors.visitingCaptainContact}</span>}
-            </L>
+            <L label="University name *"><input style={fi(!!step2Err.visitingUniversity)} value={visitingUniversity} onChange={(e) => { setVU(e.target.value); setStep2Err((p) => ({ ...p, visitingUniversity: '' })); }} placeholder="e.g. FAST NUCES" />{step2Err.visitingUniversity && <span style={fieldErr}>{step2Err.visitingUniversity}</span>}</L>
+            <L label="City *"><input style={fi(!!step2Err.visitingCity)} value={visitingCity} onChange={(e) => { setVC(e.target.value); setStep2Err((p) => ({ ...p, visitingCity: '' })); }} placeholder="e.g. Karachi" />{step2Err.visitingCity && <span style={fieldErr}>{step2Err.visitingCity}</span>}</L>
+            <L label="Team name *"><input style={fi(!!step2Err.visitingTeamName)} value={visitingTeamName} onChange={(e) => { setVTN(e.target.value); setStep2Err((p) => ({ ...p, visitingTeamName: '' })); }} placeholder="e.g. FAST Lions" />{step2Err.visitingTeamName && <span style={fieldErr}>{step2Err.visitingTeamName}</span>}</L>
+            <L label="Captain name *"><input style={fi(!!step2Err.visitingCaptainName)} value={visitingCaptainName} onChange={(e) => { setVCN(e.target.value); setStep2Err((p) => ({ ...p, visitingCaptainName: '' })); }} placeholder="Full name" />{step2Err.visitingCaptainName && <span style={fieldErr}>{step2Err.visitingCaptainName}</span>}</L>
+            <L label="Captain contact *"><input style={fi(!!step2Err.visitingCaptainContact)} value={visitingCaptainContact} onChange={(e) => { setVCC(e.target.value); setStep2Err((p) => ({ ...p, visitingCaptainContact: '' })); }} placeholder="e.g. 0312-3456789" />{step2Err.visitingCaptainContact && <span style={fieldErr}>{step2Err.visitingCaptainContact}</span>}</L>
           </div>
 
-          <SectionHeading>BUKC Team</SectionHeading>
+          <SectionHeading>BUKC Team ({bukcCountNum} participant{bukcCountNum !== 1 ? 's' : ''})</SectionHeading>
           <div style={formGrid}>
-            <L label="BUKC team name *">
-              <input style={fieldInp(!!step2Errors.bukcTeamName)} value={bukcTeamName}
-                onChange={(e) => { setBTN(e.target.value); setStep2Errors((p) => ({ ...p, bukcTeamName: '' })); }}
-                placeholder="e.g. BUKC Warriors" />
-              {step2Errors.bukcTeamName && <span style={fieldErr}>{step2Errors.bukcTeamName}</span>}
-            </L>
-            <L label="Captain enrollment no. *">
-              <input style={fieldInp(!!step2Errors.bukcCaptainEnrollment)} value={bukcCaptainEnrollment}
-                onChange={(e) => { setBCE(e.target.value); setStep2Errors((p) => ({ ...p, bukcCaptainEnrollment: '' })); }}
-                placeholder="e.g. 84-024000-321" />
-              {step2Errors.bukcCaptainEnrollment && <span style={fieldErr}>{step2Errors.bukcCaptainEnrollment}</span>}
-            </L>
-            <L label="Captain contact *">
-              <input style={fieldInp(!!step2Errors.bukcCaptainContact)} value={bukcCaptainContact}
-                onChange={(e) => { setBCC(e.target.value); setStep2Errors((p) => ({ ...p, bukcCaptainContact: '' })); }}
-                placeholder="e.g. 0311-2345678" />
-              {step2Errors.bukcCaptainContact && <span style={fieldErr}>{step2Errors.bukcCaptainContact}</span>}
-            </L>
-            <L label="Authorization / letter reference">
-              <input style={inp} value={authorizationRef} onChange={(e) => setAuthRef(e.target.value)}
-                placeholder="e.g. Sports Dept. approval ref. #SD-2026-014" />
-            </L>
+            <L label="Team name *"><input style={fi(!!step2Err.bukcTeamName)} value={bukcTeamName} onChange={(e) => { setBTN(e.target.value); setStep2Err((p) => ({ ...p, bukcTeamName: '' })); }} placeholder="e.g. BUKC Warriors" />{step2Err.bukcTeamName && <span style={fieldErr}>{step2Err.bukcTeamName}</span>}</L>
+            <L label="Captain name *"><input style={fi(!!step2Err.bukcCaptainName)} value={bukcCaptainName} onChange={(e) => { setBCN(e.target.value); setStep2Err((p) => ({ ...p, bukcCaptainName: '' })); }} placeholder="Full name" />{step2Err.bukcCaptainName && <span style={fieldErr}>{step2Err.bukcCaptainName}</span>}</L>
+            <L label="Captain enrollment no. *"><input style={fi(!!step2Err.bukcCaptainEnrollment)} value={bukcCaptainEnrollment} onChange={(e) => { setBCE(e.target.value); setStep2Err((p) => ({ ...p, bukcCaptainEnrollment: '' })); }} placeholder="e.g. 84-024000-321" />{step2Err.bukcCaptainEnrollment && <span style={fieldErr}>{step2Err.bukcCaptainEnrollment}</span>}</L>
+            <L label="Captain contact *"><input style={fi(!!step2Err.bukcCaptainContact)} value={bukcCaptainContact} onChange={(e) => { setBCC(e.target.value); setStep2Err((p) => ({ ...p, bukcCaptainContact: '' })); }} placeholder="e.g. 0311-2345678" />{step2Err.bukcCaptainContact && <span style={fieldErr}>{step2Err.bukcCaptainContact}</span>}</L>
           </div>
 
-          {/* BUKC Player roster */}
+          {/* BUKC Player roster — fixed to bukcCountNum entries */}
           <div style={{ marginTop: 18 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <span style={{ ...lbl, margin: 0 }}>BUKC Player Roster *</span>
-              <button type="button" style={addRowBtn}
-                onClick={() => setBukcPlayers((p) => [...p, { enrollmentNo: '', fullName: '' }])}>
-                + Add player
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={lbl}>BUKC Player Roster * ({bukcCountNum} player{bukcCountNum !== 1 ? 's' : ''} — matches count entered in Step 1)</span>
             </div>
-            {step2Errors.bukcPlayers && <span style={{ ...fieldErr, display: 'block', marginBottom: 8 }}>{step2Errors.bukcPlayers}</span>}
+            {step2Err.bukcPlayers && <span style={{ ...fieldErr, display: 'block', marginBottom: 8 }}>{step2Err.bukcPlayers}</span>}
             <div style={{ display: 'grid', gap: 8 }}>
               {bukcPlayers.map((player, i) => (
                 <div key={i} style={playerRow}>
@@ -508,59 +605,34 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
                     onChange={(e) => setBukcPlayers((prev) => prev.map((p, j) => j === i ? { ...p, enrollmentNo: e.target.value } : p))} />
                   <input style={{ ...inp, flex: 2 }} placeholder="Full name" value={player.fullName}
                     onChange={(e) => setBukcPlayers((prev) => prev.map((p, j) => j === i ? { ...p, fullName: e.target.value } : p))} />
-                  {bukcPlayers.length > 1 && (
-                    <button type="button" style={removeRowBtn}
-                      onClick={() => setBukcPlayers((prev) => prev.filter((_, j) => j !== i))}>×</button>
-                  )}
                 </div>
               ))}
             </div>
+            <p style={{ margin: '8px 0 0', fontSize: 12, color: '#5c6773' }}>
+              To change the roster size, go back to Step 1 and update the BUKC participant count.
+            </p>
           </div>
         </div>
       )}
 
+      {/* ── STEP 2: Internal ── */}
       {step === 2 && bookingType === 'INTERNAL' && (
         <div style={stepBody}>
           <h3 style={stepTitle}>Step 2 — Team Details: Internal</h3>
 
-          <SectionHeading>Team A (Your Team)</SectionHeading>
+          <SectionHeading>Team A — Your Team ({bukcCountNum} participant{bukcCountNum !== 1 ? 's' : ''})</SectionHeading>
           <div style={formGrid}>
-            <L label="Team name *">
-              <input style={fieldInp(!!step2Errors.teamAName)} value={teamAName}
-                onChange={(e) => { setTAN(e.target.value); setStep2Errors((p) => ({ ...p, teamAName: '' })); }}
-                placeholder="e.g. CS Department XI" />
-              {step2Errors.teamAName && <span style={fieldErr}>{step2Errors.teamAName}</span>}
-            </L>
-            <L label="Captain enrollment no. *">
-              <input style={fieldInp(!!step2Errors.teamACaptainEnrollment)} value={teamACaptainEnrollment}
-                onChange={(e) => { setTACE(e.target.value); setStep2Errors((p) => ({ ...p, teamACaptainEnrollment: '' })); }}
-                placeholder="e.g. 84-024000-321" />
-              {step2Errors.teamACaptainEnrollment && <span style={fieldErr}>{step2Errors.teamACaptainEnrollment}</span>}
-            </L>
-            <L label="Captain contact *">
-              <input style={fieldInp(!!step2Errors.teamACaptainContact)} value={teamACaptainContact}
-                onChange={(e) => { setTACC(e.target.value); setStep2Errors((p) => ({ ...p, teamACaptainContact: '' })); }}
-                placeholder="e.g. 0311-2345678" />
-              {step2Errors.teamACaptainContact && <span style={fieldErr}>{step2Errors.teamACaptainContact}</span>}
-            </L>
-            <L label="Organizing department / society *">
-              <input style={fieldInp(!!step2Errors.organizingEntity)} value={organizingEntity}
-                onChange={(e) => { setOE(e.target.value); setStep2Errors((p) => ({ ...p, organizingEntity: '' })); }}
-                placeholder="e.g. CS Department, Sports Society" />
-              {step2Errors.organizingEntity && <span style={fieldErr}>{step2Errors.organizingEntity}</span>}
-            </L>
+            <L label="Team name *"><input style={fi(!!step2Err.teamAName)} value={teamAName} onChange={(e) => { setTAN(e.target.value); setStep2Err((p) => ({ ...p, teamAName: '' })); }} placeholder="e.g. CS Department XI" />{step2Err.teamAName && <span style={fieldErr}>{step2Err.teamAName}</span>}</L>
+            <L label="Captain name *"><input style={fi(!!step2Err.teamACaptainName)} value={teamACaptainName} onChange={(e) => { setTACN(e.target.value); setStep2Err((p) => ({ ...p, teamACaptainName: '' })); }} placeholder="Full name" />{step2Err.teamACaptainName && <span style={fieldErr}>{step2Err.teamACaptainName}</span>}</L>
+            <L label="Captain enrollment no. *"><input style={fi(!!step2Err.teamACaptainEnrollment)} value={teamACaptainEnrollment} onChange={(e) => { setTACE(e.target.value); setStep2Err((p) => ({ ...p, teamACaptainEnrollment: '' })); }} placeholder="e.g. 84-024000-321" />{step2Err.teamACaptainEnrollment && <span style={fieldErr}>{step2Err.teamACaptainEnrollment}</span>}</L>
+            <L label="Captain contact *"><input style={fi(!!step2Err.teamACaptainContact)} value={teamACaptainContact} onChange={(e) => { setTACC(e.target.value); setStep2Err((p) => ({ ...p, teamACaptainContact: '' })); }} placeholder="e.g. 0311-2345678" />{step2Err.teamACaptainContact && <span style={fieldErr}>{step2Err.teamACaptainContact}</span>}</L>
+            <L label="Organizing department / society *"><input style={fi(!!step2Err.organizingEntity)} value={organizingEntity} onChange={(e) => { setOE(e.target.value); setStep2Err((p) => ({ ...p, organizingEntity: '' })); }} placeholder="e.g. CS Department, Sports Society" />{step2Err.organizingEntity && <span style={fieldErr}>{step2Err.organizingEntity}</span>}</L>
           </div>
 
-          <SectionHeading>Team B (Opponent — optional for practice)</SectionHeading>
+          <SectionHeading>Team B — Opponent ({opponentCountNum} participant{opponentCountNum !== 1 ? 's' : ''}) — optional for solo practice</SectionHeading>
           <div style={formGrid}>
-            <L label="Team name">
-              <input style={inp} value={teamBName} onChange={(e) => setTBN(e.target.value)}
-                placeholder="e.g. EE Department XI (leave blank for solo practice)" />
-            </L>
-            <L label="Captain enrollment no.">
-              <input style={inp} value={teamBCaptainEnrollment} onChange={(e) => setTBCE(e.target.value)}
-                placeholder="e.g. 83-019000-111" />
-            </L>
+            <L label="Team name"><input style={inp} value={teamBName} onChange={(e) => setTBN(e.target.value)} placeholder="e.g. EE Department XI" /></L>
+            <L label="Captain enrollment no."><input style={inp} value={teamBCaptainEnrollment} onChange={(e) => setTBCE(e.target.value)} placeholder="e.g. 83-019000-111" /></L>
           </div>
         </div>
       )}
@@ -571,20 +643,27 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
           <h3 style={stepTitle}>
             Step 3 — {eventFormat === 'SINGLE_MATCH' ? 'Match Date & Time' : 'Tournament Schedule'}
           </h3>
-          {eventFormat === 'TOURNAMENT' && (
-            <p style={stepHint}>
-              Add one session per match day. Up to 30 sessions for a full tournament bracket.
-            </p>
-          )}
-          <div style={{ maxWidth: 700 }}>
-            <div style={{ display: 'grid' }}>
-              <SessionRowsEditor rows={sessions} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} />
+
+          {checkingConflicts && (
+            <div style={{ ...infoBox, marginBottom: 14 }}>
+              Checking venue availability… please wait before adding sessions.
             </div>
+          )}
+
+          <div style={{ background: '#f0f4f8', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#26485f' }}>
+            <strong>Date rules:</strong> Weekdays only (Mon–Fri) · Future dates only · No overlap with existing approved sessions at this venue
           </div>
-          <div style={{ marginTop: 16 }}>
+
+          {eventFormat === 'TOURNAMENT' && (
+            <p style={stepHint}>Add one session per match day. Sessions on the same date are not allowed.</p>
+          )}
+
+          <SessionRowsEditor rows={sessions} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} errors={sessionErrors} />
+
+          <div style={{ marginTop: 20 }}>
             <L label="Special requirements / notes (optional)">
-              <textarea style={{ ...inp, minHeight: 72, resize: 'vertical' }} value={specialRequirements}
-                onChange={(e) => setSpecialReq(e.target.value)}
+              <textarea style={{ ...inp, minHeight: 72, resize: 'vertical', width: '100%', boxSizing: 'border-box' }}
+                value={specialRequirements} onChange={(e) => setSpecialReq(e.target.value)}
                 placeholder="e.g. Will need scoreboard access, spectator seating for 50, referee required…" maxLength={500} />
               <span style={{ fontSize: 11, color: '#8a949f' }}>{specialRequirements.length}/500</span>
             </L>
@@ -596,14 +675,15 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
       {step === 4 && (
         <div style={stepBody}>
           <h3 style={stepTitle}>Step 4 — Review Your Request</h3>
-          <p style={stepHint}>Please verify everything below before submitting. Once submitted, you cannot edit the request.</p>
+          <p style={stepHint}>Verify everything below before submitting. You cannot edit after submission.</p>
 
           <ReviewSection title="Event Details">
             <ReviewRow label="Type" value={bookingType === 'INTER_UNIVERSITY' ? 'Inter-University Competition' : 'Internal / Practice'} />
             <ReviewRow label="Venue" value={selectedVenue?.name ?? '—'} />
             <ReviewRow label="Sport" value={sport} />
             <ReviewRow label="Format" value={`${EVENT_FORMAT_LABEL[eventFormat]} · ${MATCH_FORMAT_LABEL[matchFormat]}`} />
-            <ReviewRow label="Participants" value={`${estimatedParticipants} total`} />
+            <ReviewRow label="Total participants" value={`${totalParticipants} (BUKC: ${bukcCountNum} · ${bookingType === 'INTER_UNIVERSITY' ? 'Visiting' : 'Opponent'}: ${opponentCountNum})`} />
+            <ReviewRow label="Equipment" value={equipmentSupport === 'SELF' ? 'Teams supply own equipment' : 'University support required'} />
           </ReviewSection>
 
           {bookingType === 'INTER_UNIVERSITY' && (
@@ -614,18 +694,17 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
                 <ReviewRow label="Captain" value={`${visitingCaptainName} · ${visitingCaptainContact}`} />
               </ReviewSection>
               <ReviewSection title="BUKC Team">
-                <ReviewRow label="Team name" value={bukcTeamName} />
-                <ReviewRow label="Captain" value={`${bukcCaptainEnrollment} · ${bukcCaptainContact}`} />
-                <ReviewRow label="Roster" value={`${bukcPlayers.filter((p) => p.enrollmentNo.trim()).length} player(s) listed`} />
-                {authorizationRef && <ReviewRow label="Auth. ref." value={authorizationRef} />}
+                <ReviewRow label="Team" value={bukcTeamName} />
+                <ReviewRow label="Captain" value={`${bukcCaptainName} · ${bukcCaptainEnrollment} · ${bukcCaptainContact}`} />
+                <ReviewRow label="Roster" value={`${bukcPlayers.filter((p) => p.enrollmentNo.trim()).length}/${bukcCountNum} players listed`} />
               </ReviewSection>
             </>
           )}
 
           {bookingType === 'INTERNAL' && (
             <ReviewSection title="Teams">
-              <ReviewRow label="Team A" value={`${teamAName} (captain: ${teamACaptainEnrollment})`} />
-              {teamBName && <ReviewRow label="Team B" value={`${teamBName}${teamBCaptainEnrollment ? ` (captain: ${teamBCaptainEnrollment})` : ''}`} />}
+              <ReviewRow label="Team A" value={`${teamAName} — ${teamACaptainName} (${teamACaptainEnrollment})`} />
+              {teamBName && <ReviewRow label="Team B" value={`${teamBName}${teamBCaptainEnrollment ? ` (${teamBCaptainEnrollment})` : ''}`} />}
               <ReviewRow label="Organizer" value={organizingEntity} />
             </ReviewSection>
           )}
@@ -634,33 +713,33 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
             {sessions.map((s) => (
               <ReviewRow key={s.sessionNo}
                 label={`Session ${s.sessionNo}`}
-                value={`${s.date} · ${s.startTime} – ${s.endTime}${s.teamName ? ` · ${s.teamName}` : ''}`} />
+                value={`${s.date} (${DAYS[new Date(s.date + 'T12:00:00').getDay()]}) · ${s.startTime}–${s.endTime}`} />
             ))}
           </ReviewSection>
 
           {specialRequirements && (
             <ReviewSection title="Special Requirements">
-              <p style={{ margin: 0, fontSize: 14, color: '#444', lineHeight: 1.5 }}>{specialRequirements}</p>
+              <p style={{ margin: 0, padding: '6px 14px', fontSize: 13.5, color: '#444', lineHeight: 1.5 }}>
+                {specialRequirements}
+              </p>
             </ReviewSection>
           )}
 
           <div style={{ marginTop: 16, padding: '12px 14px', background: '#f0f4f8', borderRadius: 6, fontSize: 13, color: '#5c6773', lineHeight: 1.6 }}>
-            By submitting, you confirm that all information is accurate and that this event complies with BUKC Sports Department policies.
-            Your request will be reviewed by the Sports Coordinator and, if forwarded, by the Super Admin before any slot is confirmed.
+            By submitting, you confirm all information is accurate and this event complies with BUKC Sports Department policies.
+            Your request will be reviewed by the Sports Coordinator before any slot is confirmed.
           </div>
         </div>
       )}
 
-      {/* ── Navigation ── */}
+      {/* Navigation footer */}
       <div style={wizardFooter}>
         <div style={{ display: 'flex', gap: 10 }}>
           {step > 1 && <button type="button" style={ghostBtn} onClick={() => setStep((s) => s - 1)}>← Back</button>}
-          {step < TOTAL_STEPS && (
-            <button type="button" style={primaryBtn} onClick={nextStep}>
-              Continue →
-            </button>
+          {step < TOTAL && (
+            <button type="button" style={primaryBtn} onClick={nextStep}>Continue →</button>
           )}
-          {step === TOTAL_STEPS && (
+          {step === TOTAL && (
             <button type="button" style={submitBtn} disabled={busy} onClick={submit}>
               {busy ? 'Submitting…' : 'Submit Booking Request'}
             </button>
@@ -674,55 +753,51 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
   );
 }
 
-// ── Small components ──
+// ── Small shared components ──
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return <div style={{ font: '600 13px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '20px 0 10px', paddingBottom: 6, borderBottom: '2px solid #e7edf4' }}>{children}</div>;
 }
 function ReviewSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 16, border: '1px solid #e5e5e5', borderRadius: 6, overflow: 'hidden' }}>
+    <div style={{ marginBottom: 14, border: '1px solid #e5e5e5', borderRadius: 6, overflow: 'hidden' }}>
       <div style={{ padding: '8px 14px', background: '#f7f9fb', borderBottom: '1px solid #e5e5e5', font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</div>
-      <div style={{ padding: '8px 0' }}>{children}</div>
+      <div style={{ padding: '4px 0' }}>{children}</div>
     </div>
   );
 }
 function ReviewRow({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', padding: '6px 14px', borderBottom: '1px solid #f4f4f4', fontSize: 13.5 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', padding: '6px 14px', borderBottom: '1px solid #f4f4f4', fontSize: 13.5 }}>
       <span style={{ color: '#8a949f', fontWeight: 600 }}>{label}</span>
       <span style={{ color: '#333' }}>{value}</span>
     </div>
   );
 }
 function StatusBadge({ status }: { status: string }) {
-  const style = ['APPROVED', 'COMPLETED'].includes(status) ? badge.ok
+  const s = ['APPROVED', 'COMPLETED'].includes(status) ? badge.ok
     : ['REJECTED', 'CANCELLED'].includes(status) ? badge.danger
     : badge.warn;
   const label = status === 'SHORTFALL_PENDING' ? 'Awaiting your response' : status;
-  return <span style={{ ...badgeBase, ...style }}>{label}</span>;
+  return <span style={{ ...badgeBase, ...s }}>{label}</span>;
 }
 function ShortfallActions({ bookingId, onDone, onError }: { bookingId: string; onDone: (m: string) => void; onError: (m: string) => void }) {
   const [busy, setBusy] = useState(false);
-  const [showDecline, setShowDecline] = useState(false);
-  async function respond(confirm: boolean) {
+  const [confirm, setConfirm] = useState(false);
+  async function respond(yes: boolean) {
     setBusy(true);
-    try {
-      await confirmShortfall(bookingId, confirm);
-      onDone(confirm ? "Confirmed — booking returned to the Coordinator." : "Declined — booking rejected.");
-    } catch (e) { onError(e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'); }
-    finally { setBusy(false); }
+    try { await confirmShortfall(bookingId, yes); onDone(yes ? 'Confirmed.' : 'Declined.'); }
+    catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
-  if (showDecline) return (
-    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-      <span style={{ fontSize: 12.5, color: '#5c6773' }}>Sure?</span>
+  if (confirm) return (
+    <span style={{ display: 'inline-flex', gap: 6 }}>
       <button style={smallDanger} disabled={busy} onClick={() => respond(false)}>Yes, decline</button>
-      <button style={smallGhost} onClick={() => setShowDecline(false)}>Cancel</button>
+      <button style={smallGhost} onClick={() => setConfirm(false)}>Cancel</button>
     </span>
   );
   return (
     <span style={{ display: 'inline-flex', gap: 6 }}>
       <button style={smallAccept} disabled={busy} onClick={() => respond(true)}>I'll supply it</button>
-      <button style={smallGhost} onClick={() => setShowDecline(true)}>Decline</button>
+      <button style={smallGhost} onClick={() => setConfirm(true)}>Decline</button>
     </span>
   );
 }
@@ -745,8 +820,9 @@ const lbl: React.CSSProperties = { display: 'block', font: '500 12px var(--font-
 const inp: React.CSSProperties = { width: '100%', font: '14px var(--font-body)', padding: '9px 11px', border: '1px solid #ccc', borderRadius: 6, boxSizing: 'border-box' };
 const formGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 };
 const fieldErr: React.CSSProperties = { display: 'block', fontSize: 12, color: '#c0392b', marginTop: 4 };
-const warningBox: React.CSSProperties = { marginTop: 8, padding: '8px 12px', background: '#fdf1e3', border: '1px solid #f0c060', borderRadius: 6, fontSize: 12.5, color: '#9a6412', lineHeight: 1.5 };
+const warningBox: React.CSSProperties = { padding: '8px 12px', background: '#fdf1e3', border: '1px solid #f0c060', borderRadius: 6, fontSize: 12.5, color: '#9a6412', lineHeight: 1.5 };
 const infoBox: React.CSSProperties = { padding: '10px 14px', background: '#e3f2ff', border: '1px solid #90caf9', borderRadius: 6, fontSize: 13.5, color: '#1565c0', marginBottom: 18 };
+const venueInfoBox: React.CSSProperties = { padding: '10px 14px', background: '#f0f4f8', borderRadius: 6, fontSize: 13, color: '#26485f' };
 const badgeBase: React.CSSProperties = { font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4 };
 const badge = {
   ok: { background: '#e6f4ec', color: '#1f7a45' } as React.CSSProperties,
@@ -766,9 +842,6 @@ const stepHint: React.CSSProperties = { margin: '-8px 0 18px', font: '14px var(-
 const wizardFooter: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 20, marginTop: 20, borderTop: '1px solid #e5e5e5' };
 const typeCard: React.CSSProperties = { background: '#f8f9fa', border: '2px solid #e5e5e5', borderRadius: 10, padding: '16px 18px', cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s' };
 const typeCardActive: React.CSSProperties = { borderColor: '#26485f', background: '#f0f4f8' };
-const venueInfoBox: React.CSSProperties = { padding: '10px 14px', background: '#f0f4f8', borderRadius: 6, fontSize: 13, color: '#26485f' };
-const addRowBtn: React.CSSProperties = { background: 'none', border: 'none', color: '#0a6ebd', font: '600 13px var(--font-body)', cursor: 'pointer', padding: '4px 8px' };
-const removeRowBtn: React.CSSProperties = { background: 'none', border: 'none', color: '#c0392b', font: '600 16px var(--font-body)', cursor: 'pointer', padding: '0 4px', lineHeight: 1, alignSelf: 'center' };
 const playerRow: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'flex-start', background: '#f8f9fa', padding: '8px 10px', borderRadius: 6, border: '1px solid #e5e5e5' };
 const emptyState: React.CSSProperties = { textAlign: 'center', padding: '40px 24px' };
 const emptyIcon: React.CSSProperties = { fontSize: 44, marginBottom: 12 };
