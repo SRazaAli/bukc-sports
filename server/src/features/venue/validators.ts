@@ -74,7 +74,6 @@ const interUniversityMetaSchema = z.object({
   visitingHasCaptain: z.boolean(),
   visitingCaptainName: z.string().min(2).max(100).optional(),
   visitingCaptainContact: z.string().min(6).max(20).optional(),
-  visitingPlayers: z.array(visitingPlayerSchema).min(1).max(30),
   // Equipment
   equipmentSupport: z.enum(['SELF', 'UNIVERSITY']),
   equipmentItems: z.array(equipmentItemSchema),

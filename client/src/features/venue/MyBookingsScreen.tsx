@@ -37,7 +37,7 @@ type MatchFormat = 'FRIENDLY' | 'LEAGUE' | 'KNOCKOUT' | 'ROUND_ROBIN';
 type EquipmentSupport = 'SELF' | 'UNIVERSITY';
 
 interface Player { enrollmentNo: string; fullName: string }
-interface EquipmentItem { equipmentTypeId: number; name: string; quantity: number }
+interface EquipmentItem { equipmentTypeId: number; name: string; quantity: number; lendingUnit: 'SINGLE' | 'PAIR' }
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -232,7 +232,7 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
           return typeSport === chosenSport || venueSportNames.includes(typeSport);
         });
         setEquipmentItems(
-          relevant.map((t) => ({ equipmentTypeId: t.equipment_type_id, name: t.name, quantity: 0 })),
+          relevant.map((t) => ({ equipmentTypeId: t.equipment_type_id, name: t.name, quantity: 0, lendingUnit: t.lending_unit })),
         );
       })
       .catch(() => setAllTypes([]))
@@ -286,11 +286,14 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
       if (!opponentCaptainContact.trim()) e.opponentCaptainContact = 'Required when captain is specified.';
     }
     const validOpp = opponentPlayers.filter((p) => p.fullName.trim());
-    if (validOpp.length < opponentCountNum) e.opponentPlayers = `Fill in all ${opponentCountNum} opponent player entries.`;
+    // Visiting team player roster is not collected for inter-university events
+    if (bookingType === 'INTERNAL' && validOpp.length < opponentCountNum) {
+      e.opponentPlayers = `Fill in all ${opponentCountNum} opponent player entries.`;
+    }
 
-    // Two teams cannot have the same name
+    // Two teams cannot have the same name (case-insensitive, whitespace-stripped)
     if (bukcTeamName.trim() && opponentTeamName.trim() &&
-        bukcTeamName.trim().toLowerCase() === opponentTeamName.trim().toLowerCase()) {
+        bukcTeamName.replace(/\s+/g, '').toLowerCase() === opponentTeamName.replace(/\s+/g, '').toLowerCase()) {
       e.opponentTeamName = 'Team names must be different.';
     }
     setS2Err(e);
@@ -333,6 +336,7 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
     setBusy(true);
     try {
       const validBukc = bukcPlayers.filter((p) => p.enrollmentNo.trim() && p.fullName.trim());
+      // Visiting team players are not collected for inter-university events (external institution)
       const validOpp = opponentPlayers.filter((p) => p.fullName.trim());
       const usedEquipment = equipmentSupport === 'UNIVERSITY'
         ? equipmentItems.filter((e) => e.quantity > 0).map((e) => ({ equipmentTypeId: e.equipmentTypeId, name: e.name, quantity: e.quantity }))
@@ -351,7 +355,6 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
         visitingHasCaptain: opponentHasCaptain,
         visitingCaptainName: opponentHasCaptain ? opponentCaptainName : undefined,
         visitingCaptainContact: opponentHasCaptain ? opponentCaptainContact : undefined,
-        visitingPlayers: validOpp,
         equipmentSupport,
         equipmentItems: usedEquipment,
         specialRequirements: specialRequirements.trim() || undefined,
@@ -498,8 +501,8 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
         <div style={stepBody}>
           <h3 style={stepTitle}>Step 2 — Teams & Rosters</h3>
 
-          {/* BUKC Team */}
-          <SecHead>BUKC Team ({bukcCountNum} player{bukcCountNum !== 1 ? 's' : ''})</SecHead>
+          {/* BUKC / Team A */}
+          <SecHead>{bookingType === 'INTERNAL' ? `Team A (${bukcCountNum} player${bukcCountNum !== 1 ? 's' : ''})` : `BUKC Team (${bukcCountNum} player${bukcCountNum !== 1 ? 's' : ''})`}</SecHead>
           <div style={fgrid}>
             <L label="Team name *">
               <input style={fi(!!s2Err.bukcTeamName)} value={bukcTeamName} onChange={(e) => { setBTN(e.target.value); setS2Err((p) => ({ ...p, bukcTeamName: '' })); }} placeholder="e.g. BUKC Warriors" />
@@ -556,12 +559,15 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
             </div>
           )}
           {s2Err.opponentPlayers && <div style={{ ...ferr, marginBottom: 8 }}>{s2Err.opponentPlayers}</div>}
-          <RosterTable
-            players={opponentPlayers}
-            onChange={setOpponentPlayers}
-            withEnrollment={bookingType === 'INTERNAL'}
-            label={bookingType === 'INTER_UNIVERSITY' ? 'Visiting Team Players' : 'Team B Player Roster'}
-          />
+          {/* Roster only for internal Team B — visiting team players not collected for inter-university events */}
+          {bookingType === 'INTERNAL' && (
+            <RosterTable
+              players={opponentPlayers}
+              onChange={setOpponentPlayers}
+              withEnrollment={true}
+              label="Team B Player Roster"
+            />
+          )}
         </div>
       )}
 
@@ -597,14 +603,15 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
               ) : (
                 <div style={{ display: 'grid', gap: 10 }}>
                   {equipmentItems.map((item, i) => (
-                    <div key={item.equipmentTypeId} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 14px', border: '1px solid #e5e5e5', borderRadius: 8, background: item.quantity > 0 ? '#f0f4f8' : '#fafafa' }}>
-                      <div style={{ flex: 1, font: '500 14px var(--font-body)', color: '#333' }}>{item.name}</div>
+                    <div key={item.equipmentTypeId} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 14px', border: `1px solid ${item.quantity > 0 ? '#26485f' : '#e5e5e5'}`, borderRadius: 8, background: item.quantity > 0 ? '#f0f4f8' : '#fafafa' }}>
+                      <div style={{ flex: 1, font: '500 14px var(--font-body)', color: '#333' }}>
+                        {item.name}{item.lendingUnit === 'PAIR' ? <span style={{ fontSize: 12, color: '#5c6773', marginLeft: 6 }}>(pair)</span> : null}
+                      </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <button type="button" style={qtyBtn} onClick={() => setEquipmentItems((prev) => prev.map((e, j) => j === i ? { ...e, quantity: Math.max(0, e.quantity - 1) } : e))}>−</button>
                         <span style={{ font: '600 16px var(--font-body)', minWidth: 28, textAlign: 'center', color: item.quantity > 0 ? '#26485f' : '#aaa' }}>{item.quantity}</span>
                         <button type="button" style={qtyBtn} onClick={() => setEquipmentItems((prev) => prev.map((e, j) => j === i ? { ...e, quantity: e.quantity + 1 } : e))}>+</button>
                       </div>
-                      {item.quantity > 0 && <span style={{ fontSize: 12, color: '#1f7a45', fontWeight: 600 }}>Requested</span>}
                     </div>
                   ))}
                 </div>
@@ -647,15 +654,36 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
             <RevRow label="Total participants" value={`${totalParticipants} (BUKC: ${bukcCountNum}, ${bookingType === 'INTER_UNIVERSITY' ? 'Visiting' : 'Team B'}: ${opponentCountNum})`} />
           </RevSec>
 
-          <RevSec title={`BUKC Team — ${bukcTeamName}`}>
-            {bukcHasCaptain && <RevRow label="Captain" value={`${bukcCaptainName} · ${bukcCaptainEnrollment} · ${bukcCaptainContact}`} />}
-            <RevRow label="Players" value={`${bukcPlayers.filter((p) => p.enrollmentNo.trim()).length} of ${bukcCountNum} entered`} />
+          <RevSec title={bookingType === 'INTERNAL' ? `Team A — ${bukcTeamName}` : `BUKC Team — ${bukcTeamName}`}>
+            {bukcHasCaptain && (
+              <>
+                <RevRow label="Captain" value={bukcCaptainName} />
+                <RevRow label="Enrollment" value={bukcCaptainEnrollment} />
+                <RevRow label="Contact" value={bukcCaptainContact} />
+              </>
+            )}
+            <RevRow label="Players" value={`${bukcPlayers.filter((p) => p.enrollmentNo.trim()).length} of ${bukcCountNum}`} />
+            {bukcPlayers.filter((p) => p.fullName.trim()).map((p, i) => (
+              <RevRow key={i} label={`  #${i + 1}`} value={`${p.fullName}${p.enrollmentNo ? ` · ${p.enrollmentNo}` : ''}`} />
+            ))}
           </RevSec>
 
           <RevSec title={bookingType === 'INTER_UNIVERSITY' ? `Visiting Team — ${opponentTeamName}` : `Team B — ${opponentTeamName}`}>
             {bookingType === 'INTER_UNIVERSITY' && <RevRow label="University" value={`${opponentUniversity}, ${opponentCity}`} />}
-            {opponentHasCaptain && <RevRow label="Captain" value={`${opponentCaptainName} · ${opponentCaptainContact}`} />}
-            <RevRow label="Players" value={`${opponentPlayers.filter((p) => p.fullName.trim()).length} of ${opponentCountNum} entered`} />
+            {opponentHasCaptain && (
+              <>
+                <RevRow label="Captain" value={opponentCaptainName} />
+                <RevRow label="Contact" value={opponentCaptainContact} />
+              </>
+            )}
+            {bookingType === 'INTERNAL' && (
+              <>
+                <RevRow label="Players" value={`${opponentPlayers.filter((p) => p.fullName.trim()).length} of ${opponentCountNum}`} />
+                {opponentPlayers.filter((p) => p.fullName.trim()).map((p, i) => (
+                  <RevRow key={i} label={`  #${i + 1}`} value={`${p.fullName}${p.enrollmentNo ? ` · ${p.enrollmentNo}` : ''}`} />
+                ))}
+              </>
+            )}
           </RevSec>
 
           <RevSec title="Equipment">
