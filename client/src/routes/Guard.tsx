@@ -18,7 +18,7 @@ export function RequireRole({ roles, children }: { roles: UserRole[]; children: 
   const { user, loading } = useAuth();
   if (loading) return <FullPageLoading />;
   if (!user) return <Navigate to="/login" replace />;
-  if (!roles.includes(user.role)) return <Navigate to="/" replace />;
+  if (!roles.includes(user.role)) return <Navigate to="/home" replace />;
   return <>{children}</>;
 }
 

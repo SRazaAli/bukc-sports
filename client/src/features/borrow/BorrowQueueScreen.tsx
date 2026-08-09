@@ -412,7 +412,7 @@ function ArticleSelectForm({ item, onDone, onError }: {
             <label key={a.article_id} style={articleRow}>
               <input type="checkbox" checked={selected.includes(a.article_id)} onChange={() => toggle(a.article_id)} />
               <span style={{ fontWeight: 500 }}>{a.barcode}</span>
-              <span style={{ color: '#6b7280', fontSize: 13 }}>{a.condition_label ?? '—'}</span>
+              <span style={{ color: '#6b7280', fontSize: 13 }}>{a.current_condition_label ?? '—'}</span>
             </label>
           ))}
         </div>
@@ -497,8 +497,9 @@ function WalkinForm({ onDone, onError }: { onDone: (m: string) => void; onError:
     setBusy(true);
     try {
       await lendWalkinGuest({
-        equipmentTypeId: typeId, articleIds, fullName, idNumber,
-        contactNumber: contact, isFaculty,
+        equipmentTypeId: typeId, articleIds,
+        guestFullName: fullName, guestIdNumber: idNumber,
+        guestContactNumber: contact, guestIsFaculty: isFaculty,
         agreedStartAt: new Date(startAt).toISOString(),
         agreedReturnAt: new Date(endAt).toISOString(),
       });

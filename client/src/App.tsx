@@ -10,6 +10,7 @@ import RegisterScreen from './features/auth/RegisterScreen.js';
 import { ForgotPasswordScreen, ResetPasswordScreen } from './features/auth/PasswordResetScreens.js';
 import AcceptInviteScreen from './features/auth/AcceptInviteScreen.js';
 import AdminAccountsScreen from './features/auth/AdminAccountsScreen.js';
+import ProfileScreen from './features/auth/ProfileScreen.js';
 import InventoryScreen from './features/inventory/InventoryScreen.js';
 import AvailabilityScreen from './features/availability/AvailabilityScreen.js';
 import MyBorrowsScreen from './features/borrow/MyBorrowsScreen.js';
@@ -21,6 +22,10 @@ import VenueQueueScreen from './features/venue/VenueQueueScreen.js';
 import EquipmentAlertsScreen from './features/venue/EquipmentAlertsScreen.js';
 import VenueApprovalScreen from './features/venue/VenueApprovalScreen.js';
 import CalendarScreen from './features/venue/CalendarScreen.js';
+import ConflictDetectionScreen from './features/venue/ConflictDetectionScreen.js';
+import UsageHistoryScreen from './features/history/UsageHistoryScreen.js';
+import DashboardScreen from './features/dashboard/DashboardScreen.js';
+import OfflineFallbackScreen from './features/offline/OfflineFallbackScreen.js';
 import HomeScreen from './features/auth/HomeScreen.js';
 
 export default function App() {
@@ -44,14 +49,27 @@ export default function App() {
 
           <Route path="/home" element={<HomeScreen />} />
 
+          {/* Profile — all authenticated roles */}
+          <Route path="/profile" element={<ProfileScreen />} />
+
           <Route
             path="/admin/accounts"
             element={
-              <RequireRole roles={['SUPER_ADMIN']}>
+              <RequireRole roles={['SUPER_ADMIN', 'COORDINATOR']}>
                 <AdminAccountsScreen />
               </RequireRole>
             }
           />
+
+          <Route
+            path="/dashboard"
+            element={
+              <RequireRole roles={['SUPER_ADMIN', 'COORDINATOR']}>
+                <DashboardScreen />
+              </RequireRole>
+            }
+          />
+
           <Route
             path="/inventory"
             element={
@@ -63,7 +81,6 @@ export default function App() {
 
           <Route path="/availability" element={<AvailabilityScreen />} />
 
-          {/* Per-item borrow detail — student clicks "Request to Borrow" on an availability card */}
           <Route
             path="/borrow/:typeId"
             element={
@@ -74,6 +91,7 @@ export default function App() {
           />
 
           <Route path="/my-borrows" element={<MyBorrowsScreen />} />
+
           <Route
             path="/borrow-queue"
             element={
@@ -122,9 +140,33 @@ export default function App() {
               </RequireRole>
             }
           />
+
           <Route path="/calendar" element={<CalendarScreen />} />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route
+            path="/conflict-detection"
+            element={
+              <RequireRole roles={['SUPER_ADMIN', 'COORDINATOR']}>
+                <ConflictDetectionScreen />
+              </RequireRole>
+            }
+          />
+
+          {/* Usage History — staff get full view + article lifecycle tab;
+              students/externals see their own records only */}
+          <Route path="/usage-history" element={<UsageHistoryScreen />} />
+
+          <Route
+            path="/offline-fallback"
+            element={
+              <RequireRole roles={['SUPER_ADMIN', 'COORDINATOR']}>
+                <OfflineFallbackScreen />
+              </RequireRole>
+            }
+          />
+
+          {/* Catch-all → home dashboard, not the landing screen */}
+          <Route path="*" element={<Navigate to="/home" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
