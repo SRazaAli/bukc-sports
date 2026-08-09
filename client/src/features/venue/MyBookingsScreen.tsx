@@ -182,7 +182,7 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
   const [typesLoading, setTypesLoading] = useState(false);
 
   // Step 4 — Sessions
-  const { rows: sessions, addRow, removeRow, updateRow, toSessionInputs } = useSessionRows();
+  const { rows: sessions, addRow, removeRow, updateRow, toSessionInputs, setRows } = useSessionRows();
   const [sessionErrors, setSessionErrors] = useState<Record<number, string>>({});
   const [approvedSessions, setApprovedSessions] = useState<Array<{ starts_at: string; ends_at: string }>>([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
@@ -469,7 +469,14 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
               {s1Err.opponentCount && <span style={ferr}>{s1Err.opponentCount}</span>}
             </L>
             <L label="Event format *">
-              <select style={inp} value={eventFormat} onChange={(e) => setEventFormat(e.target.value as EventFormat)}>
+              <select style={inp} value={eventFormat} onChange={(e) => {
+                const fmt = e.target.value as EventFormat;
+                setEventFormat(fmt);
+                // Lock to one session for single match
+                if (fmt === 'SINGLE_MATCH') {
+                  setRows((prev) => prev.slice(0, 1));
+                }
+              }}>
                 <option value="SINGLE_MATCH">Single Match</option>
                 <option value="TOURNAMENT">Multi-day Tournament</option>
               </select>
@@ -630,7 +637,7 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
             <strong>Date rules:</strong> Weekdays only (Mon–Fri) · Future dates only · No overlap with existing approved sessions at this venue
           </div>
           {eventFormat === 'TOURNAMENT' && <p style={{ margin: '-4px 0 14px', fontSize: 13.5, color: '#5c6773' }}>Add one session per match day. Same-date sessions are not allowed.</p>}
-          <SessionRowsEditor rows={sessions} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} errors={sessionErrors} />
+          <SessionRowsEditor rows={sessions} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} errors={sessionErrors} allowMultiple={eventFormat === 'TOURNAMENT'} />
           <div style={{ marginTop: 20 }}>
             <L label="Special requirements / notes (optional)">
               <textarea style={{ ...inp, minHeight: 72, resize: 'vertical', width: '100%', boxSizing: 'border-box' }} value={specialRequirements} onChange={(e) => setSpecialReq(e.target.value)} placeholder="e.g. Scoreboard access, spectator seating for 50, referee required…" maxLength={500} />

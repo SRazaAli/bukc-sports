@@ -68,19 +68,20 @@ export function useSessionRows() {
 }
 
 export function SessionRowsEditor({
-  rows, onAdd, onRemove, onUpdate, errors,
+  rows, onAdd, onRemove, onUpdate, errors, allowMultiple = true,
 }: {
   rows: SessionRow[];
   onAdd: () => void;
   onRemove: (sessionNo: number) => void;
   onUpdate: (sessionNo: number, patch: Partial<SessionRow>) => void;
-  errors?: Record<number, string>; // sessionNo → error message
+  errors?: Record<number, string>;
+  allowMultiple?: boolean;
 }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
         <span style={lbl}>Sessions {rows.length > 1 ? `(${rows.length})` : ''}</span>
-        {rows.length < 30 && (
+        {allowMultiple && rows.length < 30 && (
           <button type="button" style={addBtn} onClick={onAdd}>+ Add session</button>
         )}
       </div>
@@ -90,32 +91,20 @@ export function SessionRowsEditor({
           return (
             <div key={row.sessionNo} style={{ ...sessionCard, ...(err ? { borderColor: '#c0392b' } : {}) }}>
               <div style={sessionHead}>
-                <span style={sessionNoStyle}>Session {row.sessionNo}</span>
-                {rows.length > 1 && (
+                <span style={sessionNoStyle}>{allowMultiple ? `Session ${row.sessionNo}` : 'Match date & time'}</span>
+                {allowMultiple && rows.length > 1 && (
                   <button type="button" style={removeBtn} onClick={() => onRemove(row.sessionNo)}>
                     Remove
                   </button>
                 )}
               </div>
               <div style={sessionGrid}>
-                <input
-                  type="date"
-                  style={{ ...inp, ...(err ? { borderColor: '#c0392b' } : {}) }}
-                  value={row.date}
-                  onChange={(e) => onUpdate(row.sessionNo, { date: e.target.value })}
-                />
-                <input
-                  type="time"
-                  style={inp}
-                  value={row.startTime}
-                  onChange={(e) => onUpdate(row.sessionNo, { startTime: e.target.value })}
-                />
-                <input
-                  type="time"
-                  style={inp}
-                  value={row.endTime}
-                  onChange={(e) => onUpdate(row.sessionNo, { endTime: e.target.value })}
-                />
+                <input type="date" style={{ ...inp, ...(err ? { borderColor: '#c0392b' } : {}) }}
+                  value={row.date} onChange={(e) => onUpdate(row.sessionNo, { date: e.target.value })} />
+                <input type="time" style={inp} value={row.startTime}
+                  onChange={(e) => onUpdate(row.sessionNo, { startTime: e.target.value })} />
+                <input type="time" style={inp} value={row.endTime}
+                  onChange={(e) => onUpdate(row.sessionNo, { endTime: e.target.value })} />
               </div>
               {err && <div style={errStyle}>{err}</div>}
             </div>
