@@ -5,7 +5,7 @@
  * Clicking "Review" opens a detail panel showing ALL that student's pending
  * requests, each with its own approve/reject action.
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
@@ -496,6 +496,7 @@ function WalkinFormTabbed({ onDone, onError }: { onDone: (m: string) => void; on
 function WalkinRegisteredForm({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
   const [types, setTypes] = useState<EquipmentType[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
+  const [kitCategoryId, setKitCategoryId] = useState(0);
   const [typeId, setTypeId] = useState(0);
   const [articleIds, setArticleIds] = useState<string[]>([]);
   const [enrollmentNo, setEnrollmentNo] = useState('');
@@ -515,6 +516,21 @@ function WalkinRegisteredForm({ onDone, onError }: { onDone: (m: string) => void
       .then((r) => setArticles(r.articles))
       .catch(() => onError('Could not load articles.'));
   }, [typeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Derive unique sport categories from the loaded types list (no extra API call needed)
+  const kits = useMemo(() => {
+    const seen = new Map<number, string>();
+    for (const t of types) {
+      if (!seen.has(t.sport_category_id)) seen.set(t.sport_category_id, t.sport_category_name);
+    }
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [types]);
+
+  // Types visible in the equipment dropdown — filtered by kit selection when a kit is chosen
+  const visibleTypes = useMemo(
+    () => (kitCategoryId ? types.filter((t) => t.sport_category_id === kitCategoryId) : types),
+    [types, kitCategoryId],
+  );
 
   async function resolve() {
     if (!enrollmentNo.trim()) return;
@@ -572,15 +588,78 @@ function WalkinRegisteredForm({ onDone, onError }: { onDone: (m: string) => void
         )}
       </div>
 
-      {/* Equipment */}
+      {/* Kit selector — disabled when a specific equipment type has been chosen */}
       <div style={formField}>
-        <label style={fieldLabel}>Equipment type</label>
-        <select style={fieldInput} value={typeId} onChange={(e) => setTypeId(Number(e.target.value))}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <label style={fieldLabel}>Kit</label>
+          {kitCategoryId > 0 && (
+            <button
+              type="button"
+              style={clearBtn}
+              onClick={() => { setKitCategoryId(0); setTypeId(0); setArticles([]); setArticleIds([]); }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <select
+          style={{ ...fieldInput, ...(typeId > 0 ? disabledFieldStyle : {}) }}
+          value={kitCategoryId}
+          disabled={typeId > 0}
+          onChange={(e) => {
+            const newKit = Number(e.target.value);
+            setKitCategoryId(newKit);
+            setTypeId(0);
+            setArticles([]);
+            setArticleIds([]);
+          }}
+        >
+          <option value={0}>— select a kit —</option>
+          {kits.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+        </select>
+        {typeId > 0 && <span style={mutedHint}>Clear equipment type to use kit selection</span>}
+      </div>
+
+      {/* Kit contents — shown only when a kit is selected */}
+      {kitCategoryId > 0 && visibleTypes.length > 0 && (
+        <div style={{ ...formField, gridColumn: '1 / -1' }}>
+          <label style={fieldLabel}>Items in this kit</label>
+          <div style={kitItemsList}>
+            {visibleTypes.map((t) => (
+              <span key={t.equipment_type_id} style={kitItem}>
+                <span style={kitBullet}>•</span>
+                {t.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Equipment type — disabled when a kit has been chosen */}
+      <div style={formField}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <label style={fieldLabel}>Equipment type</label>
+          {typeId > 0 && (
+            <button
+              type="button"
+              style={clearBtn}
+              onClick={() => { setTypeId(0); setArticles([]); setArticleIds([]); }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <select
+          style={{ ...fieldInput, ...(kitCategoryId > 0 ? disabledFieldStyle : {}) }}
+          value={typeId}
+          disabled={kitCategoryId > 0}
+          onChange={(e) => setTypeId(Number(e.target.value))}
+        >
           <option value={0}>— select —</option>
           {types.map((t) => <option key={t.equipment_type_id} value={t.equipment_type_id}>{t.name}</option>)}
         </select>
+        {kitCategoryId > 0 && <span style={mutedHint}>Clear kit to select by equipment type</span>}
       </div>
-      <div style={formField} />
       {articles.length > 0 && (
         <div style={{ ...formField, gridColumn: '1 / -1' }}>
           <label style={fieldLabel}>Articles</label>
@@ -804,6 +883,12 @@ const inactiveTab: React.CSSProperties = { background: 'none', border: 'none', b
 
 // Registered borrower lookup
 const resolveBtn: React.CSSProperties = { background: '#374151', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' };
+const kitItemsList: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 4, padding: '10px 14px', borderRadius: 6, background: '#f8fafc', border: '1px solid #e2e8f0' };
+const kitItem: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#1e3a5f', fontWeight: 500 };
+const kitBullet: React.CSSProperties = { color: '#3b82f6', fontSize: 16, lineHeight: 1 };
+const clearBtn: React.CSSProperties = { background: 'none', border: 'none', color: '#6b7280', fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: '0 2px', textDecoration: 'underline' };
+const disabledFieldStyle: React.CSSProperties = { opacity: 0.45, cursor: 'not-allowed', background: '#f3f4f6' };
+const mutedHint: React.CSSProperties = { fontSize: 11, color: '#9ca3af', marginTop: 2 };
 const resolvedCard: React.CSSProperties = { marginTop: 8, padding: '10px 14px', borderRadius: 7, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 2 };
 const resolvedName: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: '#065f46' };
 const resolvedDetail: React.CSSProperties = { fontSize: 12, color: '#047857' };
