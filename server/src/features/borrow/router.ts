@@ -112,6 +112,14 @@ borrowRouter.post('/lend/walkin/registered', ...coordinatorOnly, asyncHandler(as
   res.status(201).json({ transaction: created });
 }));
 
+// Student's own transaction list — covers both PLATFORM and WALK_IN paths.
+// Registered walk-in borrows have borrower_user_id set, so they appear here
+// even though they have no borrow_request row.
+// Registered BEFORE /:id so "transactions" is not matched as a txn UUID.
+borrowRouter.get('/transactions/mine', ...student, asyncHandler(async (req, res) => {
+  res.json({ transactions: await svc.listMyTransactions(req.user!.userId) });
+}));
+
 borrowRouter.get('/active', ...staffRead, asyncHandler(async (_req, res) => {
   await svc.checkOverdueBorrows();
   res.json({ transactions: await svc.listActiveBorrows() });

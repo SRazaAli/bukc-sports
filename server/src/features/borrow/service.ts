@@ -355,6 +355,54 @@ export async function lendWalkinRegistered(input: {
   } catch (e) { throw mapDbError(e); }
 }
 
+// ── student's own transaction history (WALK_IN + PLATFORM) ──
+// borrow_request only covers the platform request flow; a registered student
+// who was lent equipment as a walk-in has a borrow_transaction row with their
+// borrower_user_id set but no borrow_request row. This query covers both paths.
+export async function listMyTransactions(userId: string) {
+  const rows = await db.selectFrom('borrow_transaction as bt')
+    .innerJoin('equipment_type as et', 'et.equipment_type_id', 'bt.equipment_type_id')
+    .leftJoin('borrow_transaction_article as bta', 'bta.borrow_txn_id', 'bt.borrow_txn_id')
+    .leftJoin('article as a', 'a.article_id', 'bta.article_id')
+    .select([
+      'bt.borrow_txn_id', 'bt.path', 'bt.status',
+      'bt.agreed_start_at', 'bt.agreed_return_at',
+      'bt.actual_start_at', 'bt.actual_return_at',
+      'et.name as equipment_type_name',
+      'a.barcode',
+    ])
+    .where('bt.borrower_user_id', '=', userId)
+    .orderBy('bt.agreed_start_at', 'desc')
+    .execute();
+
+  // Group articles under each transaction
+  const map = new Map<string, {
+    borrow_txn_id: string; path: string; status: string;
+    agreed_start_at: string; agreed_return_at: string;
+    actual_start_at: string | null; actual_return_at: string | null;
+    equipment_type_name: string; barcodes: string[];
+  }>();
+
+  for (const r of rows) {
+    if (!map.has(r.borrow_txn_id)) {
+      map.set(r.borrow_txn_id, {
+        borrow_txn_id: r.borrow_txn_id,
+        path: r.path,
+        status: r.status,
+        agreed_start_at: r.agreed_start_at as unknown as string,
+        agreed_return_at: r.agreed_return_at as unknown as string,
+        actual_start_at: r.actual_start_at as unknown as string | null,
+        actual_return_at: r.actual_return_at as unknown as string | null,
+        equipment_type_name: r.equipment_type_name,
+        barcodes: [],
+      });
+    }
+    if (r.barcode) map.get(r.borrow_txn_id)!.barcodes.push(r.barcode);
+  }
+
+  return Array.from(map.values());
+}
+
 export async function listActiveBorrows() {
   return db.selectFrom('borrow_transaction as bt')
     .innerJoin('equipment_type as et', 'et.equipment_type_id', 'bt.equipment_type_id')
