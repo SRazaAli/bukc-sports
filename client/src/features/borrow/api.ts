@@ -31,6 +31,22 @@ export const submitRequest = (input: { equipmentTypeId: number; requestedStartAt
   api<{ request: { borrowRequestId: string } }>('/api/borrow/requests', { method: 'POST', body: input });
 export const listMyRequests = () => api<{ requests: MyRequest[] }>('/api/borrow/requests/mine');
 
+export interface MyTransaction {
+  borrow_txn_id: string;
+  path: 'PLATFORM' | 'WALK_IN';
+  status: string;
+  agreed_start_at: string;
+  agreed_return_at: string;
+  actual_start_at: string | null;
+  actual_return_at: string | null;
+  equipment_type_name: string;
+  barcodes: string[];
+}
+
+// student — own transaction history (platform + walk-in)
+export const listMyTransactions = () =>
+  api<{ transactions: MyTransaction[] }>('/api/borrow/transactions/mine');
+
 // coordinator
 export const listQueue = () => api<{ queue: QueueItem[] }>('/api/borrow/queue');
 export const approveRequest = (id: string) => api<{ message: string }>(`/api/borrow/requests/${id}/approve`, { method: 'POST', body: {} });
