@@ -12,7 +12,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell, PrimaryButton } from '../auth/PortalShell.js';
 import { listTypes, listSportCategories, type EquipmentType, type SportCategory } from '../inventory/api.js';
-import { submitRequest, listMyRequests, type MyRequest } from './api.js';
+import { submitRequest, listMyRequests, listMyTransactions, type MyRequest, type MyTransaction } from './api.js';
 import { getKitPack, submitKitBorrowRequest, type KitPack } from '../availability/kitPackApi.js';
 import { ApiRequestError } from '../../lib/api.js';
 
@@ -216,13 +216,14 @@ export default function MyBorrowsScreen() {
   const [types, setTypes] = useState<EquipmentType[]>([]);
   const [cats, setCats] = useState<SportCategory[]>([]);
   const [requests, setRequests] = useState<MyRequest[]>([]);
+  const [transactions, setTransactions] = useState<MyTransaction[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [t, r, c] = await Promise.all([listTypes(), listMyRequests(), listSportCategories()]);
-      setTypes(t.types); setRequests(r.requests); setCats(c.categories);
+      const [t, r, c, tx] = await Promise.all([listTypes(), listMyRequests(), listSportCategories(), listMyTransactions()]);
+      setTypes(t.types); setRequests(r.requests); setCats(c.categories); setTransactions(tx.transactions);
     } catch (e) { setError(errMsg(e)); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -294,6 +295,51 @@ export default function MyBorrowsScreen() {
             </table>
           )}
         </Panel>
+
+        <Panel title="My Borrows">
+          {transactions.length === 0 ? (
+            <p style={muted}>No borrow transactions on record yet.</p>
+          ) : (
+            <table style={table}>
+              <thead>
+                <tr>
+                  <th style={th}>Equipment</th>
+                  <th style={th}>Articles</th>
+                  <th style={th}>Window</th>
+                  <th style={th}>Path</th>
+                  <th style={th}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map((tx) => (
+                  <tr key={tx.borrow_txn_id}>
+                    <td style={td}>{tx.equipment_type_name}</td>
+                    <td style={{ ...td, fontSize: 12, color: '#374151' }}>
+                      {tx.barcodes.length > 0 ? tx.barcodes.join(', ') : '—'}
+                    </td>
+                    <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                      {new Date(tx.agreed_start_at).toLocaleString('en-PK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      {' → '}
+                      {new Date(tx.agreed_return_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                    <td style={td}>
+                      <span style={{
+                        ...badgeBase,
+                        background: tx.path === 'WALK_IN' ? '#ede9fe' : '#e0f2fe',
+                        color: tx.path === 'WALK_IN' ? '#5b21b6' : '#0369a1',
+                      }}>
+                        {tx.path === 'WALK_IN' ? 'Walk-in' : 'Platform'}
+                      </span>
+                    </td>
+                    <td style={td}>
+                      <span style={{ ...badgeBase, ...txnStatusBadge(tx.status) }}>{tx.status.replace(/_/g, ' ')}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Panel>
       </div>
     </PortalShell>
   );
@@ -341,4 +387,13 @@ function statusBadge(s: string): React.CSSProperties {
   if (s === 'REJECTED') return { background: '#fee2e2', color: '#991b1b' };
   if (s === 'CANCELLED') return { background: '#f3f4f6', color: '#6b7280' };
   return { background: '#fef3c7', color: '#92400e' }; // PENDING
+}
+function txnStatusBadge(s: string): React.CSSProperties {
+  if (s === 'COMPLETED') return { background: '#d1fae5', color: '#065f46' };
+  if (s === 'COMPLETED_LATE') return { background: '#fef3c7', color: '#92400e' };
+  if (s === 'COMPLETED_DAMAGED') return { background: '#fee2e2', color: '#991b1b' };
+  if (s === 'ACTIVE') return { background: '#dbeafe', color: '#1d4ed8' };
+  if (s === 'OVERDUE') return { background: '#fee2e2', color: '#991b1b' };
+  if (s === 'INCOMPLETE') return { background: '#fef9c3', color: '#854d0e' };
+  return { background: '#f3f4f6', color: '#6b7280' };
 }
