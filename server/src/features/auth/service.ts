@@ -491,6 +491,19 @@ export async function listPendingAccounts(): Promise<PendingAccountDetail[]> {
   }));
 }
 
+export async function listAllAccounts() {
+  const rows = await db.selectFrom('app_user')
+    .select(['user_id', 'role', 'full_name', 'email', 'contact_number', 'status', 'created_at'])
+    .where('status', 'in', ['ACTIVE', 'DEACTIVATED'])
+    .orderBy('created_at', 'desc')
+    .execute();
+  return rows.map((r) => ({
+    userId: r.user_id, role: r.role, fullName: r.full_name, email: r.email,
+    contactNumber: r.contact_number, status: r.status,
+    createdAt: new Date(r.created_at as unknown as string).toISOString(),
+  }));
+}
+
 // ── Coordinator invite audit log (for the record — every invite ever sent) ──
 export interface CoordinatorInviteRecord {
   inviteId: string;
