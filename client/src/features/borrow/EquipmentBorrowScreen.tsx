@@ -20,6 +20,15 @@ function errMsg(e: unknown): string {
   return 'Something went wrong.';
 }
 
+// ── Time helpers ──────────────────────────────────────────────────────────────
+const OPEN_HH = 8;
+const CLOSE_HH = 17;
+function toHHMM(m: number) { return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }
+function smartStart() { const now = new Date(); return toHHMM(Math.min(Math.max(Math.ceil((now.getHours() * 60 + now.getMinutes()) / 5) * 5, OPEN_HH * 60), CLOSE_HH * 60 - 5)); }
+function smartEnd(start: string, maxMin: number) { const p = start.split(':').map(Number); return toHHMM(Math.min((p[0] ?? 8) * 60 + (p[1] ?? 0) + maxMin, CLOSE_HH * 60)); }
+function todayStr() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function nowMinTime(date: string) { const today = todayStr(); if (date !== today) return `${OPEN_HH.toString().padStart(2, '0')}:00`; const now = new Date(); return toHHMM(Math.max(now.getHours() * 60 + now.getMinutes(), OPEN_HH * 60)); }
+
 export default function EquipmentBorrowScreen() {
   const { user, loading } = useAuth();
   const { typeId } = useParams<{ typeId: string }>();
@@ -35,9 +44,9 @@ export default function EquipmentBorrowScreen() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   // Form
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [startTime, setStartTime] = useState('10:00');
-  const [endTime, setEndTime] = useState('13:00');
+  const [date, setDate] = useState(todayStr);
+  const [startTime, setStartTime] = useState(smartStart);
+  const [endTime, setEndTime] = useState(() => smartEnd(smartStart(), 480));
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -193,22 +202,17 @@ export default function EquipmentBorrowScreen() {
                   <form onSubmit={handleSubmit} style={formGrid}>
                     <div style={field}>
                       <label style={fieldLabel}>Date</label>
-                      <input
-                        type="date"
-                        style={inp}
-                        value={date}
-                        min={new Date().toISOString().slice(0, 10)}
-                        onChange={(e) => setDate(e.target.value)}
-                        required
-                      />
+                      <input type="date" style={inp} value={date} min={todayStr()} onChange={(e) => setDate(e.target.value)} required />
                     </div>
                     <div style={field}>
                       <label style={fieldLabel}>Start time</label>
-                      <input type="time" style={inp} value={startTime} onChange={(e) => setStartTime(e.target.value)} required />
+                      <input type="time" style={inp} value={startTime} min={nowMinTime(date)} max="17:00" step={300}
+                        onChange={(e) => { setStartTime(e.target.value); setEndTime(smartEnd(e.target.value, 480)); }} required />
                     </div>
                     <div style={field}>
                       <label style={fieldLabel}>Return by</label>
-                      <input type="time" style={inp} value={endTime} onChange={(e) => setEndTime(e.target.value)} required />
+                      <input type="time" style={inp} value={endTime} min={startTime} max="17:00" step={300}
+                        onChange={(e) => setEndTime(e.target.value)} required />
                     </div>
 
                     {/* Summary of selected extras */}

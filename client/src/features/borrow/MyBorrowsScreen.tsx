@@ -290,7 +290,7 @@ export default function MyBorrowsScreen() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  if (loading) return <PortalShell title="My Borrows"><p /></PortalShell>;
+  if (loading) return <PortalShell title="Kit Borrow"><p /></PortalShell>;
   if (!user) return <Navigate to="/" replace />;
   if (user.role !== 'STUDENT') return <Navigate to="/home" replace />;
 
@@ -300,23 +300,12 @@ export default function MyBorrowsScreen() {
   };
 
   return (
-    <PortalShell title="My Borrows" tint="sage">
+    <PortalShell title="Kit Borrow" tint="sage">
       <div style={wrap}>
         {error  && <div style={box.err}>{error}</div>}
         {notice && <div style={box.ok}>{notice}</div>}
 
-        {/* Individual item request — expanded by default, or always if arriving with a typeId */}
-        <Panel title="Request Equipment" defaultOpen={!incomingKit}>
-          <RequestForm
-            types={types}
-            initialTypeId={incomingTypeId}
-            onDone={flash.ok}
-            onError={flash.err}
-          />
-        </Panel>
-
-        {/* Kit pack request — expanded when arriving from the kit CTA */}
-        <Panel title="Request Full Kit" defaultOpen={!!incomingKit}>
+        <Panel title="Request Full Kit" defaultOpen>
           <KitRequestForm
             cats={cats}
             initialSportId={incomingKit?.sportCategoryId}

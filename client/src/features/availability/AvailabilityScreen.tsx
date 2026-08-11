@@ -98,7 +98,7 @@ export default function AvailabilityScreen() {
             </span>
             {isStudent && (
               <button style={myBorrowsBtn} onClick={() => navigate('/my-borrows')}>
-                My Borrows
+                Kit Borrow
               </button>
             )}
           </div>
