@@ -1,212 +1,308 @@
 /**
- * Registration, parameterized by role (student | external). Layout takes after
- * the Admissions "Candidate Registration" card in the screenshots. Student form
- * has cascading Department -> Program Title dropdowns. No CAPTCHA (per project).
- * On success, shows the green "Awaiting administrator verification" banner.
+ * RegisterScreen — student | external registration.
  *
- * External form: Institution is a dropdown of known universities plus an
- * "Other" option that reveals a free-text field. Representative Name was
- * removed — it duplicated Full Name (the person filling the form types their
- * own name into both) with no real distinction in practice.
+ * Coordinator and Super Admin have NO register screen (invite-only / seeded).
+ *
+ * Backend logic unchanged:
+ *  - Student  → POST /api/auth/register/student
+ *  - External → POST /api/auth/register/external
+ *  - On success → "awaiting verification" state (no auto-login)
+ *
+ * Student form has cascading Department → Program Title dropdowns.
+ * External form has institution + representative + designation fields.
  */
 import { useState, useMemo, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { PortalShell, PrimaryButton, type BarTint } from './PortalShell.js';
+import AuthShell, { Field, AuthError, AuthSuccess, type AuthRole } from './AuthShell.js';
 import { registerStudent, registerExternal } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
-import { DEPARTMENTS, EXTERNAL_UNIVERSITIES } from './reference-data.js';
-import {
-  validateFullName, validateEmail, validateContactNumber,
-  validateInstitution, validateDesignation, validatePassword,
-} from './validation.js';
+import { DEPARTMENTS } from './reference-data.js';
 
 type Role = 'student' | 'external';
-const CFG: Record<Role, { title: string; tint: BarTint; loginLink: string }> = {
-  student: { title: 'Student Registration', tint: 'sage', loginLink: '/login/student' },
-  external: { title: 'External Registration', tint: 'blue', loginLink: '/login/external' },
+
+interface RoleCfg {
+  title: string;
+  subtitle: string;
+  loginLink: string;
+}
+const CFG: Record<Role, RoleCfg> = {
+  student:  { title: 'Create Account', subtitle: 'Student — Bahria University', loginLink: '/login/student' },
+  external: { title: 'Create Account', subtitle: 'External Organisation',        loginLink: '/login/external' },
 };
-
-const OTHER = '__other__';
-
-type FieldErrors = Partial<Record<
-  'fullName' | 'email' | 'contactNumber' | 'enrollmentNo' | 'department' | 'programTitle'
-  | 'institutionName' | 'designation' | 'password', string
->>;
 
 export default function RegisterScreen({ role }: { role: Role }) {
   const cfg = CFG[role];
+
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [showPassword, setShowPassword] = useState(false);
 
-  // shared
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
+  // Shared fields
+  const [fullName,      setFullName]      = useState('');
+  const [email,         setEmail]         = useState('');
   const [contactNumber, setContactNumber] = useState('');
-  const [password, setPassword] = useState('');
-  // student
-  const [enrollmentNo, setEnrollmentNo] = useState('');
-  const [department, setDepartment] = useState('');
-  const [programTitle, setProgramTitle] = useState('');
-  // external
-  const [institutionChoice, setInstitutionChoice] = useState('');
-  const [customInstitution, setCustomInstitution] = useState('');
-  const [designation, setDesignation] = useState('');
+  const [password,      setPassword]      = useState('');
+
+  // Student-only
+  const [enrollmentNo,  setEnrollmentNo]  = useState('');
+  const [department,    setDepartment]    = useState('');
+  const [programTitle,  setProgramTitle]  = useState('');
+
+  // External-only
+  const [institutionName,    setInstitutionName]    = useState('');
+  const [representativeName, setRepresentativeName] = useState('');
+  const [designation,        setDesignation]        = useState('');
 
   const programs = useMemo(
     () => DEPARTMENTS.find((d) => d.name === department)?.programs ?? [],
     [department],
   );
 
-  const institutionName = institutionChoice === OTHER ? customInstitution.trim() : institutionChoice;
-
-  function validate(): FieldErrors {
-    const errs: FieldErrors = {};
-    const nameErr = validateFullName(fullName); if (nameErr) errs.fullName = nameErr;
-    const emailErr = validateEmail(email); if (emailErr) errs.email = emailErr;
-    const contactErr = validateContactNumber(contactNumber); if (contactErr) errs.contactNumber = contactErr;
-    const passErr = validatePassword(password); if (passErr) errs.password = passErr;
-
-    if (role === 'student') {
-      if (!enrollmentNo.trim()) errs.enrollmentNo = 'Enrollment number is required.';
-      else if (!/^[0-9]{2}-[0-9]{6}-[0-9]{3}$/.test(enrollmentNo)) errs.enrollmentNo = 'Format: 84-024000-123.';
-      if (!department) errs.department = 'Select a department.';
-      if (!programTitle) errs.programTitle = 'Select a program.';
-    } else {
-      if (!institutionChoice) errs.institutionName = 'Select an institution.';
-      else {
-        const instErr = validateInstitution(institutionName);
-        if (instErr) errs.institutionName = instErr;
-      }
-      const desigErr = validateDesignation(designation); if (desigErr) errs.designation = desigErr;
-    }
-    return errs;
-  }
-
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const errs = validate();
-    setFieldErrors(errs);
-    if (Object.values(errs).some(Boolean)) return;
-
     setLoading(true);
     try {
       if (role === 'student') {
         await registerStudent({ fullName, email, contactNumber, password, enrollmentNo, department, programTitle });
       } else {
-        await registerExternal({ fullName, email, contactNumber, password, institutionName, designation });
+        await registerExternal({ fullName, email, contactNumber, password, institutionName, representativeName, designation });
       }
       setDone(true);
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.body.error : 'Could not create the account. Try again.');
+      setError(err instanceof ApiRequestError ? err.body.error : 'Could not create the account. Please try again.');
     } finally {
       setLoading(false);
     }
   }
 
+  // ── Success state ──────────────────────────────────────────────────────────
+
   if (done) {
     return (
-      <PortalShell title={cfg.title} tint={cfg.tint}>
-        <div style={{ maxWidth: 900, margin: '0 auto' }}>
-          <div style={successBanner}>
-            <strong>Account created.</strong> Awaiting administrator verification.
+      <AuthShell role={role as AuthRole} title="Account Created" subtitle={cfg.subtitle}>
+        <div style={{ textAlign: 'center', padding: '8px 0' }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: '50%',
+            background: 'var(--ok-bg)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 20px',
+            color: 'var(--ok)',
+          }}>
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="5,13 10,18 21,8"/>
+            </svg>
           </div>
-          <p style={{ color: '#555', marginTop: 16 }}>
-            An administrator reviews new accounts before they can sign in. You'll receive an email once your account is active.
+          <h3 style={{ font: '700 18px var(--font-display)', color: 'var(--navy)', margin: '0 0 10px' }}>
+            Application Submitted
+          </h3>
+          <p style={{ font: '13.5px/1.6 var(--font-body)', color: 'var(--ink-muted)', margin: '0 0 24px' }}>
+            Your account is awaiting administrator verification. You'll receive an email once it's approved.
           </p>
-          <Link to={cfg.loginLink} style={backLink}>Back to sign in</Link>
+          <AuthSuccess message="Account created — awaiting administrator verification." />
+          <div style={{ marginTop: 20 }}>
+            <Link to={cfg.loginLink} className="auth-link" style={{ fontWeight: 600 }}>
+              ← Back to Sign In
+            </Link>
+          </div>
         </div>
-      </PortalShell>
+      </AuthShell>
     );
   }
 
+  // ── Form ───────────────────────────────────────────────────────────────────
+
   return (
-    <PortalShell title={cfg.title} tint={cfg.tint}>
-      <div style={card}>
-        <div style={cardHead}>Candidate Registration</div>
-        <form onSubmit={onSubmit} noValidate style={{ padding: 24 }}>
-          {error && <div style={errorBox}>{error}</div>}
+    <AuthShell role={role as AuthRole} title={cfg.title} subtitle={cfg.subtitle} cardWidth={520}>
+      <form onSubmit={onSubmit} noValidate>
+        {error && <AuthError message={error} />}
 
-          <Field label="Full Name:" error={fieldErrors.fullName}>
-            <input style={inp} value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Full name" required maxLength={50} />
-          </Field>
-          <Field label="Email:" error={fieldErrors.email}>
-            <input style={inp} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" required maxLength={254} />
-          </Field>
-          <Field label="Contact Number:" error={fieldErrors.contactNumber} hint="Format: 03XXXXXXXXX or 03XX-XXXXXXX">
-            <input style={inp} value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} placeholder="Enter contact number" required maxLength={12} />
-          </Field>
+        {/* ── Shared fields ── */}
+        <SectionLabel>Personal Details</SectionLabel>
 
-          {role === 'student' ? (
-            <>
-              <Field label="Enrollment:" error={fieldErrors.enrollmentNo} hint="Format: XX-XXXXXX-XXX ">
-                <input style={inp} value={enrollmentNo} onChange={(e) => setEnrollmentNo(e.target.value)} placeholder="e.g. 84-024000-123" required />
-              </Field>
-              <Field label="Department:" error={fieldErrors.department}>
-                <select style={inp} value={department} onChange={(e) => { setDepartment(e.target.value); setProgramTitle(''); }} required>
-                  <option value="">Select</option>
-                  {DEPARTMENTS.map((d) => <option key={d.name} value={d.name}>{d.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Program Title:" error={fieldErrors.programTitle}>
-                <select style={inp} value={programTitle} onChange={(e) => setProgramTitle(e.target.value)} disabled={!department} required>
-                  <option value="">{department ? 'Select' : 'Select a department first'}</option>
-                  {programs.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </Field>
-            </>
-          ) : (
-            <>
-              <Field label="Institution:" error={fieldErrors.institutionName}>
-                <select style={inp} value={institutionChoice} onChange={(e) => { setInstitutionChoice(e.target.value); setCustomInstitution(''); }} required>
-                  <option value="">Select</option>
-                  {EXTERNAL_UNIVERSITIES.map((u) => <option key={u} value={u}>{u}</option>)}
-                  <option value={OTHER}>Other…</option>
-                </select>
-                {institutionChoice === OTHER && (
-                  <input style={{ ...inp, marginTop: 8 }} value={customInstitution}
-                    onChange={(e) => setCustomInstitution(e.target.value)}
-                    placeholder="Enter institution name" required maxLength={100} />
-                )}
-              </Field>
-              <Field label="Designation:" error={fieldErrors.designation}>
-                <input style={inp} value={designation} onChange={(e) => setDesignation(e.target.value)} placeholder="e.g. Sports Coordinator" required maxLength={50} />
-              </Field>
-            </>
-          )}
-
-          <Field label="Password:" error={fieldErrors.password} hint="8–64 characters, at least one letter and one number">
-            <input style={inp} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a password" required />
+        <TwoCol>
+          <Field label="Full Name">
+            <input className="auth-input" type="text" value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Muhammad Ali Khan" required />
           </Field>
+          <Field label="Contact Number">
+            <input className="auth-input" type="tel" value={contactNumber}
+              onChange={(e) => setContactNumber(e.target.value)}
+              placeholder="03xxxxxxxxx" required />
+          </Field>
+        </TwoCol>
 
-          <div style={{ marginTop: 8 }}>
-            <PrimaryButton type="submit" disabled={loading}>{loading ? 'Registering…' : 'Register'}</PrimaryButton>
+        <Field label="Email Address">
+          <input className="auth-input" type="email" value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com" autoComplete="email" required />
+        </Field>
+
+        <Field label="Password" hint="Minimum 8 characters">
+          <div style={{ position: 'relative' }}>
+            <input
+              className="auth-input"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Create a password"
+              autoComplete="new-password"
+              style={{ paddingRight: 40 }}
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              tabIndex={-1}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              style={{
+                position: 'absolute', right: 10, top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--ink-faint)', display: 'flex', padding: 2,
+              }}
+            >
+              {showPassword ? <EyeOff /> : <EyeOn />}
+            </button>
           </div>
-          <Link to={cfg.loginLink} style={greenBtn}>Already have an account?</Link>
-        </form>
-      </div>
-    </PortalShell>
+        </Field>
+
+        {/* ── Student-specific ── */}
+        {role === 'student' && (
+          <>
+            <Divider />
+            <SectionLabel>Academic Information</SectionLabel>
+
+            <Field label="Enrollment Number" hint="Format: 84-024000-123">
+              <input className="auth-input" type="text" value={enrollmentNo}
+                onChange={(e) => setEnrollmentNo(e.target.value)}
+                placeholder="84-024000-123" required />
+            </Field>
+
+            <TwoCol>
+              <Field label="Department">
+                <select className="auth-input" value={department}
+                  onChange={(e) => { setDepartment(e.target.value); setProgramTitle(''); }}
+                  required>
+                  <option value="">Select department</option>
+                  {DEPARTMENTS.map((d) => (
+                    <option key={d.name} value={d.name}>{d.name}</option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Program">
+                <select className="auth-input" value={programTitle}
+                  onChange={(e) => setProgramTitle(e.target.value)}
+                  disabled={!department} required>
+                  <option value="">{department ? 'Select program' : 'Pick department first'}</option>
+                  {programs.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </Field>
+            </TwoCol>
+          </>
+        )}
+
+        {/* ── External-specific ── */}
+        {role === 'external' && (
+          <>
+            <Divider />
+            <SectionLabel>Organisation Details</SectionLabel>
+
+            <Field label="Institution / Organisation Name">
+              <input className="auth-input" type="text" value={institutionName}
+                onChange={(e) => setInstitutionName(e.target.value)}
+                placeholder="e.g. NUST, DHA College" required />
+            </Field>
+
+            <TwoCol>
+              <Field label="Representative Name">
+                <input className="auth-input" type="text" value={representativeName}
+                  onChange={(e) => setRepresentativeName(e.target.value)}
+                  placeholder="Full name" required />
+              </Field>
+              <Field label="Designation / Role">
+                <input className="auth-input" type="text" value={designation}
+                  onChange={(e) => setDesignation(e.target.value)}
+                  placeholder="e.g. Head of Sports" required />
+              </Field>
+            </TwoCol>
+          </>
+        )}
+
+        <div style={{ marginTop: 24 }}>
+          <button type="submit" className="auth-submit" disabled={loading}>
+            {loading ? 'Creating account…' : 'Create Account'}
+          </button>
+        </div>
+
+        <div style={{ textAlign: 'center', marginTop: 18, fontSize: 13.5, color: 'var(--ink-muted)' }}>
+          Already have an account?{' '}
+          <Link to={cfg.loginLink} className="auth-link" style={{ fontWeight: 600 }}>
+            Sign in
+          </Link>
+        </div>
+      </form>
+    </AuthShell>
   );
 }
 
-function Field({ label, children, error, hint }: { label: string; children: React.ReactNode; error?: string; hint?: string }) {
+// ── Layout helpers ────────────────────────────────────────────────────────────
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <label style={{ display: 'block', fontWeight: 700, fontSize: 14, color: '#333', marginBottom: 6 }}>{label}</label>
+    <div style={{
+      font: '600 11px var(--font-body)',
+      color: 'var(--ink-muted)',
+      textTransform: 'uppercase',
+      letterSpacing: '0.08em',
+      marginBottom: 12,
+    }}>
       {children}
-      {error ? <small style={errHint}>{error}</small> : hint ? <small style={hintStyle}>{hint}</small> : null}
     </div>
   );
 }
 
-const card: React.CSSProperties = { maxWidth: 900, margin: '0 auto', border: '1px solid #e0e0e0', borderRadius: 4, background: '#fff' };
-const cardHead: React.CSSProperties = { background: 'linear-gradient(#fafafa,#eee)', borderBottom: '1px solid #e0e0e0', padding: '14px 24px', fontSize: 17, color: '#444' };
-const inp: React.CSSProperties = { width: '100%', fontSize: 15, padding: '9px 12px', border: '1px solid #ccc', borderRadius: 3, color: '#333', outline: 'none' };
-const hintStyle: React.CSSProperties = { display: 'block', color: '#888', fontSize: 12, marginTop: 4 };
-const errHint: React.CSSProperties = { display: 'block', color: '#b3352b', fontSize: 12, marginTop: 4 };
-const errorBox: React.CSSProperties = { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 4, padding: '10px 12px', marginBottom: 16, fontSize: 14 };
-const successBanner: React.CSSProperties = { background: '#dff0d8', color: '#3c763d', border: '1px solid #c3e0ab', borderRadius: 4, padding: '14px 16px', fontSize: 15 };
-const greenBtn: React.CSSProperties = { display: 'block', textAlign: 'center', marginTop: 12, background: 'linear-gradient(#28a745,#1f8a3b)', color: '#fff', padding: '11px', borderRadius: 4, textDecoration: 'none', fontWeight: 600 };
-const backLink: React.CSSProperties = { display: 'inline-block', marginTop: 16, color: '#0a6ebd', textDecoration: 'none' };
+function TwoCol({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 12,
+    }}>
+      <style>{`@media (max-width: 480px) { .two-col { grid-template-columns: 1fr !important; } }`}</style>
+      <div className="two-col" style={{
+        display: 'contents',
+      }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Divider() {
+  return <div style={{ height: 1, background: 'var(--line-light)', margin: '20px 0 16px' }} />;
+}
+
+// ── Eye icons ─────────────────────────────────────────────────────────────────
+
+function EyeOn() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/>
+      <circle cx="8" cy="8" r="2"/>
+    </svg>
+  );
+}
+function EyeOff() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 2l12 12M6.5 6.6A2 2 0 0 0 9.4 9.5"/>
+      <path d="M6.9 3.1C7.3 3 7.6 3 8 3c4.5 0 7 5 7 5a12 12 0 0 1-1.8 2.6M4.7 4.8A12 12 0 0 0 1 8s2.5 5 7 5c1.4 0 2.7-.4 3.8-1"/>
+    </svg>
+  );
+}
