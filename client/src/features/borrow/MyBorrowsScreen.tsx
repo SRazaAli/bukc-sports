@@ -20,6 +20,46 @@ function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error
 
 // ─── Individual request form (original) ──────────────────────────────────────
 
+// ── Time helpers ──────────────────────────────────────────────────────────────
+const OPEN_HH = 8;   // 08:00
+const CLOSE_HH = 17; // 17:00
+
+function toHHMM(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
+  const m = (totalMinutes % 60).toString().padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function smartStart(): string {
+  const now = new Date();
+  const localMin = now.getHours() * 60 + now.getMinutes();
+  // Round up to next multiple of 5
+  const rounded = Math.ceil(localMin / 5) * 5;
+  // Clamp to [08:00, 17:00)
+  const clamped = Math.min(Math.max(rounded, OPEN_HH * 60), CLOSE_HH * 60 - 5);
+  return toHHMM(clamped);
+}
+
+function smartEnd(startHHMM: string, maxDurationMinutes: number): string {
+  const parts = startHHMM.split(':').map(Number);
+  const startMin = (parts[0] ?? 8) * 60 + (parts[1] ?? 0);
+  const endMin = Math.min(startMin + maxDurationMinutes, CLOSE_HH * 60);
+  return toHHMM(endMin);
+}
+
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function nowMinTime(date: string): string {
+  const today = todayStr();
+  if (date !== today) return `${OPEN_HH.toString().padStart(2, '0')}:00`;
+  const now = new Date();
+  return toHHMM(Math.max(now.getHours() * 60 + now.getMinutes(), OPEN_HH * 60));
+}
+
+// ─── Individual request form ───────────────────────────────────────────────────
 function RequestForm({ types, initialTypeId, onDone, onError }: {
   types: EquipmentType[];
   initialTypeId?: number;
@@ -27,19 +67,36 @@ function RequestForm({ types, initialTypeId, onDone, onError }: {
   onError: (m: string) => void;
 }) {
   const [equipmentTypeId, setType] = useState(initialTypeId ?? 0);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [startTime, setStartTime] = useState('10:00');
-  const [endTime, setEndTime] = useState('13:00');
+  const [date, setDate] = useState(todayStr);
+  const [startTime, setStartTime] = useState(smartStart);
+  const [endTime, setEndTime] = useState(() => {
+    const sel = types.find((t) => t.equipment_type_id === (initialTypeId ?? 0));
+    return smartEnd(smartStart(), sel?.max_borrow_duration_minutes ?? 480);
+  });
   const [busy, setBusy] = useState(false);
 
-  // Sync if parent resolves types after mount
   useEffect(() => {
     if (initialTypeId && equipmentTypeId === 0) setType(initialTypeId);
   }, [initialTypeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // When type changes, recalc end time using new max duration
+  function handleTypeChange(id: number) {
+    setType(id);
+    const sel = types.find((t) => t.equipment_type_id === id);
+    if (sel) setEndTime(smartEnd(startTime, sel.max_borrow_duration_minutes));
+  }
+
+  // When start changes, push end time forward by max duration
+  function handleStartChange(val: string) {
+    setStartTime(val);
+    const sel = types.find((t) => t.equipment_type_id === equipmentTypeId);
+    setEndTime(smartEnd(val, sel?.max_borrow_duration_minutes ?? 480));
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!equipmentTypeId) { onError('Choose an equipment type.'); return; }
+    if (startTime >= endTime) { onError('Return time must be after start time.'); return; }
     setBusy(true);
     try {
       const requestedStartAt = `${date}T${startTime}:00.000Z`;
@@ -49,22 +106,26 @@ function RequestForm({ types, initialTypeId, onDone, onError }: {
     } catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
 
+  const minTime = nowMinTime(date);
+
   return (
     <form onSubmit={submit} style={formGrid}>
       <L label="Equipment">
-        <select style={inp} value={equipmentTypeId} onChange={(e) => setType(Number(e.target.value))} required>
+        <select style={inp} value={equipmentTypeId} onChange={(e) => handleTypeChange(Number(e.target.value))} required>
           <option value={0}>Select</option>
           {types.map((t) => <option key={t.equipment_type_id} value={t.equipment_type_id}>{t.name}</option>)}
         </select>
       </L>
       <L label="Date">
-        <input type="date" style={inp} value={date} onChange={(e) => setDate(e.target.value)} required />
+        <input type="date" style={inp} value={date} min={todayStr()} onChange={(e) => setDate(e.target.value)} required />
       </L>
       <L label="Start time">
-        <input type="time" style={inp} value={startTime} onChange={(e) => setStartTime(e.target.value)} required />
+        <input type="time" style={inp} value={startTime} min={minTime} max="17:00" step={300}
+          onChange={(e) => handleStartChange(e.target.value)} required />
       </L>
-      <L label="Return time">
-        <input type="time" style={inp} value={endTime} onChange={(e) => setEndTime(e.target.value)} required />
+      <L label="Return by">
+        <input type="time" style={inp} value={endTime} min={startTime} max="17:00" step={300}
+          onChange={(e) => setEndTime(e.target.value)} required />
       </L>
       <div style={{ gridColumn: '1 / -1' }}>
         <PrimaryButton disabled={busy}>{busy ? 'Submitting…' : 'Submit Request'}</PrimaryButton>
@@ -93,9 +154,9 @@ function KitRequestForm({ cats, initialSportId, onDone, onError }: {
   const [sportId, setSportId] = useState<number>(initialSportId ?? 0);
   const [kitPack, setKitPack] = useState<KitPack | null>(null);
   const [kitLoading, setKitLoading] = useState(false);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [startTime, setStartTime] = useState('10:00');
-  const [endTime, setEndTime] = useState('13:00');
+  const [date, setDate] = useState(todayStr);
+  const [startTime, setStartTime] = useState(smartStart);
+  const [endTime, setEndTime] = useState(() => smartEnd(smartStart(), 480));
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -165,13 +226,15 @@ function KitRequestForm({ cats, initialSportId, onDone, onError }: {
       {kitPack?.canRequestAll && (
         <>
           <L label="Date">
-            <input type="date" style={inp} value={date} onChange={(e) => setDate(e.target.value)} required />
+            <input type="date" style={inp} value={date} min={todayStr()} onChange={(e) => setDate(e.target.value)} required />
           </L>
           <L label="Start time">
-            <input type="time" style={inp} value={startTime} onChange={(e) => setStartTime(e.target.value)} required />
+            <input type="time" style={inp} value={startTime} min={nowMinTime(date)} max="17:00" step={300}
+              onChange={(e) => { setStartTime(e.target.value); setEndTime(smartEnd(e.target.value, 480)); }} required />
           </L>
-          <L label="Return time">
-            <input type="time" style={inp} value={endTime} onChange={(e) => setEndTime(e.target.value)} required />
+          <L label="Return by">
+            <input type="time" style={inp} value={endTime} min={startTime} max="17:00" step={300}
+              onChange={(e) => setEndTime(e.target.value)} required />
           </L>
           <div style={{ gridColumn: '1 / -1' }}>
             <PrimaryButton disabled={submitting}>
