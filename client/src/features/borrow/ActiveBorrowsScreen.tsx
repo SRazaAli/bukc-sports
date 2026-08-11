@@ -70,7 +70,7 @@ function ReturnPanel({ txn, onBack, onDone, onError }: { txn: TxnDetail; onBack:
   const [score, setScore] = useState(80);
   const [busy,  setBusy]  = useState(false);
 
-  const labelFor = (s: number) => s >= (txn as any).good_min ?? 70 ? 'GOOD' : s >= (txn as any).worn_min ?? 40 ? 'WORN' : 'DAMAGED';
+  const labelFor = (s: number) => s >= ((txn as any).good_min ?? 70) ? 'GOOD' : s >= ((txn as any).worn_min ?? 40) ? 'WORN' : 'DAMAGED';
 
   async function submit() {
     setBusy(true);
