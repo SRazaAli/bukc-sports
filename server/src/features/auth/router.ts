@@ -122,6 +122,11 @@ authRouter.get('/admin/pending', requireAuth, requireRole('SUPER_ADMIN'), asyncH
   res.json({ accounts: await svc.listPendingAccounts() });
 }));
 
+authRouter.get('/admin/users', requireAuth, requireRole('SUPER_ADMIN'),
+  asyncHandler(async (_req, res) => {
+    res.json({ accounts: await svc.listAllAccounts() });
+  }));
+
 // Audit trail — every coordinator invite ever sent, for the record.
 authRouter.get('/admin/coordinator-invites', requireAuth, requireRole('SUPER_ADMIN'), asyncHandler(async (_req, res) => {
   res.json({ invites: await svc.listCoordinatorInvites() });
