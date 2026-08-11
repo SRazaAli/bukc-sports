@@ -50,7 +50,7 @@ export default function MyBorrowsScreen() {
               <tbody>{requests.map((r) => (
                 <tr key={r.borrow_request_id}>
                   <td style={Td}>{r.equipment_type_name}</td>
-                  <td style={Td} style={{ ...Td, whiteSpace: 'nowrap' }}>{fmtDT(r.requested_start_at)} → {new Date(r.requested_return_at).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' })}</td>
+                  <td style={{ ...Td, whiteSpace: 'nowrap' }}>{fmtDT(r.requested_start_at)} → {new Date(r.requested_return_at).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' })}</td>
                   <td style={Td}><Badge status={r.status} /></td>
                   <td style={{ ...Td, color: 'var(--danger)', fontSize: 13 }}>{r.rejection_reason ?? ''}</td>
                 </tr>
