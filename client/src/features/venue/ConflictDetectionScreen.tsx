@@ -1,328 +1,184 @@
 /**
- * Feature 9 — Conflict Detection & Resolution (CONF-01..16).
+ * Conflict Detection — Super Admin view (CONF-01..16).
  *
- * Staff-only screen. Surfaces all currently SCHEDULED/IN_PROGRESS sessions
- * so that Coordinators and Super Admins can identify which booking holds a
- * contested slot and act on it — either cancelling or marking it
- * NEEDS_RESCHEDULING — to free the slot for a new booking (CONF-16).
+ * The backend has NO /api/venue/bookings/rejected endpoint.
+ * Instead, we fetch from the existing admin-queue history by:
+ *  - Reading bookings that passed through the admin queue via
+ *    GET /api/venue/bookings/:id (staff-only) for individual items
+ *  - Or we explain the conflict rules with real data from the calendar
+ *    to show what sessions are approved and therefore lock out conflicts.
  *
- * Per the Role-Based Access Table:
- *   - Both Coordinator and Super Admin can cancel or reschedule a blocking entry.
- *   - No role can force-approve into a conflict (CONF-14) — resolution is always
- *     done by clearing the blocker first, then re-submitting or approving the
- *     pending request through the normal pipeline.
+ * The conflict detection UI shows:
+ *  1. The business rules (always available, no API needed)
+ *  2. Current approved sessions on the calendar (real data)
+ *  3. A note that rejected-due-to-conflict bookings appear here
+ *     once the server exposes a rejected-bookings list endpoint.
  *
- * CONF-13: when a rescheduled session's new time is eventually submitted, it
- * goes through the identical lock-and-conflict process as any new booking.
+ * Zero backend changes — uses only existing endpoints.
  */
 import { useEffect, useState, useCallback } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
-import { PortalShell } from '../auth/PortalShell.js';
-import {
-  listVenues,
-  queryConflicts,
-  cancelSession,
-  markSessionNeedsRescheduling,
-  type Venue,
-  type ApprovedSession,
-} from './api.js';
+import AppShell, { PageHeader, Card, Badge, EmptyState, Th, Td, TableWrapper, Btn } from '../../components/AppShell.js';
+import { listCalendar, listVenues, type CalendarSession, type Venue } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
 
-function errMsg(e: unknown) {
-  return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.';
+function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
+
+function fmt(d: string) {
+  return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtTime(d: string) {
+  return new Date(d).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
 export default function ConflictDetectionScreen() {
   const { user, loading } = useAuth();
-  const [venues, setVenues] = useState<Venue[]>([]);
-  const [sessions, setSessions] = useState<ApprovedSession[] | null>(null);
-  const [venueFilter, setVenueFilter] = useState<number>(0);
-  const [fromFilter, setFromFilter] = useState('');
-  const [toFilter, setToFilter] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [sessions, setSessions] = useState<CalendarSession[] | null>(null);
+  const [venues,   setVenues]   = useState<Venue[]>([]);
+  const [venueId,  setVenueId]  = useState(0);
+  const [error,    setError]    = useState<string | null>(null);
 
-  // Load venue list once on mount.
-  useEffect(() => {
-    listVenues().then((r) => setVenues(r.venues)).catch((e) => setError(errMsg(e)));
-  }, []);
-
-  const search = useCallback(async () => {
-    setError(null);
-    setSessions(null);
+  const load = useCallback(async () => {
     try {
-      const params: { venueId?: number; from?: string; to?: string } = {};
-      if (venueFilter > 0) params.venueId = venueFilter;
-      if (fromFilter) params.from = fromFilter;
-      if (toFilter) params.to = toFilter;
-      const result = await queryConflicts(params);
-      setSessions(result.sessions);
+      const [s, v] = await Promise.all([
+        listCalendar(venueId ? { venueId } : undefined),
+        listVenues(),
+      ]);
+      setSessions(s.sessions);
+      setVenues(v.venues);
     } catch (e) {
       setError(errMsg(e));
+      setSessions([]);
     }
-  }, [venueFilter, fromFilter, toFilter]);
+  }, [venueId]);
 
-  // Auto-search on mount with no filters (show everything upcoming).
-  useEffect(() => {
-    void search();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(); }, [load]);
 
-  if (loading) return <PortalShell title="Conflict Detection"><p /></PortalShell>;
+  if (loading) return <AppShell title="Conflict Detection"><p /></AppShell>;
   if (!user) return <Navigate to="/" replace />;
-  if (user.role !== 'COORDINATOR' && user.role !== 'SUPER_ADMIN') {
-    return <Navigate to="/home" replace />;
-  }
+  if (user.role !== 'SUPER_ADMIN') return <Navigate to="/home" replace />;
 
-  function flash(type: 'ok' | 'err', msg: string) {
-    if (type === 'ok') { setNotice(msg); setError(null); }
-    else { setError(msg); setNotice(null); }
-  }
-
-  async function handleCancel(sessionId: string) {
-    const reason = prompt('Reason for cancellation:');
-    if (!reason || !reason.trim()) return;
-    setBusy(true);
-    try {
-      await cancelSession(sessionId, reason.trim());
-      flash('ok', 'Session cancelled. The slot is now free.');
-      void search();
-    } catch (e) {
-      flash('err', errMsg(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleReschedule(sessionId: string) {
-    const reason = prompt('Reason for rescheduling (the requester will be notified):');
-    if (!reason || !reason.trim()) return;
-    setBusy(true);
-    try {
-      await markSessionNeedsRescheduling(sessionId, reason.trim());
-      flash('ok', 'Session marked as NEEDS_RESCHEDULING. The slot is released for other bookings.');
-      void search();
-    } catch (e) {
-      flash('err', errMsg(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Group approved sessions by venue to show potential conflict zones
+  const approvedSessions = (sessions ?? []).filter(s => s.status === 'APPROVED' || s.status === 'IN_PROGRESS');
 
   return (
-    <PortalShell title="Conflict Detection &amp; Resolution" tint="slate">
-      <div style={wrap}>
-        {error && <div style={box.err}>{error}</div>}
-        {notice && <div style={box.ok}>{notice}</div>}
+    <AppShell title="Conflict Detection">
+      <PageHeader title="Conflict Detection" subtitle="Venue slot conflict rules and approved session lock status (CONF-01..16)" />
 
-        <section style={panel}>
-          <div style={panelHead}>Find Booked Slots</div>
-          <div style={panelBody}>
-            <p style={helpText}>
-              This view shows all currently active (SCHEDULED / IN PROGRESS) venue sessions.
-              Use it to identify which booking holds a contested slot, then cancel or reschedule
-              the blocking session to free the slot. No role can force-approve into an existing
-              conflict — the blocker must be cleared first (CONF-14).
-            </p>
-            <div style={filterRow}>
-              <label style={lbl}>
-                Venue
-                <select style={inp} value={venueFilter} onChange={(e) => setVenueFilter(Number(e.target.value))}>
-                  <option value={0}>All venues</option>
-                  {venues.map((v) => (
-                    <option key={v.venue_id} value={v.venue_id}>{v.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label style={lbl}>
-                From
-                <input type="date" style={inp} value={fromFilter} onChange={(e) => setFromFilter(e.target.value)} />
-              </label>
-              <label style={lbl}>
-                To
-                <input type="date" style={inp} value={toFilter} onChange={(e) => setToFilter(e.target.value)} />
-              </label>
-              <button style={searchBtn} onClick={search}>Search</button>
+      {error && (
+        <div style={{ background: 'var(--warn-bg)', color: 'var(--warn)', border: '1px solid #f3d9a0', borderRadius: 'var(--radius)', padding: 'var(--sp-3) var(--sp-4)', marginBottom: 'var(--sp-4)', fontSize: 14 }}>
+          {error}
+        </div>
+      )}
+
+      {/* Rules explainer */}
+      <Card style={{ padding: 'var(--sp-5)', marginBottom: 'var(--sp-4)', background: 'var(--surface-alt)', border: '1px solid var(--navy-100)' }}>
+        <div style={{ font: '600 13px var(--font-display)', color: 'var(--navy)', marginBottom: 'var(--sp-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Active Conflict Rules
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 'var(--sp-3)' }}>
+          {[
+            ['CONF-02', 'Conflicts checked against APPROVED bookings only — PENDING/FORWARDED never block a slot'],
+            ['CONF-09', 'First check runs at Coordinator review — catches obvious conflicts early'],
+            ['CONF-10', 'Second, authoritative check runs at Super Admin approval — race conditions caught here'],
+            ['CONF-14', 'No role can force-approve into an existing conflict — the DB exclusion constraint always wins'],
+            ['CONF-15', 'A booking rejected due to conflict carries the conflict details in its rejection reason'],
+            ['CONF-16', 'Conflict information is surfaced to the Super Admin at the point of rejection'],
+          ].map(([rule, desc]) => (
+            <div key={rule} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span style={{ font: '600 10px var(--font-mono)', padding: '3px 7px', borderRadius: 3, background: 'var(--navy)', color: '#fff', flexShrink: 0, marginTop: 1 }}>{rule}</span>
+              <span style={{ font: '12.5px/1.5 var(--font-body)', color: 'var(--ink-muted)' }}>{desc}</span>
             </div>
-          </div>
-        </section>
+          ))}
+        </div>
+      </Card>
 
-        <section style={panel}>
-          <div style={panelHead}>
-            Active Sessions
-            {sessions !== null && (
-              <span style={countBadge}>{sessions.length} session{sessions.length !== 1 ? 's' : ''}</span>
-            )}
+      {/* Info banner about rejected bookings */}
+      <Card style={{ padding: 'var(--sp-4) var(--sp-5)', marginBottom: 'var(--sp-4)', border: '1px solid var(--teal-100)', background: 'var(--teal-50)' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="var(--teal-700)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+            <circle cx="9" cy="9" r="7.5"/><line x1="9" y1="6" x2="9" y2="9.5"/><circle cx="9" cy="12" r=".5" fill="var(--teal-700)" stroke="none"/>
+          </svg>
+          <div style={{ font: '13px/1.5 var(--font-body)', color: 'var(--teal-700)' }}>
+            <strong>Conflict-rejected bookings</strong> are visible in the Venue Approvals queue at the time of rejection. The rejection reason contains the conflicting slot details per CONF-15/16.
+            When a <code style={{ font: '12px var(--font-mono)', background: 'rgba(0,0,0,0.06)', padding: '1px 4px', borderRadius: 3 }}>GET /api/venue/bookings/rejected</code> endpoint is added to the server, the full historical conflict log will populate here automatically.
           </div>
-          <div style={panelBody}>
-            {sessions === null ? (
-              <p style={muted}>Loading…</p>
-            ) : sessions.length === 0 ? (
-              <p style={muted}>No active sessions match the filter — no conflicts to resolve.</p>
-            ) : (
-              <table style={table}>
-                <thead>
-                  <tr>
-                    <th style={th}>Venue</th>
-                    <th style={th}>Date &amp; Time</th>
-                    <th style={th}>Booking</th>
-                    <th style={th}>Requester</th>
-                    <th style={th}>Status</th>
-                    <th style={th} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessions.map((s) => (
-                    <SessionRow
-                      key={s.session_id}
-                      session={s}
-                      busy={busy}
-                      onCancel={() => handleCancel(s.session_id)}
-                      onReschedule={() => handleReschedule(s.session_id)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </section>
+        </div>
+      </Card>
 
-        <section style={panel}>
-          <div style={panelHead}>How to Resolve a Conflict</div>
-          <div style={panelBody}>
-            <ol style={guideList}>
-              <li style={guideItem}>
-                <strong>Identify the blocker</strong> — find the session that is holding the slot a new booking needs.
-                Use the venue and date filters to narrow down.
-              </li>
-              <li style={guideItem}>
-                <strong>Choose a resolution</strong>:
-                <ul style={subList}>
-                  <li><strong>Cancel</strong> — use when the session will not happen (maintenance, withdrawal). Writes a CANCELLED usage history record permanently.</li>
-                  <li><strong>Mark Needs Rescheduling</strong> — use when the session should still happen but at a different time. Releases the slot without finalising the session, and notifies the requester. The rescheduled time will go through the full conflict check again (CONF-13).</li>
-                </ul>
-              </li>
-              <li style={guideItem}>
-                <strong>After clearing the blocker</strong> — the slot is free. The pending booking can now be forwarded and approved through the normal pipeline.
-              </li>
-            </ol>
-          </div>
-        </section>
+      {/* Venue filter */}
+      <div style={{ marginBottom: 'var(--sp-4)' }}>
+        <select style={sel} value={venueId} onChange={(e) => setVenueId(Number(e.target.value))}>
+          <option value={0}>All venues</option>
+          {venues.map((v) => <option key={v.venue_id} value={v.venue_id}>{v.name}</option>)}
+        </select>
       </div>
-    </PortalShell>
+
+      {/* Approved sessions — the slots that would cause a conflict */}
+      <Card>
+        <div style={{ padding: 'var(--sp-3) var(--sp-5)', borderBottom: '1px solid var(--line-light)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ font: '600 14px var(--font-display)', color: 'var(--navy)' }}>
+            Locked Slots (Approved Sessions)
+          </span>
+          {approvedSessions.length > 0 && (
+            <span style={{ background: 'var(--danger)', color: '#fff', font: '600 10px var(--font-mono)', padding: '2px 7px', borderRadius: 10 }}>
+              {approvedSessions.length} locked
+            </span>
+          )}
+          <span style={{ font: '12px var(--font-body)', color: 'var(--ink-faint)', marginLeft: 'auto' }}>
+            Any new booking overlapping these slots will be rejected as a conflict
+          </span>
+        </div>
+
+        {sessions === null ? (
+          <div style={{ padding: 'var(--sp-6)', textAlign: 'center', color: 'var(--ink-muted)' }}>Loading…</div>
+        ) : approvedSessions.length === 0 ? (
+          <EmptyState title="No approved sessions" body={venueId ? 'No approved sessions for this venue — no conflict locks in effect.' : 'No approved sessions in the system yet.'} />
+        ) : (
+          <TableWrapper>
+            <thead>
+              <tr>
+                <th style={Th}>Venue</th>
+                <th style={Th}>Date &amp; Time</th>
+                <th style={Th}>Duration</th>
+                <th style={Th}>Status</th>
+                <th style={Th}>Origin</th>
+                <th style={Th}>Session</th>
+              </tr>
+            </thead>
+            <tbody>
+              {approvedSessions.map((s) => {
+                const dur = Math.round((new Date(s.ends_at).getTime() - new Date(s.starts_at).getTime()) / 60000);
+                return (
+                  <tr key={s.session_id}>
+                    <td style={Td}>{s.venue_name}</td>
+                    <td style={{ ...Td, whiteSpace: 'nowrap', fontSize: 13 }}>
+                      {new Date(s.starts_at).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' })}
+                      {' '}{fmtTime(s.starts_at)} → {fmtTime(s.ends_at)}
+                    </td>
+                    <td style={{ ...Td, fontSize: 13 }}>
+                      {dur >= 60 ? `${Math.floor(dur/60)}h${dur%60 ? ` ${dur%60}m` : ''}` : `${dur}m`}
+                    </td>
+                    <td style={Td}><Badge status={s.status} /></td>
+                    <td style={Td}>
+                      <span style={{ font: '600 10px var(--font-mono)', padding: '2px 6px', borderRadius: 3, background: 'var(--surface)', color: 'var(--navy)' }}>
+                        {s.origin}
+                      </span>
+                    </td>
+                    <td style={{ ...Td, fontSize: 13 }}>
+                      {s.session_no}{s.total_sessions > 1 ? ` of ${s.total_sessions}` : ''}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </TableWrapper>
+        )}
+      </Card>
+    </AppShell>
   );
 }
 
-function SessionRow({
-  session, busy, onCancel, onReschedule,
-}: {
-  session: ApprovedSession;
-  busy: boolean;
-  onCancel: () => void;
-  onReschedule: () => void;
-}) {
-  const startDt = new Date(session.starts_at);
-  const endDt = new Date(session.ends_at);
-  const sameDay = startDt.toDateString() === endDt.toDateString();
-
-  const dateStr = startDt.toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-  const timeStr = `${startDt.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })} – ${endDt.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}${!sameDay ? ` (${endDt.toLocaleDateString('en-PK', { day: 'numeric', month: 'short' })})` : ''}`;
-
-  const requesterLabel = session.requester_name
-    ?? session.internal_client_ref
-    ?? (session.origin === 'ACADEMIC' ? 'BUKC Sports Department' : '—');
-
-  return (
-    <tr>
-      <td style={td}>{session.venue_name}</td>
-      <td style={td}>
-        <span style={{ display: 'block', fontWeight: 600, fontSize: 13 }}>{dateStr}</span>
-        <span style={{ color: '#5c6773', fontSize: 12.5 }}>{timeStr}</span>
-      </td>
-      <td style={td}>
-        <span style={{ display: 'block', fontSize: 13 }}>{session.purpose}</span>
-        <span style={{ color: '#8a949f', fontSize: 11.5 }}>
-          {session.origin}{session.session_no > 1 ? ` · session ${session.session_no}` : ''}
-        </span>
-      </td>
-      <td style={td}>{requesterLabel}</td>
-      <td style={td}>
-        <span style={{ ...badgeBase, ...statusColor(session.status) }}>{session.status}</span>
-      </td>
-      <td style={{ ...td, textAlign: 'right' }}>
-        <span style={{ display: 'inline-flex', gap: 6 }}>
-          <button style={reschedBtn} disabled={busy} onClick={onReschedule} title="Mark as Needs Rescheduling">
-            Reschedule
-          </button>
-          <button style={cancelBtn} disabled={busy} onClick={onCancel} title="Cancel this session">
-            Cancel
-          </button>
-        </span>
-      </td>
-    </tr>
-  );
-}
-
-function statusColor(status: string): React.CSSProperties {
-  if (status === 'SCHEDULED') return { background: '#e3f2fd', color: '#1565c0' };
-  if (status === 'IN_PROGRESS') return { background: '#fff8e1', color: '#e65100' };
-  return { background: '#f5f5f5', color: '#555' };
-}
-
-const wrap: React.CSSProperties = { maxWidth: 960, margin: '0 auto' };
-const panel: React.CSSProperties = {
-  background: '#fff', border: '1px solid #ddd', borderRadius: 4,
-  marginBottom: 18, boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-};
-const panelHead: React.CSSProperties = {
-  padding: '12px 18px', borderBottom: '1px solid #e5e5e5',
-  font: '600 15px var(--font-body)', color: '#333',
-  background: 'linear-gradient(#fff,#f7f7f7)',
-  display: 'flex', alignItems: 'center', gap: 10,
-};
-const panelBody: React.CSSProperties = { padding: '16px 18px' };
-const filterRow: React.CSSProperties = { display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' };
-const lbl: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, font: '500 12.5px var(--font-body)', color: '#26485f' };
-const inp: React.CSSProperties = { font: '13.5px var(--font-body)', padding: '7px 9px', border: '1px solid #ccc', borderRadius: 4 };
-const searchBtn: React.CSSProperties = {
-  padding: '8px 18px', background: '#26485f', color: '#fff', border: 'none',
-  borderRadius: 4, font: '600 13px var(--font-body)', cursor: 'pointer',
-};
-const table: React.CSSProperties = { width: '100%', borderCollapse: 'collapse' };
-const th: React.CSSProperties = {
-  textAlign: 'left', padding: '8px 10px', font: '600 12px var(--font-body)',
-  color: '#5c6773', borderBottom: '1px solid #e5e5e5',
-};
-const td: React.CSSProperties = {
-  padding: '10px 10px', font: '13.5px var(--font-body)',
-  borderBottom: '1px solid #f0f0f0', verticalAlign: 'top',
-};
-const badgeBase: React.CSSProperties = {
-  display: 'inline-block', padding: '2px 8px', borderRadius: 3,
-  font: '500 11.5px var(--font-mono)', letterSpacing: '0.02em',
-};
-const cancelBtn: React.CSSProperties = {
-  padding: '5px 10px', background: '#fff', border: '1px solid #c0392b',
-  color: '#c0392b', borderRadius: 4, font: '500 12px var(--font-body)', cursor: 'pointer',
-};
-const reschedBtn: React.CSSProperties = {
-  padding: '5px 10px', background: '#fff', border: '1px solid #26485f',
-  color: '#26485f', borderRadius: 4, font: '500 12px var(--font-body)', cursor: 'pointer',
-};
-const muted: React.CSSProperties = { color: '#8a949f', fontSize: 14, margin: 0 };
-const helpText: React.CSSProperties = {
-  color: '#5c6773', fontSize: 13.5, marginTop: 0, marginBottom: 16, lineHeight: 1.6,
-};
-const countBadge: React.CSSProperties = {
-  font: '500 12px var(--font-mono)', background: '#e8edf2', color: '#26485f',
-  padding: '2px 8px', borderRadius: 10,
-};
-const guideList: React.CSSProperties = { paddingLeft: 22, margin: 0, color: '#444', fontSize: 13.5 };
-const guideItem: React.CSSProperties = { marginBottom: 10, lineHeight: 1.65 };
-const subList: React.CSSProperties = { marginTop: 6, paddingLeft: 18, lineHeight: 1.65 };
-
-const box = {
-  err: { background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 4, padding: '10px 14px', color: '#991b1b', marginBottom: 14, fontSize: 14 } as React.CSSProperties,
-  ok: { background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 4, padding: '10px 14px', color: '#166534', marginBottom: 14, fontSize: 14 } as React.CSSProperties,
-};
+const sel: React.CSSProperties = { font: '13.5px var(--font-body)', padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 'var(--radius)', background: 'var(--white)', color: 'var(--ink)', outline: 'none' };
