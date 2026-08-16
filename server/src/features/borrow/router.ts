@@ -8,7 +8,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../middleware/async.js';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
-import { badRequest } from '../../middleware/errors.js';
+import { badRequest, forbidden } from '../../middleware/errors.js';
 import * as svc from './service.js';
 import { submitKitBorrowRequest } from './kitBorrowService.js';
 import * as v from './validators.js';
@@ -127,8 +127,13 @@ borrowRouter.post('/:id/return', ...coordinatorOnly, asyncHandler(async (req, re
   res.json({ ...result, message: 'Return processed.' });
 }));
 
-borrowRouter.get('/reputation/:userId', ...staffRead, asyncHandler(async (req, res) => {
+// Staff can look up any user's reputation; a student may look up only their
+// own (the Profile screen's Borrowing Activity panel — T-617).
+borrowRouter.get('/reputation/:userId', requireAuth, asyncHandler(async (req, res) => {
   const userId = req.params.userId;
   if (!userId) throw badRequest('Missing userId');
+  const isStaff = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'COORDINATOR';
+  const isSelf = req.user!.role === 'STUDENT' && req.user!.userId === userId;
+  if (!isStaff && !isSelf) throw forbidden();
   res.json(await svc.getReputation(userId));
 }));
