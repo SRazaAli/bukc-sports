@@ -2,16 +2,19 @@
  * Registration, parameterized by role (student | external). Layout takes after
  * the Admissions "Candidate Registration" card in the screenshots. Student form
  * has cascading Department -> Program Title dropdowns. No CAPTCHA (per project).
- * On success, shows the green "Awaiting administrator verification" banner.
+ * On success, shows the "Awaiting administrator verification" banner.
  *
  * External form: Institution is a dropdown of known universities plus an
- * "Other" option that reveals a free-text field. Representative Name was
- * removed — it duplicated Full Name (the person filling the form types their
- * own name into both) with no real distinction in practice.
+ * "Other" option that reveals a free-text field.
+ *
+ * Visual redesign only — validation, submission, and API calls are unchanged.
  */
 import { useState, useMemo, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
-import { PortalShell, PrimaryButton, type BarTint } from './PortalShell.js';
+import {
+  AuthSplit, FieldGroup, AuthInput, AuthSelect, AuthButton, AuthLinkRow, AuthLink,
+  ErrorBanner, SuccessBanner, PersonIcon, LockIcon, MailIcon, PhoneIcon, BankIcon, BuildingIcon, BadgeIcon,
+  type PortalKey,
+} from './AuthUI.js';
 import { registerStudent, registerExternal } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
 import { DEPARTMENTS, EXTERNAL_UNIVERSITIES } from './reference-data.js';
@@ -21,9 +24,20 @@ import {
 } from './validation.js';
 
 type Role = 'student' | 'external';
-const CFG: Record<Role, { title: string; tint: BarTint; loginLink: string }> = {
-  student: { title: 'Student Registration', tint: 'sage', loginLink: '/login/student' },
-  external: { title: 'External Registration', tint: 'blue', loginLink: '/login/external' },
+
+const CFG: Record<Role, { title: string; loginLink: string; headline: string; subhead: string; chip: string }> = {
+  student: {
+    title: 'Student Registration', loginLink: '/login/student',
+    headline: 'Join the BUKC sports community.',
+    subhead: 'Create your student account to book venues and borrow equipment. An administrator verifies every new account.',
+    chip: 'For enrolled BUKC students',
+  },
+  external: {
+    title: 'External Registration', loginLink: '/login/external',
+    headline: 'Bring your organization to our courts.',
+    subhead: 'Register as an external member to request venues for your events. An administrator verifies every new account.',
+    chip: 'For partner institutions',
+  },
 };
 
 const OTHER = '__other__';
@@ -35,6 +49,7 @@ type FieldErrors = Partial<Record<
 
 export default function RegisterScreen({ role }: { role: Role }) {
   const cfg = CFG[role];
+  const portal = role as PortalKey;
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -108,105 +123,105 @@ export default function RegisterScreen({ role }: { role: Role }) {
 
   if (done) {
     return (
-      <PortalShell title={cfg.title} tint={cfg.tint}>
-        <div style={{ maxWidth: 900, margin: '0 auto' }}>
-          <div style={successBanner}>
-            <strong>Account created.</strong> Awaiting administrator verification.
-          </div>
-          <p style={{ color: '#555', marginTop: 16 }}>
-            An administrator reviews new accounts before they can sign in. You'll receive an email once your account is active.
-          </p>
-          <Link to={cfg.loginLink} style={backLink}>Back to sign in</Link>
+      <AuthSplit portal={portal} eyebrow={`${role === 'student' ? 'Student' : 'External'} Portal`}
+        headline={cfg.headline} subhead={cfg.subhead} chip={cfg.chip} formMaxWidth={440}>
+        <SuccessBanner title="Account created.">Awaiting administrator verification.</SuccessBanner>
+        <p style={{ color: '#5C7180', marginTop: 16, fontSize: 14, lineHeight: 1.6 }}>
+          An administrator reviews new accounts before they can sign in. You&apos;ll receive an email once your account is active.
+        </p>
+        <div style={{ marginTop: 18 }}>
+          <AuthLink to={cfg.loginLink}>← Back to sign in</AuthLink>
         </div>
-      </PortalShell>
+      </AuthSplit>
     );
   }
 
   return (
-    <PortalShell title={cfg.title} tint={cfg.tint}>
-      <div style={card}>
-        <div style={cardHead}>Candidate Registration</div>
-        <form onSubmit={onSubmit} noValidate style={{ padding: 24 }}>
-          {error && <div style={errorBox}>{error}</div>}
-
-          <Field label="Full Name:" error={fieldErrors.fullName}>
-            <input style={inp} value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Full name" required maxLength={50} />
-          </Field>
-          <Field label="Email:" error={fieldErrors.email}>
-            <input style={inp} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" required maxLength={254} />
-          </Field>
-          <Field label="Contact Number:" error={fieldErrors.contactNumber} hint="Format: 03XXXXXXXXX or 03XX-XXXXXXX">
-            <input style={inp} value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} placeholder="Enter contact number" required maxLength={12} />
-          </Field>
-
-          {role === 'student' ? (
-            <>
-              <Field label="Enrollment:" error={fieldErrors.enrollmentNo} hint="Format: XX-XXXXXX-XXX ">
-                <input style={inp} value={enrollmentNo} onChange={(e) => setEnrollmentNo(e.target.value)} placeholder="e.g. 84-024000-123" required />
-              </Field>
-              <Field label="Department:" error={fieldErrors.department}>
-                <select style={inp} value={department} onChange={(e) => { setDepartment(e.target.value); setProgramTitle(''); }} required>
-                  <option value="">Select</option>
-                  {DEPARTMENTS.map((d) => <option key={d.name} value={d.name}>{d.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Program Title:" error={fieldErrors.programTitle}>
-                <select style={inp} value={programTitle} onChange={(e) => setProgramTitle(e.target.value)} disabled={!department} required>
-                  <option value="">{department ? 'Select' : 'Select a department first'}</option>
-                  {programs.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </Field>
-            </>
-          ) : (
-            <>
-              <Field label="Institution:" error={fieldErrors.institutionName}>
-                <select style={inp} value={institutionChoice} onChange={(e) => { setInstitutionChoice(e.target.value); setCustomInstitution(''); }} required>
-                  <option value="">Select</option>
-                  {EXTERNAL_UNIVERSITIES.map((u) => <option key={u} value={u}>{u}</option>)}
-                  <option value={OTHER}>Other…</option>
-                </select>
-                {institutionChoice === OTHER && (
-                  <input style={{ ...inp, marginTop: 8 }} value={customInstitution}
-                    onChange={(e) => setCustomInstitution(e.target.value)}
-                    placeholder="Enter institution name" required maxLength={100} />
-                )}
-              </Field>
-              <Field label="Designation:" error={fieldErrors.designation}>
-                <input style={inp} value={designation} onChange={(e) => setDesignation(e.target.value)} placeholder="e.g. Sports Coordinator" required maxLength={50} />
-              </Field>
-            </>
-          )}
-
-          <Field label="Password:" error={fieldErrors.password} hint="8–64 characters, at least one letter and one number">
-            <input style={inp} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a password" required />
-          </Field>
-
-          <div style={{ marginTop: 8 }}>
-            <PrimaryButton type="submit" disabled={loading}>{loading ? 'Registering…' : 'Register'}</PrimaryButton>
-          </div>
-          <Link to={cfg.loginLink} style={greenBtn}>Already have an account?</Link>
-        </form>
+    <AuthSplit
+      portal={portal}
+      eyebrow={`${role === 'student' ? 'Student' : 'External'} Portal`}
+      headline={cfg.headline}
+      subhead={cfg.subhead}
+      chip={cfg.chip}
+      formMaxWidth={440}
+    >
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ margin: '2px 0 4px', fontSize: 24, fontWeight: 700, color: '#0B3754' }}>{cfg.title}</h2>
+        <p style={{ margin: 0, fontSize: 14, color: '#5C7180' }}>A few details, then an administrator verifies your account.</p>
       </div>
-    </PortalShell>
+
+      <form onSubmit={onSubmit} noValidate>
+        {error && <div style={{ marginBottom: 16 }}><ErrorBanner>{error}</ErrorBanner></div>}
+
+        <FieldGroup label="Full Name" icon={<PersonIcon />} error={fieldErrors.fullName}>
+          <AuthInput value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Full name" required maxLength={50} />
+        </FieldGroup>
+
+        <FieldGroup label="Email" icon={<MailIcon />} error={fieldErrors.email}>
+          <AuthInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="someone@example.com" required maxLength={254} />
+        </FieldGroup>
+
+        <FieldGroup label="Contact Number" icon={<PhoneIcon />} error={fieldErrors.contactNumber} hint="Format: 03XXXXXXXXX or 03XX-XXXXXXX">
+          <AuthInput value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} placeholder="Enter contact number" required maxLength={12} />
+        </FieldGroup>
+
+        {role === 'student' ? (
+          <>
+            <FieldGroup label="Enrollment" icon={<BadgeIcon />} error={fieldErrors.enrollmentNo} hint="Format: XX-XXXXXX-XXX">
+              <AuthInput value={enrollmentNo} onChange={(e) => setEnrollmentNo(e.target.value)} placeholder="e.g. 84-024000-123" required />
+            </FieldGroup>
+            <FieldGroup label="Department" icon={<BuildingIcon />} error={fieldErrors.department}>
+              <AuthSelect value={department} onChange={(e) => { setDepartment(e.target.value); setProgramTitle(''); }} required>
+                <option value="">Select</option>
+                {DEPARTMENTS.map((d) => <option key={d.name} value={d.name}>{d.name}</option>)}
+              </AuthSelect>
+            </FieldGroup>
+            <FieldGroup label="Program Title" icon={<BankIcon />} error={fieldErrors.programTitle}>
+              <AuthSelect value={programTitle} onChange={(e) => setProgramTitle(e.target.value)} disabled={!department} required>
+                <option value="">{department ? 'Select' : 'Select a department first'}</option>
+                {programs.map((p) => <option key={p} value={p}>{p}</option>)}
+              </AuthSelect>
+            </FieldGroup>
+          </>
+        ) : (
+          <>
+            <FieldGroup label="Institution" icon={<BuildingIcon />} error={fieldErrors.institutionName}>
+              <AuthSelect value={institutionChoice} onChange={(e) => { setInstitutionChoice(e.target.value); setCustomInstitution(''); }} required>
+                <option value="">Select</option>
+                {EXTERNAL_UNIVERSITIES.map((u) => <option key={u} value={u}>{u}</option>)}
+                <option value={OTHER}>Other…</option>
+              </AuthSelect>
+              {institutionChoice === OTHER && (
+                <div style={{ marginTop: 8 }}>
+                  <AuthInput
+                    hasIcon={false} value={customInstitution}
+                    onChange={(e) => setCustomInstitution(e.target.value)}
+                    placeholder="Enter institution name" required maxLength={100}
+                  />
+                </div>
+              )}
+            </FieldGroup>
+            <FieldGroup label="Designation" icon={<BadgeIcon />} error={fieldErrors.designation}>
+              <AuthInput value={designation} onChange={(e) => setDesignation(e.target.value)} placeholder="e.g. Sports Coordinator" required maxLength={50} />
+            </FieldGroup>
+          </>
+        )}
+
+        <FieldGroup label="Password" icon={<LockIcon />} error={fieldErrors.password} hint="8–64 characters, at least one letter and one number">
+          <AuthInput type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a password" required />
+        </FieldGroup>
+
+        <div style={{ marginTop: 6 }}>
+          <AuthButton type="submit" portal={portal} disabled={loading}>{loading ? 'Registering…' : 'Register'}</AuthButton>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <AuthLinkRow>
+            <AuthLink to={cfg.loginLink}>Already have an account? Sign in</AuthLink>
+            <span />
+          </AuthLinkRow>
+        </div>
+      </form>
+    </AuthSplit>
   );
 }
-
-function Field({ label, children, error, hint }: { label: string; children: React.ReactNode; error?: string; hint?: string }) {
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <label style={{ display: 'block', fontWeight: 700, fontSize: 14, color: '#333', marginBottom: 6 }}>{label}</label>
-      {children}
-      {error ? <small style={errHint}>{error}</small> : hint ? <small style={hintStyle}>{hint}</small> : null}
-    </div>
-  );
-}
-
-const card: React.CSSProperties = { maxWidth: 900, margin: '0 auto', border: '1px solid #e0e0e0', borderRadius: 4, background: '#fff' };
-const cardHead: React.CSSProperties = { background: 'linear-gradient(#fafafa,#eee)', borderBottom: '1px solid #e0e0e0', padding: '14px 24px', fontSize: 17, color: '#444' };
-const inp: React.CSSProperties = { width: '100%', fontSize: 15, padding: '9px 12px', border: '1px solid #ccc', borderRadius: 3, color: '#333', outline: 'none' };
-const hintStyle: React.CSSProperties = { display: 'block', color: '#888', fontSize: 12, marginTop: 4 };
-const errHint: React.CSSProperties = { display: 'block', color: '#b3352b', fontSize: 12, marginTop: 4 };
-const errorBox: React.CSSProperties = { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 4, padding: '10px 12px', marginBottom: 16, fontSize: 14 };
-const successBanner: React.CSSProperties = { background: '#dff0d8', color: '#3c763d', border: '1px solid #c3e0ab', borderRadius: 4, padding: '14px 16px', fontSize: 15 };
-const greenBtn: React.CSSProperties = { display: 'block', textAlign: 'center', marginTop: 12, background: 'linear-gradient(#28a745,#1f8a3b)', color: '#fff', padding: '11px', borderRadius: 4, textDecoration: 'none', fontWeight: 600 };
-const backLink: React.CSSProperties = { display: 'inline-block', marginTop: 16, color: '#0a6ebd', textDecoration: 'none' };
