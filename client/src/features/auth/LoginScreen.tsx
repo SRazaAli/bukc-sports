@@ -4,13 +4,15 @@
  *  - External / Coordinator / Admin: Email + Password only
  * Student & External show a "New …" registration link; Coordinator & Admin do
  * not (coordinators are invited per AUTH-06; admins are seeded).
+ *
+ * Visual redesign only — auth logic, validation, and API calls are unchanged.
  */
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
-  PortalShell, LabeledInput, LabeledSelect, PrimaryButton, fs,
-  PersonIcon, LockIcon, BankIcon, type BarTint,
-} from './PortalShell.js';
+  AuthSplit, FieldGroup, AuthInput, AuthSelect, AuthButton, AuthLinkRow, AuthLink, ErrorBanner,
+  PersonIcon, LockIcon, BankIcon, type PortalKey,
+} from './AuthUI.js';
 import { useAuth } from '../../lib/auth.js';
 import { login, studentLogin } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
@@ -18,11 +20,34 @@ import { INSTITUTES, DEFAULT_INSTITUTE } from './reference-data.js';
 
 export type LoginRole = 'student' | 'external' | 'coordinator' | 'admin';
 
-const CONFIG: Record<LoginRole, { title: string; tint: BarTint; newLink?: { to: string; label: string }; expectedRole: string }> = {
-  student:     { title: 'Student', tint: 'sage', newLink: { to: '/register/student', label: 'New Student' }, expectedRole: 'STUDENT' },
-  external:    { title: 'External', tint: 'blue', newLink: { to: '/register/external', label: 'New External' }, expectedRole: 'EXTERNAL' },
-  coordinator: { title: 'Coordinator', tint: 'slate', expectedRole: 'COORDINATOR' },
-  admin:       { title: 'Administration Staff', tint: 'navy', expectedRole: 'SUPER_ADMIN' },
+const CONFIG: Record<LoginRole, {
+  title: string; expectedRole: string; newLink?: { to: string; label: string };
+  headline: string; subhead: string; chip: string;
+}> = {
+  student: {
+    title: 'Student', expectedRole: 'STUDENT', newLink: { to: '/register/student', label: 'New Student' },
+    headline: 'Book courts, track equipment, done in minutes.',
+    subhead: 'Sign in with your enrollment number to reserve venues and borrow sports equipment across campus.',
+    chip: 'Live venue availability',
+  },
+  external: {
+    title: 'External', expectedRole: 'EXTERNAL', newLink: { to: '/register/external', label: 'New External' },
+    headline: 'Bring your event to the BUKC courts.',
+    subhead: 'External members can request venues and manage bookings once verified by an administrator.',
+    chip: 'Trusted by partner institutions',
+  },
+  coordinator: {
+    title: 'Coordinator', expectedRole: 'COORDINATOR',
+    headline: 'Keep every booking and borrow request on track.',
+    subhead: 'Review the borrow queue, resolve venue conflicts, and manage equipment alerts in one dashboard.',
+    chip: 'Queue & conflict tools',
+  },
+  admin: {
+    title: 'Administration Staff', expectedRole: 'SUPER_ADMIN',
+    headline: 'Oversee the whole sports operation at a glance.',
+    subhead: 'Approve venues, manage accounts, and monitor activity across the entire platform.',
+    chip: 'Full platform control',
+  },
 };
 
 export default function LoginScreen({ role }: { role: LoginRole }) {
@@ -35,6 +60,7 @@ export default function LoginScreen({ role }: { role: LoginRole }) {
   const [loading, setLoading] = useState(false);
 
   const isStudent = role === 'student';
+  const portal = role as PortalKey;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -59,49 +85,72 @@ export default function LoginScreen({ role }: { role: LoginRole }) {
   }
 
   return (
-    <PortalShell title={cfg.title} tint={cfg.tint}>
-      <form onSubmit={onSubmit} noValidate style={fs.formCol}>
-        {error && <div style={errorBox}>{error}</div>}
+    <AuthSplit
+      portal={portal}
+      eyebrow={`${cfg.title} Portal`}
+      headline={cfg.headline}
+      subhead={cfg.subhead}
+      chip={cfg.chip}
+    >
+      <div style={{ marginBottom: 22 }}>
+        <h2 style={{ margin: '2px 0 4px', fontSize: 24, fontWeight: 700, color: '#0B3754' }}>
+          Sign in to {cfg.title}
+        </h2>
+        <p style={{ margin: 0, fontSize: 14, color: '#5C7180' }}>Enter your credentials to continue.</p>
+      </div>
+
+      <form onSubmit={onSubmit} noValidate>
+        {error && <div style={{ marginBottom: 16 }}><ErrorBanner>{error}</ErrorBanner></div>}
 
         {isStudent ? (
-          <LabeledInput
-            label="Enrollment:" icon={<PersonIcon />} placeholder="Enrollment"
-            autoComplete="username" value={identifier} onChange={(e) => setIdentifier(e.target.value)} required
-          />
+          <FieldGroup label="Enrollment" icon={<PersonIcon />}>
+            <AuthInput
+              placeholder="e.g. 84-024000-123" autoComplete="username" required
+              value={identifier} onChange={(e) => setIdentifier(e.target.value)}
+            />
+          </FieldGroup>
         ) : (
-          <LabeledInput
-            label="Email:" icon={<PersonIcon />} type="email" placeholder="Email"
-            autoComplete="username" value={identifier} onChange={(e) => setIdentifier(e.target.value)} required
-          />
+          <FieldGroup label="Email" icon={<PersonIcon />}>
+            <AuthInput
+              type="email" placeholder="you@example.com" autoComplete="username" required
+              value={identifier} onChange={(e) => setIdentifier(e.target.value)}
+            />
+          </FieldGroup>
         )}
 
-        <LabeledInput
-          label="Password:" icon={<LockIcon />} type="password" placeholder="Password"
-          autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required
-        />
+        <FieldGroup label="Password" icon={<LockIcon />}>
+          <AuthInput
+            type="password" placeholder="••••••••" autoComplete="current-password" required
+            value={password} onChange={(e) => setPassword(e.target.value)}
+          />
+        </FieldGroup>
 
         {isStudent && (
-          <LabeledSelect label="Institute:" icon={<BankIcon />} defaultValue={DEFAULT_INSTITUTE}>
-            {INSTITUTES.map((inst) => (
-              <option key={inst} value={inst} disabled={inst !== DEFAULT_INSTITUTE}>{inst}</option>
-            ))}
-          </LabeledSelect>
+          <FieldGroup label="Institute" icon={<BankIcon />}>
+            <AuthSelect defaultValue={DEFAULT_INSTITUTE}>
+              {INSTITUTES.map((inst) => (
+                <option key={inst} value={inst} disabled={inst !== DEFAULT_INSTITUTE}>{inst}</option>
+              ))}
+            </AuthSelect>
+          </FieldGroup>
         )}
 
-        <PrimaryButton type="submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign In'}</PrimaryButton>
-
-        <div style={linkRow}>
-          {cfg.newLink ? <Link to={cfg.newLink.to} style={link}>{cfg.newLink.label}</Link> : <span />}
-          <Link to="/forgot-password" style={link}>Forgot Password?</Link>
+        <div style={{ marginTop: 6 }}>
+          <AuthButton type="submit" portal={portal} disabled={loading}>
+            {loading ? 'Signing in…' : `Sign in as ${cfg.title === 'Administration Staff' ? 'Admin' : cfg.title}`}
+          </AuthButton>
         </div>
-        <div style={{ marginTop: 18, textAlign: 'center' }}>
-          <Link to="/" style={{ ...link, fontSize: 13 }}>← All portals</Link>
+
+        <div style={{ marginTop: 18 }}>
+          <AuthLinkRow>
+            {cfg.newLink ? <AuthLink to={cfg.newLink.to}>{cfg.newLink.label}</AuthLink> : <span />}
+            <AuthLink to="/forgot-password">Forgot password?</AuthLink>
+          </AuthLinkRow>
+        </div>
+        <div style={{ marginTop: 16, textAlign: 'center' }}>
+          <AuthLink to="/" style={{ fontSize: 12.5, color: '#5C7180', fontWeight: 500 }}>← Back to all portals</AuthLink>
         </div>
       </form>
-    </PortalShell>
+    </AuthSplit>
   );
 }
-
-const errorBox: React.CSSProperties = { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 4, padding: '10px 12px', marginBottom: 16, fontSize: 14 };
-const linkRow: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', marginTop: 16 };
-const link: React.CSSProperties = { color: '#0a6ebd', textDecoration: 'none', fontSize: 14 };

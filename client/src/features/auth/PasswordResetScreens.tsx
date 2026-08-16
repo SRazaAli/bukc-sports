@@ -6,10 +6,16 @@
  * not the email exists (no enumeration); step 2 gives the same generic
  * "invalid or expired" error whether the email, the code, or both were
  * wrong — same principle, applied all the way through.
+ *
+ * Visual redesign only — state machine, validation, and API calls
+ * (forgotPassword / resetPassword) are unchanged from the original.
  */
 import { useState, type FormEvent } from 'react';
-import { Link, Navigate } from 'react-router-dom';
-import { PortalShell, LabeledInput, PrimaryButton, fs, MailIcon, LockIcon } from './PortalShell.js';
+import { Navigate } from 'react-router-dom';
+import {
+  AuthGenericSplit, FieldGroup, AuthInput, AuthButtonNeutral, AuthLink,
+  ErrorBanner, SuccessBanner, MailIcon, LockIcon,
+} from './AuthUI.js';
 import { forgotPassword, resetPassword } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
 
@@ -53,54 +59,113 @@ export function ForgotPasswordScreen() {
     }
   }
 
-  return (
-    <PortalShell title="Reset Password" tint="sage">
-      <div style={panel}>
-        <div style={panelHead}>Forgot Password</div>
-        <div style={panelBody}>
-          {done ? (
-            <div>
-              <div style={okBox}>Password reset. You can now sign in.</div>
-              <Link to="/" style={{ ...link, display: 'inline-block', marginTop: 14 }}>Back to Login</Link>
-            </div>
-          ) : step === 'email' ? (
-            <form onSubmit={onSubmitEmail} noValidate style={fs.formCol}>
-              <p style={{ color: '#777', fontSize: 14, lineHeight: 1.6, marginTop: 0 }}>
-                Provide your registered email address. We'll send you an 8-digit code to reset your password.
-                The code expires in 15 minutes and can only be used once.
-              </p>
-              <LabeledInput label="Email:" icon={<MailIcon />} type="email" placeholder="Email Address"
-                value={email} onChange={(e) => setEmail(e.target.value)} required />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 8 }}>
-                <PrimaryButton type="submit" disabled={loading} style={{ width: 'auto', padding: '10px 28px' }}>
-                  {loading ? 'Sending…' : 'Submit'}
-                </PrimaryButton>
-                <Link to="/" style={link}>Back to Login</Link>
-              </div>
-            </form>
-          ) : (
-            <form onSubmit={onSubmitCode} noValidate style={fs.formCol}>
-              {error && <div style={errBox}>{error}</div>}
-              <p style={{ color: '#777', fontSize: 14, lineHeight: 1.6, marginTop: 0 }}>
-                Enter the code sent to <strong>{email}</strong>. If it doesn't appear within a few minutes, check your spam folder.
-              </p>
-              <LabeledInput label="8-digit code:" icon={<LockIcon />} placeholder="XXXXXXXX"
-                inputMode="numeric" maxLength={8} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} required />
-              <LabeledInput label="New password:" icon={<LockIcon />} type="password" placeholder="At least 8 characters"
-                autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required />
-              <LabeledInput label="Confirm new password:" icon={<LockIcon />} type="password" placeholder="Repeat new password"
-                autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
-                <PrimaryButton type="submit" disabled={loading} style={{ width: 'auto', padding: '10px 28px' }}>
-                  {loading ? 'Resetting…' : 'Verify & Reset'}
-                </PrimaryButton>
-                <button type="button" style={linkBtn} onClick={() => setStep('email')}>Use a different email / resend code</button>
-              </div>
-            </form>
-          )}
+  if (done) {
+    return (
+      <AuthGenericSplit
+        eyebrow="Account Recovery"
+        headline="All set — you're back in."
+        subhead="Your password has been reset. Use it the next time you sign in to any BUKC Sports portal."
+        chip="Recovery complete"
+        chipIcon="✅"
+      >
+        <SuccessBanner title="Password reset.">You can now sign in with your new password.</SuccessBanner>
+        <div style={{ marginTop: 18 }}>
+          <AuthLink to="/">← Back to sign in</AuthLink>
         </div>
+      </AuthGenericSplit>
+    );
+  }
+
+  if (step === 'email') {
+    return (
+      <AuthGenericSplit
+        eyebrow="Account Recovery"
+        headline="Forgot your password?"
+        subhead="No problem. Tell us the email on your account and we'll send a one-time code to get you back in."
+        chip="8-digit code · expires in 15 min"
+      >
+        <div style={{ marginBottom: 20 }}>
+          <h2 style={{ margin: '2px 0 4px', fontSize: 24, fontWeight: 700, color: '#0B3754' }}>Reset your password</h2>
+          <p style={{ margin: 0, fontSize: 14, color: '#5C7180', lineHeight: 1.6 }}>
+            Provide your registered email address. We&apos;ll send you an 8-digit code to reset your password.
+            The code expires in 15 minutes and can only be used once.
+          </p>
+        </div>
+
+        <form onSubmit={onSubmitEmail} noValidate>
+          <FieldGroup label="Email" icon={<MailIcon />}>
+            <AuthInput
+              type="email" placeholder="you@example.com" required
+              value={email} onChange={(e) => setEmail(e.target.value)}
+            />
+          </FieldGroup>
+
+          <div style={{ marginTop: 6 }}>
+            <AuthButtonNeutral type="submit" disabled={loading}>
+              {loading ? 'Sending…' : 'Send reset code'}
+            </AuthButtonNeutral>
+          </div>
+
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <AuthLink to="/" style={{ fontSize: 12.5, color: '#5C7180', fontWeight: 500 }}>← Back to sign in</AuthLink>
+          </div>
+        </form>
+      </AuthGenericSplit>
+    );
+  }
+
+  return (
+    <AuthGenericSplit
+      eyebrow="Account Recovery"
+      headline="Enter your code."
+      subhead="We've emailed an 8-digit code to your address. Enter it below along with your new password."
+      chip="Didn't get it? Check spam"
+    >
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ margin: '2px 0 4px', fontSize: 24, fontWeight: 700, color: '#0B3754' }}>Verify &amp; reset</h2>
+        <p style={{ margin: 0, fontSize: 14, color: '#5C7180', lineHeight: 1.6 }}>
+          Enter the code sent to <strong>{email}</strong>. If it doesn&apos;t appear within a few minutes, check your spam folder.
+        </p>
       </div>
-    </PortalShell>
+
+      <form onSubmit={onSubmitCode} noValidate>
+        {error && <div style={{ marginBottom: 16 }}><ErrorBanner>{error}</ErrorBanner></div>}
+
+        <FieldGroup label="8-digit code" icon={<LockIcon />}>
+          <AuthInput
+            placeholder="XXXXXXXX" inputMode="numeric" maxLength={8} required
+            value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+            style={{ letterSpacing: '0.35em', fontWeight: 700 }}
+          />
+        </FieldGroup>
+
+        <FieldGroup label="New password" icon={<LockIcon />}>
+          <AuthInput
+            type="password" placeholder="At least 8 characters" autoComplete="new-password" required
+            value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+          />
+        </FieldGroup>
+
+        <FieldGroup label="Confirm new password" icon={<LockIcon />}>
+          <AuthInput
+            type="password" placeholder="Repeat new password" autoComplete="new-password" required
+            value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+        </FieldGroup>
+
+        <div style={{ marginTop: 6 }}>
+          <AuthButtonNeutral type="submit" disabled={loading}>
+            {loading ? 'Resetting…' : 'Verify & reset password'}
+          </AuthButtonNeutral>
+        </div>
+
+        <div style={{ marginTop: 16, textAlign: 'center' }}>
+          <button type="button" onClick={() => setStep('email')} style={resendBtn}>
+            Use a different email / resend code
+          </button>
+        </div>
+      </form>
+    </AuthGenericSplit>
   );
 }
 
@@ -111,10 +176,6 @@ export function ResetPasswordScreen() {
   return <Navigate to="/forgot-password" replace />;
 }
 
-const panel: React.CSSProperties = { maxWidth: 640, margin: '0 auto', background: '#fff', border: '1px solid #ddd', borderRadius: 4, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' };
-const panelHead: React.CSSProperties = { padding: '14px 20px', borderBottom: '1px solid #e5e5e5', font: '600 16px var(--font-body)', color: '#333', background: 'linear-gradient(#fff,#f7f7f7)' };
-const panelBody: React.CSSProperties = { padding: 24 };
-const link: React.CSSProperties = { color: '#0a6ebd', textDecoration: 'none', fontSize: 14 };
-const linkBtn: React.CSSProperties = { background: 'none', border: 'none', color: '#0a6ebd', fontSize: 13.5, cursor: 'pointer', padding: 0 };
-const okBox: React.CSSProperties = { background: '#eaf6ee', color: '#1e6b3a', border: '1px solid #c2e6cd', borderRadius: 4, padding: '12px 14px', fontSize: 14.5 };
-const errBox: React.CSSProperties = { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 4, padding: '10px 12px', marginBottom: 14, fontSize: 14 };
+const resendBtn: React.CSSProperties = {
+  background: 'none', border: 'none', color: '#0B3754', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0,
+};
