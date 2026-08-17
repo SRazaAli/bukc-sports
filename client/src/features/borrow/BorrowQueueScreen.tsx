@@ -333,6 +333,36 @@ interface TypeArticles {
   articles: Article[];
   selected: string[];
 }
+interface ArticlePairRow {
+  pairId: string;
+  articleAId: string;
+  articleBId: string;
+  barcodeA: string;
+  barcodeB: string;
+  condition: string;
+}
+
+function buildPairs(articles: Article[]): ArticlePairRow[] {
+  const seen = new Set<string>();
+  const pairs: ArticlePairRow[] = [];
+  for (const a of articles) {
+    if (!a.pair_id || !a.article_a_id || !a.article_b_id) continue;
+    if (seen.has(a.pair_id)) continue;
+    seen.add(a.pair_id);
+    const partnerA = articles.find(x => x.article_id === a.article_a_id);
+    const partnerB = articles.find(x => x.article_id === a.article_b_id);
+    if (!partnerA || !partnerB) continue;
+    pairs.push({
+      pairId: a.pair_id,
+      articleAId: a.article_a_id,
+      articleBId: a.article_b_id,
+      barcodeA: partnerA.barcode,
+      barcodeB: partnerB.barcode,
+      condition: partnerA.current_condition_label ?? 'GOOD',
+    });
+  }
+  return pairs;
+}
 
 function GroupLendForm({ group, onBack, onDone, onError }: {
   group: QueueGroup;
@@ -370,11 +400,13 @@ function GroupLendForm({ group, onBack, onDone, onError }: {
     void load();
   }, [group]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function selectArticle(typeId: number, articleId: string) {
+  function selectArticle(typeId: number, articleIds: string[]) {
     setTypeArticles((prev) =>
       prev.map((ta) => {
         if (ta.typeId !== typeId) return ta;
-        return { ...ta, selected: ta.selected[0] === articleId ? [] : [articleId] };
+        const isSame = ta.selected.length === articleIds.length &&
+          articleIds.every(id => ta.selected.includes(id));
+        return { ...ta, selected: isSame ? [] : articleIds };
       }),
     );
   }
@@ -435,29 +467,50 @@ function GroupLendForm({ group, onBack, onDone, onError }: {
 
             {ta.articles.length === 0 ? (
               <p style={{ ...muted, color: '#b91c1c', margin: 0 }}>No available articles for this type.</p>
-            ) : (
+            ) : ta.lendingUnit === 'PAIR' ? (() => {
+              const pairs = buildPairs(ta.articles);
+              if (pairs.length === 0) return (
+                <p style={{ ...muted, color: '#b91c1c', margin: 0 }}>No available pairs for this type.</p>
+              );
+              return (
+                <div style={articleList}>
+                  {pairs.map((p) => {
+                    const isSelected = ta.selected.includes(p.articleAId) && ta.selected.includes(p.articleBId);
+                    return (
+                      <label key={p.pairId} style={articleRow}>
+                        <input
+                          type="radio"
+                          name={`article-type-${ta.typeId}`}
+                          checked={isSelected}
+                          onChange={() => selectArticle(ta.typeId, [p.articleAId, p.articleBId])}
+                        />
+                        <span style={{ fontWeight: 600, fontSize: 14 }}>{p.barcodeA} + {p.barcodeB}</span>
+                        <span style={{ color: '#6b7280', fontSize: 12 }}>{p.condition}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              );
+            })() : (
               <div style={articleList}>
-                {ta.articles.map((a) => {
-                  const checked = ta.selected[0] === a.article_id;
-                  return (
-                    <label key={a.article_id} style={articleRow}>
-                      <input
-                        type="radio"
-                        name={`article-type-${ta.typeId}`}
-                        checked={ta.selected[0] === a.article_id}
-                        onChange={() => selectArticle(ta.typeId, a.article_id)}
-                      />
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>{a.barcode}</span>
-                      <span style={{ color: '#6b7280', fontSize: 12 }}>{a.current_condition_label}</span>
-                    </label>
-                  );
-                })}
+                {ta.articles.map((a) => (
+                  <label key={a.article_id} style={articleRow}>
+                    <input
+                      type="radio"
+                      name={`article-type-${ta.typeId}`}
+                      checked={ta.selected[0] === a.article_id}
+                      onChange={() => selectArticle(ta.typeId, [a.article_id])}
+                    />
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>{a.barcode}</span>
+                    <span style={{ color: '#6b7280', fontSize: 12 }}>{a.current_condition_label}</span>
+                  </label>
+                ))}
               </div>
             )}
 
             {ta.selected.length > 0 && (
               <p style={selectionHint}>
-                ✓ {ta.selected.length} article{ta.selected.length > 1 ? 's' : ''} selected
+                ✓ {ta.lendingUnit === 'PAIR' ? 'Pair selected' : 'Article selected'}
               </p>
             )}
           </div>
@@ -658,9 +711,9 @@ function WalkinGuestForm({ onDone, onError }: { onDone: (m: string) => void; onE
       .then((r) => setArticles(r.articles))
       .catch(() => onError('Could not load articles.'));
   }, [typeId]); // eslint-disable-line react-hooks/exhaustive-deps
-function toggleArticle(id: string) {
-  setArticleIds((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
-}
+  function toggleArticle(id: string) {
+    setArticleIds((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
+  }
   async function submit() {
     setBusy(true);
     try {

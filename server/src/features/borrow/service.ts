@@ -19,9 +19,6 @@ function mapDbError(e: unknown): AppError {
       if (e.constraint === 'uq_one_open_borrow_request') {
         return conflict('You already have a pending request. Wait for it to be reviewed before submitting another.', 'DUPLICATE');
       }
-      if (e.constraint === 'uq_article_single_open_lend') {
-        return conflict('One or more selected articles are already on loan. Refresh and select a different article.', 'ARTICLE_ON_LOAN');
-      }
       return conflict('That conflicts with an existing record.', 'DUPLICATE');
     }
     if (e.code === '23503') return badRequest('Referenced item does not exist.', 'FK');
@@ -82,7 +79,6 @@ export async function getReputation(userId: string) {
 }
 
 // ── requests (BORROW-01..14) ──
-
 export async function submitRequest(studentId: string, input: {
   equipmentTypeId: number; requestedStartAt: string; requestedReturnAt: string;
   requestGroupId?: string;
@@ -97,14 +93,7 @@ export async function submitRequest(studentId: string, input: {
       throw conflict(`You can resubmit in ${Math.ceil((cooldownEnds - Date.now()) / 60000)} minute(s).`, 'COOLDOWN');
     }
   }
-if (!input.requestGroupId) {
-  const openGroup = await db.selectFrom('borrow_request')
-    .select('request_group_id')
-    .where('requested_by', '=', studentId)
-    .where('status', 'in', ['PENDING', 'APPROVED'])
-    .limit(1).executeTakeFirst();
-  if (openGroup) throw conflict('You already have an active request. Wait for it to be reviewed or returned before submitting another.', 'DUPLICATE');
-}
+
   // BORROW-14: cannot request equipment with zero available units.
   // Archived types are excluded from the availability checker, but guard here
   // too in case of a direct API call with a stale/known type id.
