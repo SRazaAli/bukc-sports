@@ -6,25 +6,32 @@
  * borrow reputation + recent requests, External sees recent venue bookings,
  * Coordinator/Super Admin get the lighter base profile only (see the chat
  * writeup for why).
+ *
+ * Visuals live in ProfileUI.tsx (a dedicated kit, same pattern as AuthUI.tsx)
+ * so this redesign never touches PortalShell or any other screen. All data
+ * fetching / handlers below are unchanged from the previous version.
  */
 import { useEffect, useState, useCallback, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
-import { PortalShell, LabeledInput, PrimaryButton, LockIcon, type BarTint } from './PortalShell.js';
 import { getMyProfile, requestChangePasswordOtp, confirmChangePassword, type ManagedAccount } from './api.js';
 import { listNotifications, unreadNotificationCount, markNotificationRead, markAllNotificationsRead, type AppNotification } from '../notifications/api.js';
 import { getReputation, listMyRequests, type MyRequest, type Reputation } from '../borrow/api.js';
 import { listMyBookings, type MyBooking } from '../venue/api.js';
 import { ApiRequestError } from '../../lib/api.js';
+import {
+  ProfilePage, ProfileTopBar, ProfileMain, ProfileGrid, ProfileFooter,
+  IdentityCard, Panel, LinkBtn, DetailRow, Banner, NotifItem, CountPill,
+  StatBox, WarnBanner, StatusPill, DataTable, td, ActivityRow, Muted,
+  PfField, PfInput, PfPasswordInput, PfButton, roleToPortalKey, type PortalKey,
+  BellIcon, IdCardIcon, KeyIcon, ShieldCheckIcon, ChartIcon, CalendarIcon,
+} from './ProfileUI.js';
 
 function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
 
-const TINT_BY_ROLE: Record<string, BarTint> = {
-  STUDENT: 'sage', EXTERNAL: 'blue', COORDINATOR: 'slate', SUPER_ADMIN: 'navy',
-};
-
 export default function ProfileScreen() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, logout } = useAuth();
+  const navigate = useNavigate();
   const [account, setAccount] = useState<ManagedAccount | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -40,43 +47,53 @@ export default function ProfileScreen() {
     void load();
   }, [authLoading, user, load]);
 
-  if (authLoading || !user) return <PortalShell title="Profile"><p /></PortalShell>;
+  async function onSignOut() {
+    await logout();
+    navigate('/');
+  }
+
+  if (authLoading || !user) {
+    return (
+      <ProfilePage>
+        <ProfileTopBar onBack={() => navigate(-1)} onSignOut={onSignOut} />
+        <ProfileMain><p /></ProfileMain>
+      </ProfilePage>
+    );
+  }
+
+  const portal = roleToPortalKey(user.role);
 
   return (
-    <PortalShell title="My Profile" tint={TINT_BY_ROLE[user.role] ?? 'navy'}>
-      <div style={wrap}>
-        {error && <div style={box.error}>{error}</div>}
-        {notice && <div style={box.ok}>{notice}</div>}
+    <ProfilePage>
+      <ProfileTopBar onBack={() => navigate(-1)} onSignOut={onSignOut} />
+      <ProfileMain>
+        {error && <Banner kind="error">{error}</Banner>}
+        {notice && <Banner kind="ok">{notice}</Banner>}
 
-        <ProfileHeader account={account} fallbackName={user.fullName} fallbackEmail={user.email} role={user.role} />
+        <ProfileGrid
+          sidebar={
+            <>
+              <IdentityCard
+                portal={portal}
+                name={account?.fullName ?? user.fullName}
+                email={account?.email ?? user.email}
+                roleLabel={user.role.replace('_', ' ')}
+                deactivated={account?.status === 'DEACTIVATED'}
+              />
+              {account && <PersonalDetails account={account} />}
+            </>
+          }
+        >
+          <NotificationInbox onError={setError} />
 
-        <NotificationInbox onError={setError} />
+          <ChangePasswordCard portal={portal} onDone={(m) => { setNotice(m); setError(null); }} onError={(m) => { setError(m); setNotice(null); }} />
 
-        {account && <PersonalDetails account={account} />}
-
-        <ChangePasswordCard onDone={(m) => { setNotice(m); setError(null); }} onError={(m) => { setError(m); setNotice(null); }} />
-
-        {user.role === 'STUDENT' && <StudentActivity userId={user.userId} onError={setError} />}
-        {user.role === 'EXTERNAL' && <ExternalActivity onError={setError} />}
-      </div>
-    </PortalShell>
-  );
-}
-
-function ProfileHeader({ account, fallbackName, fallbackEmail, role }: {
-  account: ManagedAccount | null; fallbackName: string; fallbackEmail: string; role: string;
-}) {
-  return (
-    <div style={headerCard}>
-      <div style={{ fontSize: 13, color: '#5c6773' }}>Signed in as</div>
-      <div style={{ font: '600 22px var(--font-display)', color: '#26485f', marginTop: 2 }}>
-        {account?.fullName ?? fallbackName}
-      </div>
-      <div style={{ fontSize: 13.5, color: '#5c6773', marginTop: 2 }}>
-        {account?.email ?? fallbackEmail} · {role.replace('_', ' ')}
-        {account?.status === 'DEACTIVATED' && <span style={{ ...statusPill, marginLeft: 8 }}>Deactivated</span>}
-      </div>
-    </div>
+          {user.role === 'STUDENT' && <StudentActivity userId={user.userId} onError={setError} />}
+          {user.role === 'EXTERNAL' && <ExternalActivity onError={setError} />}
+        </ProfileGrid>
+      </ProfileMain>
+      <ProfileFooter />
+    </ProfilePage>
   );
 }
 
@@ -102,26 +119,33 @@ function NotificationInbox({ onError }: { onError: (m: string) => void }) {
   }
 
   return (
-    <Panel title={`Notifications${unread > 0 ? ` (${unread} unread)` : ''}`}
-      action={unread > 0 ? <button style={linkBtn} onClick={onMarkAll}>Mark all read</button> : undefined}>
+    <Panel
+      icon={<BellIcon />}
+      title="Notifications"
+      action={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {unread > 0 && <CountPill>{unread} unread</CountPill>}
+          {unread > 0 && <LinkBtn onClick={onMarkAll}>Mark all read</LinkBtn>}
+        </div>
+      }
+    >
       {items === null ? (
-        <p style={muted}>Loading…</p>
+        <Muted>Loading…</Muted>
       ) : items.length === 0 ? (
-        <p style={muted}>No notifications yet. Account and activity updates will appear here.</p>
+        <Muted>No notifications yet. Account and activity updates will appear here.</Muted>
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        <div style={{ maxHeight: 420, overflowY: 'auto', paddingRight: 4 }}>
           {items.map((n) => (
-            <li key={n.notificationId}
-              style={{ ...notifRow, ...(n.readAt ? {} : notifRowUnread) }}
-              onClick={() => !n.readAt && onMarkRead(n.notificationId)}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                <span style={{ fontWeight: n.readAt ? 500 : 700, color: '#26485f' }}>{n.title}</span>
-                <span style={{ fontSize: 11.5, color: '#8a949f', whiteSpace: 'nowrap' }}>{new Date(n.createdAt).toLocaleString()}</span>
-              </div>
-              <div style={{ fontSize: 13, color: '#5c6773', marginTop: 2 }}>{n.body}</div>
-            </li>
+            <NotifItem
+              key={n.notificationId}
+              title={n.title}
+              body={n.body}
+              time={new Date(n.createdAt).toLocaleString()}
+              unread={!n.readAt}
+              onClick={n.readAt ? undefined : () => onMarkRead(n.notificationId)}
+            />
           ))}
-        </ul>
+        </div>
       )}
     </Panel>
   );
@@ -144,14 +168,9 @@ function PersonalDetails({ account: a }: { account: ManagedAccount }) {
       ];
 
   return (
-    <Panel title="Personal Details">
-      {rows.map(([label, value]) => (
-        <div key={label} style={detailRow}>
-          <div style={detailLabel}>{label}</div>
-          <div style={detailValue}>{value ?? '—'}</div>
-        </div>
-      ))}
-      <p style={{ ...muted, marginTop: 12, marginBottom: 0 }}>
+    <Panel icon={<IdCardIcon />} title="Personal Details">
+      {rows.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)}
+      <p style={{ fontSize: 12, color: '#5C7180', marginTop: 12, marginBottom: 0, lineHeight: 1.5 }}>
         Need to correct any of this? Contact the sports office — these fields aren't self-editable to keep enrollment/institution records reliable.
       </p>
     </Panel>
@@ -162,7 +181,7 @@ function PersonalDetails({ account: a }: { account: ManagedAccount }) {
 // AUTH-17, two-step: fill current+new+confirm, submit sends an OTP to your
 // email (step-up confirmation, GitHub-"Verify via email"-style); entering
 // that code actually applies the change.
-function ChangePasswordCard({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
+function ChangePasswordCard({ portal, onDone, onError }: { portal: PortalKey; onDone: (m: string) => void; onError: (m: string) => void }) {
   const [step, setStep] = useState<'form' | 'code'>('form');
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -199,22 +218,30 @@ function ChangePasswordCard({ onDone, onError }: { onDone: (m: string) => void; 
   }
 
   return (
-    <Panel title="Change Password">
+    <Panel icon={<KeyIcon />} title="Change Password">
       {step === 'form' ? (
-        <form onSubmit={onSubmitForm} noValidate style={{ maxWidth: 380 }}>
-          <LabeledInput label="Current password:" icon={<LockIcon />} type="password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
-          <LabeledInput label="New password:" icon={<LockIcon />} type="password" value={next} onChange={(e) => setNext(e.target.value)} required />
-          <LabeledInput label="Confirm new password:" icon={<LockIcon />} type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
-          <PrimaryButton type="submit" disabled={loading}>{loading ? 'Sending code…' : 'Send Confirmation Code'}</PrimaryButton>
+        <form onSubmit={onSubmitForm} noValidate style={{ maxWidth: 400 }}>
+          <PfField label="Current password:" icon={<KeyIcon />}>
+            <PfPasswordInput value={current} onChange={(e) => setCurrent(e.target.value)} required />
+          </PfField>
+          <PfField label="New password:" icon={<KeyIcon />}>
+            <PfPasswordInput value={next} onChange={(e) => setNext(e.target.value)} required />
+          </PfField>
+          <PfField label="Confirm new password:" icon={<ShieldCheckIcon />}>
+            <PfPasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+          </PfField>
+          <PfButton portal={portal} type="submit" disabled={loading}>{loading ? 'Sending code…' : 'Send Confirmation Code'}</PfButton>
         </form>
       ) : (
-        <form onSubmit={onSubmitCode} noValidate style={{ maxWidth: 380 }}>
-          <p style={{ ...muted, marginTop: 0 }}>We emailed an 8-digit code to confirm this change. It expires in 15 minutes.</p>
-          <LabeledInput label="Confirmation code:" icon={<LockIcon />} placeholder="XXXXXXXX"
-            inputMode="numeric" maxLength={8} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} required />
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <PrimaryButton type="submit" disabled={loading}>{loading ? 'Confirming…' : 'Confirm Change'}</PrimaryButton>
-            <button type="button" style={linkBtn} onClick={() => setStep('form')}>Back</button>
+        <form onSubmit={onSubmitCode} noValidate style={{ maxWidth: 400 }}>
+          <Muted>We emailed an 8-digit code to confirm this change. It expires in 15 minutes.</Muted>
+          <div style={{ height: 12 }} />
+          <PfField label="Confirmation code:" icon={<ShieldCheckIcon />}>
+            <PfInput placeholder="XXXXXXXX" inputMode="numeric" maxLength={8} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} required />
+          </PfField>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            <PfButton portal={portal} type="submit" disabled={loading}>{loading ? 'Confirming…' : 'Confirm Change'}</PfButton>
+            <LinkBtn type="button" onClick={() => setStep('form')}>Back</LinkBtn>
           </div>
         </form>
       )}
@@ -239,39 +266,35 @@ function StudentActivity({ userId, onError }: { userId: string; onError: (m: str
   }, [userId, onError]);
 
   return (
-    <Panel title="Borrowing Activity" action={<button style={linkBtn} onClick={() => navigate('/availability')}>Request Equipment →</button>}>
+    <Panel icon={<ChartIcon />} title="Borrowing Activity" accent
+      action={<LinkBtn onClick={() => navigate('/availability')}>Request Equipment →</LinkBtn>}>
       {rep && (
         <>
           {rep.isBadSport && (
-            <div style={badSportBanner}>⚠ BAD SPORT — You have {rep.lateReturns} late return{rep.lateReturns !== 1 ? 's' : ''}. Repeated late returns affect your borrowing standing.</div>
+            <WarnBanner>BAD SPORT — You have {rep.lateReturns} late return{rep.lateReturns !== 1 ? 's' : ''}. Repeated late returns affect your borrowing standing.</WarnBanner>
           )}
-          <div style={statsRow}>
-            <Stat label="Total borrows" value={rep.totalBorrows} />
-            <Stat label="Late returns" value={rep.lateReturns} warn={rep.lateReturns > 0} />
-            <Stat label="Damaged returns" value={rep.damagedReturns} warn={rep.damagedReturns > 0} />
+          <div style={{ display: 'flex', gap: 12, marginBottom: 8 }}>
+            <StatBox label="Total borrows" value={rep.totalBorrows} />
+            <StatBox label="Late returns" value={rep.lateReturns} warn={rep.lateReturns > 0} />
+            <StatBox label="Damaged returns" value={rep.damagedReturns} warn={rep.damagedReturns > 0} />
           </div>
         </>
       )}
       {requests === null ? (
-        <p style={muted}>Loading…</p>
+        <Muted>Loading…</Muted>
       ) : requests.length === 0 ? (
-        <p style={muted}>No borrow requests yet.</p>
+        <Muted>No borrow requests yet.</Muted>
       ) : (
-        <table style={historyTable}>
-          <thead>
-            <tr><th style={th}>Equipment</th><th style={th}>Window</th><th style={th}>Status</th><th style={th}>Note</th></tr>
-          </thead>
-          <tbody>
-            {requests.map((r) => (
-              <tr key={r.borrow_request_id}>
-                <td style={td}>{r.equipment_type_name}</td>
-                <td style={td}>{new Date(r.requested_start_at).toLocaleString()} → {new Date(r.requested_return_at).toLocaleTimeString()}</td>
-                <td style={td}><span style={{ ...badgePill, ...pillColorForStatus(r.status) }}>{r.status}</span></td>
-                <td style={{ ...td, color: '#8f2323' }}>{r.rejection_reason ?? ''}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable head={['Equipment', 'Window', 'Status', 'Note']}>
+          {requests.map((r) => (
+            <tr key={r.borrow_request_id}>
+              <td style={td}>{r.equipment_type_name}</td>
+              <td style={td}>{new Date(r.requested_start_at).toLocaleString()} → {new Date(r.requested_return_at).toLocaleTimeString()}</td>
+              <td style={td}><StatusPill status={r.status} /></td>
+              <td style={{ ...td, color: '#8F2323' }}>{r.rejection_reason ?? ''}</td>
+            </tr>
+          ))}
+        </DataTable>
       )}
     </Panel>
   );
@@ -292,71 +315,22 @@ function ExternalActivity({ onError }: { onError: (m: string) => void }) {
   }, [onError]);
 
   return (
-    <Panel title="Venue Booking Activity" action={<button style={linkBtn} onClick={() => navigate('/book-venue')}>Go to Bookings →</button>}>
+    <Panel icon={<CalendarIcon />} title="Venue Booking Activity" accent
+      action={<LinkBtn onClick={() => navigate('/book-venue')}>Go to Bookings →</LinkBtn>}>
       {bookings === null ? (
-        <p style={muted}>Loading…</p>
+        <Muted>Loading…</Muted>
       ) : bookings.length === 0 ? (
-        <p style={muted}>No venue bookings yet.</p>
+        <Muted>No venue bookings yet.</Muted>
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        <div>
           {bookings.map((b) => (
-            <li key={b.booking_id} style={activityRow}>
+            <ActivityRow key={b.booking_id}>
               <span>{b.venue_name} · {b.sessionCount} session{b.sessionCount === 1 ? '' : 's'}</span>
-              <span style={{ ...badgePill, ...pillColorForStatus(b.status) }}>{b.status}</span>
-            </li>
+              <StatusPill status={b.status} />
+            </ActivityRow>
           ))}
-        </ul>
+        </div>
       )}
     </Panel>
   );
 }
-
-function Stat({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
-  return (
-    <div style={statBox}>
-      <div style={{ fontSize: 22, fontWeight: 700, color: warn ? '#b3352b' : '#26485f' }}>{value}</div>
-      <div style={{ fontSize: 12, color: '#8a949f' }}>{label}</div>
-    </div>
-  );
-}
-
-function pillColorForStatus(status: string): React.CSSProperties {
-  if (['APPROVED', 'ACTIVE', 'COMPLETED'].includes(status)) return { background: '#e6f4ec', color: '#1f7a45' };
-  if (['REJECTED', 'CANCELLED', 'COMPLETED_LATE', 'COMPLETED_DAMAGED'].includes(status)) return { background: '#fbe9e7', color: '#b3352b' };
-  return { background: '#eef2f6', color: '#5c6773' };
-}
-
-function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section style={panel}>
-      <div style={panelHead}><span>{title}</span>{action}</div>
-      <div style={panelBody}>{children}</div>
-    </section>
-  );
-}
-
-const wrap: React.CSSProperties = { maxWidth: 720, margin: '0 auto' };
-const headerCard: React.CSSProperties = { background: '#fff', border: '1px solid #ddd', borderRadius: 4, padding: '18px 20px', marginBottom: 18, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' };
-const statusPill: React.CSSProperties = { font: '600 11px var(--font-mono)', padding: '2px 7px', borderRadius: 4, background: '#fbe9e7', color: '#b3352b' };
-const panel: React.CSSProperties = { background: '#fff', border: '1px solid #ddd', borderRadius: 4, marginBottom: 18, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' };
-const panelHead: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid #e5e5e5', font: '600 15px var(--font-body)', color: '#333', background: 'linear-gradient(#fff,#f7f7f7)' };
-const panelBody: React.CSSProperties = { padding: 20 };
-const muted: React.CSSProperties = { color: '#5c6773', fontSize: 14, margin: 0 };
-const detailRow: React.CSSProperties = { display: 'grid', gridTemplateColumns: '140px 1fr', padding: '9px 0', borderBottom: '1px solid #f0f0f0' };
-const detailLabel: React.CSSProperties = { font: '600 13px var(--font-body)', color: '#555' };
-const detailValue: React.CSSProperties = { fontSize: 14, color: '#222' };
-const linkBtn: React.CSSProperties = { background: 'none', border: 'none', font: '500 13px var(--font-body)', color: '#0a6ebd', cursor: 'pointer', padding: 0 };
-const notifRow: React.CSSProperties = { padding: '10px 4px', borderBottom: '1px solid #f0f0f0', cursor: 'pointer' };
-const notifRowUnread: React.CSSProperties = { background: '#f7fbff' };
-const badSportBanner: React.CSSProperties = { background: '#fef0ee', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 4, padding: '10px 14px', marginBottom: 12, fontSize: 13.5, font: '600 13.5px var(--font-body)' };
-const statsRow: React.CSSProperties = { display: 'flex', gap: 14, marginBottom: 8 };
-const statBox: React.CSSProperties = { flex: 1, textAlign: 'center', padding: '10px 6px', background: '#f7f9fb', borderRadius: 6 };
-const activityRow: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px', borderBottom: '1px solid #f0f0f0', fontSize: 13.5, color: '#333' };
-const historyTable: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 13.5, marginTop: 12 };
-const th: React.CSSProperties = { textAlign: 'left', font: '600 11px var(--font-body)', color: '#888', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '0 8px 8px', borderBottom: '1px solid #e5e5e5' };
-const td: React.CSSProperties = { padding: '9px 8px', borderBottom: '1px solid #eee', color: '#333' };
-const badgePill: React.CSSProperties = { font: '600 10.5px var(--font-mono)', padding: '2px 8px', borderRadius: 4 };
-const box = {
-  error: { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 4, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
-  ok: { background: '#eaf6ee', color: '#1e6b3a', border: '1px solid #c2e6cd', borderRadius: 4, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
-};
