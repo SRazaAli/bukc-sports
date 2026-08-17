@@ -335,8 +335,8 @@ export default function MyBorrowsScreen() {
                       {new Date(r.requested_start_at).toLocaleString()} → {new Date(r.requested_return_at).toLocaleTimeString()}
                     </td>
                     <td style={td}>
-                      {isExpired(r.requested_start_at, r.status)
-                        ? <span style={{ ...badgeBase, background: '#f3f4f6', color: '#6b7280' }}>EXPIRED</span>
+                      {(r.status === 'EXPIRED' || isExpired(r.requested_start_at, r.status))
+                        ? <span style={{ ...badgeBase, ...statusBadge('EXPIRED') }}>EXPIRED</span>
                         : <span style={{ ...badgeBase, ...statusBadge(r.status) }}>{r.status}</span>}
                     </td>
                     <td style={{ ...td, color: '#8f2323' }}>{r.rejection_reason ?? '—'}</td>
@@ -392,5 +392,6 @@ function statusBadge(s: string): React.CSSProperties {
   if (s === 'APPROVED') return { background: '#d1fae5', color: '#065f46' };
   if (s === 'REJECTED') return { background: '#fee2e2', color: '#991b1b' };
   if (s === 'CANCELLED') return { background: '#f3f4f6', color: '#6b7280' };
+  if (s === 'EXPIRED')  return { background: '#fce7f3', color: '#9d174d' };
   return { background: '#fef3c7', color: '#92400e' }; // PENDING
 }

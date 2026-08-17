@@ -9,6 +9,7 @@
  *  - Same-day window validation (start and end on same calendar day).
  *  - Must be a STUDENT role.
  */
+import { randomUUID } from 'crypto';
 import { db } from '../../db/index.js';
 
 export interface KitBorrowInput {
@@ -58,7 +59,10 @@ export async function submitKitBorrowRequest(input: KitBorrowInput): Promise<Kit
     );
   }
 
-  // Wrap all inserts in a transaction — all succeed or none
+  // Wrap all inserts in a transaction — all succeed or none.
+  // All rows in the kit share one request_group_id so the coordinator
+  // sees them as a single logical request.
+  const groupId = randomUUID();
   const requestIds: string[] = [];
   const typeNames: string[] = [];
 
@@ -67,6 +71,7 @@ export async function submitKitBorrowRequest(input: KitBorrowInput): Promise<Kit
       const inserted = await trx
         .insertInto('borrow_request')
         .values({
+          request_group_id: groupId,
           requested_by: studentUserId,
           equipment_type_id: row.equipment_type_id,
           requested_start_at: requestedStartAt,

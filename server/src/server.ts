@@ -6,7 +6,7 @@ import { createApp } from './app.js';
 import { config } from './config/index.js';
 import { pool } from './db/index.js';
 import { startAvailabilityListener, stopAvailabilityListener } from './lib/sse.js';
-import { checkOverdueBorrows } from './features/borrow/service.js';
+import { checkOverdueBorrows, checkExpiredRequests } from './features/borrow/service.js';
 import { checkEquipmentLocks, checkPostEventRelease } from './features/venue/equipment.js';
 import { fireWeeklyHealthCheckAlert, checkHealthCheckOverdue } from './features/inventory/service.js';
 
@@ -26,6 +26,11 @@ startAvailabilityListener().catch((err) => {
 // catch cases nobody happens to be viewing.
 const overdueInterval = setInterval(() => {
   checkOverdueBorrows().catch((err) => console.error('checkOverdueBorrows failed:', err));
+}, 5 * 60_000);
+
+// BORROW-12: expire PENDING requests whose start window has passed.
+const expiredInterval = setInterval(() => {
+  checkExpiredRequests().catch((err) => console.error('checkExpiredRequests failed:', err));
 }, 5 * 60_000);
 
 // EQUIP-AVAIL-11/12: poll for sessions crossing their T-24hr equipment lock
@@ -65,6 +70,7 @@ const overdueHealthInterval = setInterval(() => {
 async function shutdown(signal: string) {
   console.log(`\n${signal} received, shutting down...`);
   clearInterval(overdueInterval);
+  clearInterval(expiredInterval);
   clearInterval(lockInterval);
   clearInterval(releaseInterval);
   clearTimeout(weeklyHealthTimeout);

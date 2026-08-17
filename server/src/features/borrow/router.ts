@@ -38,7 +38,7 @@ function reqId(req: { params: Record<string, string | undefined> }): string {
 borrowRouter.post('/requests', ...student, asyncHandler(async (req, res) => {
   const input = parse(v.submitRequestSchema, req.body);
   const created = await svc.submitRequest(req.user!.userId, input);
-  res.status(201).json({ request: { borrowRequestId: created.borrow_request_id } });
+  res.status(201).json({ request: { borrowRequestId: created.borrow_request_id, requestGroupId: created.request_group_id } });
 }));
 
 borrowRouter.get('/requests/mine', ...student, asyncHandler(async (req, res) => {
@@ -72,7 +72,35 @@ borrowRouter.post('/requests/kit', ...student, asyncHandler(async (req, res) => 
 // ── coordinator ──
 borrowRouter.get('/queue', ...staffRead, asyncHandler(async (_req, res) => {
   await svc.checkOverdueBorrows();
+  await svc.checkExpiredRequests();
   res.json({ queue: await svc.listQueue() });
+}));
+
+// Group-level approve: approve all PENDING rows in a request_group_id
+borrowRouter.post('/groups/:groupId/approve', ...coordinatorOnly, asyncHandler(async (req, res) => {
+  const groupId = req.params.groupId;
+  if (!groupId) throw badRequest('Missing groupId');
+  await svc.approveGroup(groupId, req.user!.userId);
+  res.json({ message: 'Group approved.' });
+}));
+
+// Group-level approve-and-lend in one step
+borrowRouter.post('/groups/:groupId/lend', ...coordinatorOnly, asyncHandler(async (req, res) => {
+  const groupId = req.params.groupId;
+  if (!groupId) throw badRequest('Missing groupId');
+  const { articlesPerType, agreedStartAt, agreedReturnAt } = req.body as {
+    articlesPerType?: Record<number, string[]>;
+    agreedStartAt?: string;
+    agreedReturnAt?: string;
+  };
+  if (!articlesPerType || !agreedStartAt || !agreedReturnAt) {
+    throw badRequest('articlesPerType, agreedStartAt and agreedReturnAt are required.');
+  }
+  const result = await svc.lendPlatformGroup(
+    { groupId, articlesPerType, agreedStartAt, agreedReturnAt },
+    req.user!.userId,
+  );
+  res.status(201).json({ transactions: result.borrowTxnIds });
 }));
 
 borrowRouter.post('/requests/:id/approve', ...coordinatorOnly, asyncHandler(async (req, res) => {

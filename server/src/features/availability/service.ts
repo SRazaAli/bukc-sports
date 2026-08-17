@@ -22,6 +22,7 @@ export interface AvailabilityRow {
   lendingUnit: 'SINGLE' | 'PAIR';
   availableUnits: number;
   statusBadge: StatusBadge;
+  maxBorrowDurationMinutes: number;
   // EQUIP-AVAIL-05: total stock is staff-only. Present only for SUPER_ADMIN/COORDINATOR.
   totalStock?: number;
 }
@@ -43,6 +44,7 @@ export async function listAvailability(
     .select([
       'av.equipment_type_id', 'et.name', 'av.sport_category_id', 'sc.name as sport_category_name',
       'et.is_indoor', 'et.image_url', 'et.lending_unit', 'et.low_stock_threshold',
+      'et.max_borrow_duration_minutes',
       'av.total_stock', 'av.available_units',
     ]);
 
@@ -65,6 +67,7 @@ export async function listAvailability(
       lendingUnit: r.lending_unit,
       availableUnits,
       statusBadge: badgeFor(availableUnits, r.low_stock_threshold),
+      maxBorrowDurationMinutes: Number(r.max_borrow_duration_minutes),
     };
     if (staff) row.totalStock = Number(r.total_stock);
     return row;

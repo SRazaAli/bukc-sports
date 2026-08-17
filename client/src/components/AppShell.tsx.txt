@@ -1,0 +1,972 @@
+/**
+ * AppShell — the authenticated application layout.
+ *
+ * Structure:
+ *   <AppShell>          ← provides sidebar + topbar + scroll area
+ *     <PageContent />   ← your screen's JSX
+ *   </AppShell>
+ *
+ * The sidebar collapses to icon-only on desktop (toggle button) and becomes a
+ * full-width drawer on mobile (hamburger). Role-aware nav items are derived from
+ * the current user's role — the server is always the security gate; the sidebar
+ * only hides links the user cannot use.
+ */
+
+import {
+  type ReactNode, useState, useEffect, useCallback, useRef,
+} from 'react';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { useAuth, type UserRole } from '../lib/auth.js';
+
+// ─────────────────────────────────────────────
+//  Icons (inline SVG — zero extra dep)
+// ─────────────────────────────────────────────
+
+const ic = {
+  dashboard: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1" y="1" width="7" height="7" rx="1.5"/>
+      <rect x="10" y="1" width="7" height="7" rx="1.5"/>
+      <rect x="1" y="10" width="7" height="7" rx="1.5"/>
+      <rect x="10" y="10" width="7" height="7" rx="1.5"/>
+    </svg>
+  ),
+  equipment: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="9" cy="9" r="7.5"/>
+      <circle cx="9" cy="9" r="3"/>
+      <line x1="9" y1="1.5" x2="9" y2="6"/>
+      <line x1="9" y1="12" x2="9" y2="16.5"/>
+    </svg>
+  ),
+  borrow: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 9h12M11 5l4 4-4 4"/>
+      <rect x="1" y="1" width="6" height="16" rx="1"/>
+    </svg>
+  ),
+  venue: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 1L1 5v1h16V5L9 1z"/>
+      <rect x="3" y="7" width="2" height="8"/>
+      <rect x="8" y="7" width="2" height="8"/>
+      <rect x="13" y="7" width="2" height="8"/>
+      <line x1="1" y1="15" x2="17" y2="15"/>
+    </svg>
+  ),
+  calendar: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1" y="3" width="16" height="14" rx="1.5"/>
+      <line x1="5" y1="1" x2="5" y2="5"/>
+      <line x1="13" y1="1" x2="13" y2="5"/>
+      <line x1="1" y1="8" x2="17" y2="8"/>
+    </svg>
+  ),
+  history: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="1,9 4,2 7,12 10,5 13,9 16,4"/>
+    </svg>
+  ),
+  notification: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 1a6 6 0 0 1 6 6c0 4 1.5 5.5 1.5 5.5H1.5S3 11 3 7a6 6 0 0 1 6-6z"/>
+      <line x1="7.5" y1="15.5" x2="10.5" y2="15.5"/>
+    </svg>
+  ),
+  queue: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="3" y1="5" x2="15" y2="5"/>
+      <line x1="3" y1="9" x2="15" y2="9"/>
+      <line x1="3" y1="13" x2="10" y2="13"/>
+      <polyline points="12,11 15,14 12,17" strokeWidth="1.4"/>
+    </svg>
+  ),
+  inventory: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="2" width="14" height="5" rx="1"/>
+      <rect x="2" y="11" width="14" height="5" rx="1"/>
+      <line x1="5" y1="4.5" x2="5" y2="4.5" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="5" y1="13.5" x2="5" y2="13.5" strokeWidth="2" strokeLinecap="round"/>
+    </svg>
+  ),
+  users: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7" cy="6" r="3"/>
+      <path d="M1 16c0-3 2.7-5 6-5s6 2 6 5"/>
+      <path d="M13 4a3 3 0 0 1 0 6"/>
+      <path d="M16 16c0-2.5-1.5-4-3-4.5"/>
+    </svg>
+  ),
+  alerts: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 1L1 15h16L9 1z"/>
+      <line x1="9" y1="7" x2="9" y2="11"/>
+      <circle cx="9" cy="13.5" r=".5" fill="currentColor" stroke="none"/>
+    </svg>
+  ),
+  chevronLeft: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="10,2 4,8 10,14"/>
+    </svg>
+  ),
+  menu: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <line x1="2" y1="5" x2="16" y2="5"/>
+      <line x1="2" y1="9" x2="16" y2="9"/>
+      <line x1="2" y1="13" x2="16" y2="13"/>
+    </svg>
+  ),
+  close: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <line x1="3" y1="3" x2="15" y2="15"/>
+      <line x1="15" y1="3" x2="3" y2="15"/>
+    </svg>
+  ),
+  logout: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 15H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h4"/>
+      <polyline points="12,5 17,9 12,13"/>
+      <line x1="17" y1="9" x2="7" y2="9"/>
+    </svg>
+  ),
+  approval: (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="2" width="14" height="16" rx="1.5"/>
+      <polyline points="6,9 8,11 12,7"/>
+      <line x1="5" y1="5" x2="13" y2="5"/>
+    </svg>
+  ),
+};
+
+// ─────────────────────────────────────────────
+//  Nav item definition
+// ─────────────────────────────────────────────
+
+interface NavItem {
+  label: string;
+  to: string;
+  icon: ReactNode;
+  roles: UserRole[];
+  section?: string; // section header (shows once per unique value)
+}
+
+const NAV_ITEMS: NavItem[] = [
+  // Overview
+  { label: 'Dashboard',       to: '/home',             icon: ic.dashboard,    roles: ['SUPER_ADMIN', 'COORDINATOR', 'STUDENT', 'EXTERNAL'], section: 'Overview' },
+
+  // Equipment
+  { label: 'Availability',    to: '/availability',     icon: ic.equipment,    roles: ['SUPER_ADMIN', 'COORDINATOR', 'STUDENT', 'EXTERNAL'], section: 'Equipment' },
+  { label: 'My Borrows',      to: '/my-borrows',       icon: ic.borrow,       roles: ['STUDENT'] },
+  { label: 'Borrow Queue',    to: '/borrow-queue',     icon: ic.queue,        roles: ['COORDINATOR'] },
+  { label: 'Active Borrows',  to: '/active-borrows',   icon: ic.borrow,       roles: ['SUPER_ADMIN', 'COORDINATOR'] },
+  { label: 'Inventory',       to: '/inventory',        icon: ic.inventory,    roles: ['SUPER_ADMIN', 'COORDINATOR'] },
+
+  // Venues
+  { label: 'Book a Venue',    to: '/book-venue',       icon: ic.venue,        roles: ['STUDENT', 'EXTERNAL'], section: 'Venues' },
+  { label: 'My Bookings',     to: '/my-bookings',      icon: ic.approval,     roles: ['STUDENT', 'EXTERNAL'] },
+  { label: 'Venue Calendar',  to: '/calendar',         icon: ic.calendar,     roles: ['SUPER_ADMIN', 'COORDINATOR', 'STUDENT', 'EXTERNAL'], section: 'Venues' },
+  { label: 'Venue Queue',     to: '/venue-queue',      icon: ic.queue,        roles: ['COORDINATOR'], section: 'Venues' },
+  { label: 'Venue Approvals', to: '/venue-approvals',  icon: ic.approval,     roles: ['SUPER_ADMIN'] },
+  { label: 'Equip. Alerts',   to: '/equipment-alerts', icon: ic.alerts,       roles: ['COORDINATOR'] },
+
+  // Records
+  { label: 'Usage History',   to: '/history',          icon: ic.history,      roles: ['SUPER_ADMIN', 'COORDINATOR', 'STUDENT', 'EXTERNAL'], section: 'Records' },
+
+  // Admin
+  { label: 'Accounts',        to: '/admin/accounts',   icon: ic.users,        roles: ['SUPER_ADMIN'], section: 'Admin' },
+  { label: 'Conflict Log',    to: '/conflicts',        icon: ic.alerts,       roles: ['SUPER_ADMIN'] },
+];
+
+// ─────────────────────────────────────────────
+//  Role label & avatar colour
+// ─────────────────────────────────────────────
+
+const ROLE_LABEL: Record<UserRole, string> = {
+  STUDENT:     'Student',
+  EXTERNAL:    'External',
+  COORDINATOR: 'Coordinator',
+  SUPER_ADMIN: 'Admin Staff',
+};
+
+const ROLE_COLOR: Record<UserRole, string> = {
+  STUDENT:     '#498473',
+  EXTERNAL:    '#2a6d9e',
+  COORDINATOR: '#5a7b9a',
+  SUPER_ADMIN: '#0B3754',
+};
+
+// ─────────────────────────────────────────────
+//  AppShell
+// ─────────────────────────────────────────────
+
+interface AppShellProps {
+  children: ReactNode;
+  title?: string;
+}
+
+export default function AppShell({ children, title }: AppShellProps) {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [collapsed, setCollapsed] = useState(() => window.innerWidth < 1100);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // Responsive: track mobile breakpoint
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const handler = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      if (!e.matches) setDrawerOpen(false);
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  // Close drawer on route change
+  useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
+
+  // Trap focus & close on outside click for mobile drawer
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) {
+        setDrawerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [drawerOpen]);
+
+  const visibleItems = user
+    ? NAV_ITEMS.filter((item) => item.roles.includes(user.role))
+    : [];
+
+  const handleLogout = useCallback(async () => {
+    await logout();
+    navigate('/', { replace: true });
+  }, [logout, navigate]);
+
+  const sidebarContent = (isDrawer = false) => {
+    let lastSection = '';
+    return (
+      <nav
+        aria-label="Main navigation"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          padding: '0 0 var(--sp-4)',
+        }}
+      >
+        {/* Logo area */}
+        <div style={{
+          padding: (collapsed && !isDrawer) ? 'var(--sp-4) 0' : 'var(--sp-4) var(--sp-4)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          justifyContent: (collapsed && !isDrawer) ? 'center' : 'flex-start',
+          borderBottom: '1px solid rgba(255,255,255,0.10)',
+          marginBottom: 'var(--sp-3)',
+          minHeight: 64,
+        }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: 8,
+            background: 'rgba(255,255,255,0.15)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+            fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-display)',
+            color: '#fff',
+          }}>B</div>
+          {(!collapsed || isDrawer) && (
+            <div style={{ overflow: 'hidden' }}>
+              <div style={{
+                font: '600 13px/1 var(--font-display)',
+                color: '#fff',
+                letterSpacing: '0.01em',
+                whiteSpace: 'nowrap',
+              }}>BUKC Sports</div>
+              <div style={{
+                font: '11px/1 var(--font-body)',
+                color: 'rgba(255,255,255,0.55)',
+                marginTop: 3,
+                whiteSpace: 'nowrap',
+              }}>Bahria University</div>
+            </div>
+          )}
+        </div>
+
+        {/* Nav items */}
+        <div style={{ flex: 1, padding: '0 var(--sp-2)' }}>
+          {visibleItems.map((item) => {
+            const isFirst = item.section && item.section !== lastSection;
+            if (isFirst) lastSection = item.section!;
+
+            return (
+              <div key={item.to}>
+                {isFirst && (!collapsed || isDrawer) && (
+                  <div style={{
+                    font: '500 10px/1 var(--font-body)',
+                    color: 'rgba(255,255,255,0.38)',
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    padding: 'var(--sp-3) var(--sp-2) var(--sp-1)',
+                  }}>
+                    {item.section}
+                  </div>
+                )}
+                {isFirst && (collapsed && !isDrawer) && (
+                  <div style={{
+                    height: 1,
+                    background: 'rgba(255,255,255,0.08)',
+                    margin: 'var(--sp-2) var(--sp-2)',
+                  }} />
+                )}
+                <NavLink
+                  to={item.to}
+                  title={collapsed && !isDrawer ? item.label : undefined}
+                  style={({ isActive }) => ({
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: (collapsed && !isDrawer)
+                      ? 'var(--sp-3) 0'
+                      : 'var(--sp-2) var(--sp-3)',
+                    borderRadius: 'var(--radius)',
+                    margin: '1px 0',
+                    color: isActive ? '#fff' : 'rgba(255,255,255,0.65)',
+                    background: isActive ? 'rgba(255,255,255,0.14)' : 'transparent',
+                    textDecoration: 'none',
+                    fontSize: 13.5,
+                    fontWeight: isActive ? 600 : 400,
+                    transition: 'background var(--t-fast) var(--ease), color var(--t-fast) var(--ease)',
+                    justifyContent: (collapsed && !isDrawer) ? 'center' : 'flex-start',
+                    position: 'relative',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                  })}
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span style={{
+                        flexShrink: 0,
+                        color: isActive ? '#fff' : 'rgba(255,255,255,0.55)',
+                        display: 'flex',
+                        transition: 'color var(--t-fast) var(--ease)',
+                      }}>
+                        {item.icon}
+                      </span>
+                      {(!collapsed || isDrawer) && (
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {item.label}
+                        </span>
+                      )}
+                      {isActive && (
+                        <span style={{
+                          position: 'absolute',
+                          left: 0, top: '50%', transform: 'translateY(-50%)',
+                          width: 3, height: '60%',
+                          background: 'var(--teal-500)',
+                          borderRadius: '0 2px 2px 0',
+                        }} />
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* User + logout */}
+        {user && (
+          <div style={{
+            padding: 'var(--sp-3) var(--sp-3)',
+            borderTop: '1px solid rgba(255,255,255,0.08)',
+            marginTop: 'auto',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: '50%',
+              background: ROLE_COLOR[user.role],
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+              font: '600 12px var(--font-display)',
+              color: '#fff',
+              border: '2px solid rgba(255,255,255,0.2)',
+            }}>
+              {user.fullName.charAt(0).toUpperCase()}
+            </div>
+            {(!collapsed || isDrawer) && (
+              <>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    font: '500 12.5px var(--font-body)',
+                    color: '#fff',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {user.fullName}
+                  </div>
+                  <div style={{
+                    font: '11px var(--font-body)',
+                    color: 'rgba(255,255,255,0.45)',
+                    marginTop: 1,
+                  }}>
+                    {ROLE_LABEL[user.role]}
+                  </div>
+                </div>
+                <button
+                  onClick={() => { void handleLogout(); }}
+                  title="Sign out"
+                  aria-label="Sign out"
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'rgba(255,255,255,0.45)', padding: 4, borderRadius: 4,
+                    display: 'flex', transition: 'color var(--t-fast)',
+                    flexShrink: 0,
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.9)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.45)'; }}
+                >
+                  {ic.logout}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </nav>
+    );
+  };
+
+  return (
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+
+      {/* ── Desktop sidebar ── */}
+      {!isMobile && (
+        <aside style={{
+          width: collapsed ? 'var(--sidebar-w-col)' : 'var(--sidebar-w)',
+          minWidth: collapsed ? 'var(--sidebar-w-col)' : 'var(--sidebar-w)',
+          background: 'var(--navy)',
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'relative',
+          zIndex: 30,
+          transition: 'width var(--t-base) var(--ease), min-width var(--t-base) var(--ease)',
+          overflowX: 'hidden',
+        }}>
+          {sidebarContent(false)}
+
+          {/* Collapse toggle */}
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            style={{
+              position: 'absolute',
+              top: 20,
+              right: collapsed ? '50%' : 12,
+              transform: collapsed ? 'translateX(50%)' : 'none',
+              width: 24, height: 24,
+              borderRadius: '50%',
+              background: 'rgba(255,255,255,0.12)',
+              border: '1px solid rgba(255,255,255,0.18)',
+              color: 'rgba(255,255,255,0.7)',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all var(--t-base) var(--ease)',
+              zIndex: 10,
+              padding: 0,
+            }}
+          >
+            <span style={{
+              display: 'flex',
+              transform: collapsed ? 'rotate(180deg)' : 'none',
+              transition: 'transform var(--t-base) var(--ease)',
+            }}>
+              {ic.chevronLeft}
+            </span>
+          </button>
+        </aside>
+      )}
+
+      {/* ── Mobile drawer overlay ── */}
+      {isMobile && drawerOpen && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 40,
+            background: 'rgba(11,55,84,0.5)',
+            backdropFilter: 'blur(2px)',
+            animation: 'fadeIn var(--t-fast) var(--ease)',
+          }}
+          aria-hidden
+        />
+      )}
+
+      {/* ── Mobile drawer ── */}
+      {isMobile && (
+        <aside
+          ref={drawerRef}
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, bottom: 0,
+            width: 260,
+            background: 'var(--navy)',
+            zIndex: 50,
+            transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)',
+            transition: 'transform var(--t-base) var(--ease)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflowY: 'auto',
+          }}
+        >
+          <button
+            onClick={() => setDrawerOpen(false)}
+            aria-label="Close menu"
+            style={{
+              position: 'absolute', top: 16, right: 12,
+              background: 'rgba(255,255,255,0.1)', border: 'none',
+              borderRadius: 6, padding: 6, cursor: 'pointer',
+              color: 'rgba(255,255,255,0.8)', display: 'flex',
+            }}
+          >
+            {ic.close}
+          </button>
+          {sidebarContent(true)}
+        </aside>
+      )}
+
+      {/* ── Main area (topbar + content) ── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+
+        {/* Topbar */}
+        <header style={{
+          height: 56,
+          background: 'var(--white)',
+          borderBottom: '1px solid var(--line-light)',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 var(--sp-5)',
+          gap: 'var(--sp-4)',
+          flexShrink: 0,
+          boxShadow: 'var(--shadow-xs)',
+          zIndex: 20,
+        }}>
+          {/* Mobile hamburger */}
+          {isMobile && (
+            <button
+              onClick={() => setDrawerOpen(true)}
+              aria-label="Open menu"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--navy)', display: 'flex', padding: 4, borderRadius: 4,
+                marginRight: 4,
+              }}
+            >
+              {ic.menu}
+            </button>
+          )}
+
+          {/* Page title */}
+          {title && (
+            <h1 style={{
+              font: '600 16px/1 var(--font-display)',
+              color: 'var(--navy)',
+              margin: 0,
+              flex: 1,
+            }}>
+              {title}
+            </h1>
+          )}
+          {!title && <div style={{ flex: 1 }} />}
+
+          {/* Right side: user pill */}
+          {user && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '4px 10px 4px 6px',
+              borderRadius: 20,
+              background: 'var(--bg)',
+              border: '1px solid var(--line)',
+            }}>
+              <div style={{
+                width: 26, height: 26, borderRadius: '50%',
+                background: ROLE_COLOR[user.role],
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                font: '600 11px var(--font-display)',
+                color: '#fff',
+                flexShrink: 0,
+              }}>
+                {user.fullName.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div style={{ font: '500 12px var(--font-body)', color: 'var(--navy)', lineHeight: 1 }}>
+                  {user.fullName.split(' ')[0]}
+                </div>
+                <div style={{ font: '10.5px var(--font-body)', color: 'var(--ink-muted)', marginTop: 1 }}>
+                  {ROLE_LABEL[user.role]}
+                </div>
+              </div>
+            </div>
+          )}
+        </header>
+
+        {/* Scrollable content */}
+        <main
+          id="main-content"
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: 'var(--sp-5)',
+          }}
+        >
+          {children}
+        </main>
+      </div>
+
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        /* Fix: gap in header flex (can't use CSS variable in inline style value) */
+        header { gap: 16px; }
+      `}</style>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+//  Shared page layout primitives (re-export)
+// ─────────────────────────────────────────────
+
+/** Standard page header with title + optional right-side actions */
+export function PageHeader({
+  title, subtitle, children,
+}: { title: string; subtitle?: string; children?: ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: 'var(--sp-3)',
+      marginBottom: 'var(--sp-5)',
+    }}>
+      <div>
+        <h2 style={{
+          font: '700 22px/1.2 var(--font-display)',
+          color: 'var(--navy)',
+          margin: 0,
+        }}>{title}</h2>
+        {subtitle && (
+          <p style={{
+            font: '14px var(--font-body)',
+            color: 'var(--ink-muted)',
+            margin: '4px 0 0',
+          }}>{subtitle}</p>
+        )}
+      </div>
+      {children && (
+        <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Card container */
+export function Card({
+  children, style,
+}: { children: ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div style={{
+      background: 'var(--white)',
+      border: '1px solid var(--line-light)',
+      borderRadius: 'var(--radius-lg)',
+      boxShadow: 'var(--shadow-sm)',
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+/** Stat card for dashboard metrics */
+export function StatCard({
+  label, value, icon, color = 'var(--teal)', trend, loading,
+}: {
+  label: string;
+  value: string | number;
+  icon: ReactNode;
+  color?: string;
+  trend?: string;
+  loading?: boolean;
+}) {
+  return (
+    <div style={{
+      background: 'var(--white)',
+      border: '1px solid var(--line-light)',
+      borderRadius: 'var(--radius-lg)',
+      padding: 'var(--sp-4) var(--sp-5)',
+      boxShadow: 'var(--shadow-sm)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 'var(--sp-4)',
+      transition: 'box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease)',
+    }}
+    onMouseEnter={(e) => {
+      (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-md)';
+      (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)';
+    }}
+    onMouseLeave={(e) => {
+      (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-sm)';
+      (e.currentTarget as HTMLElement).style.transform = 'none';
+    }}>
+      <div style={{
+        width: 44, height: 44, borderRadius: 10,
+        background: color + '1a',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color, flexShrink: 0,
+      }}>
+        {icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          font: '11px/1 var(--font-body)',
+          color: 'var(--ink-muted)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          marginBottom: 4,
+        }}>
+          {label}
+        </div>
+        {loading ? (
+          <div style={{
+            height: 24, width: 60,
+            background: 'var(--line-light)',
+            borderRadius: 4,
+            animation: 'pulse 1.4s ease infinite',
+          }} />
+        ) : (
+          <div style={{
+            font: '700 24px/1 var(--font-display)',
+            color: 'var(--navy)',
+          }}>
+            {value}
+          </div>
+        )}
+        {trend && (
+          <div style={{ font: '11px var(--font-body)', color: 'var(--teal)', marginTop: 3 }}>
+            {trend}
+          </div>
+        )}
+      </div>
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.4; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/** Status badge */
+export function Badge({ status }: { status: string }) {
+  const cfg: Record<string, { bg: string; color: string }> = {
+    APPROVED:         { bg: 'var(--ok-bg)',      color: 'var(--ok)' },
+    COMPLETED:        { bg: 'var(--ok-bg)',      color: 'var(--ok)' },
+    COMPLETED_LATE:   { bg: 'var(--warn-bg)',    color: 'var(--warn)' },
+    COMPLETED_DAMAGED:{ bg: 'var(--danger-bg)',  color: 'var(--danger)' },
+    PENDING:          { bg: '#fef9e7',           color: '#9a6b00' },
+    FORWARDED:        { bg: 'var(--info-bg)',    color: 'var(--info)' },
+    REJECTED:         { bg: 'var(--danger-bg)',  color: 'var(--danger)' },
+    CANCELLED:        { bg: 'var(--surface)',    color: 'var(--ink-muted)' },
+    ACTIVE:           { bg: 'var(--info-bg)',    color: 'var(--info)' },
+    OVERDUE:          { bg: 'var(--danger-bg)',  color: 'var(--danger)' },
+    AVAILABLE:        { bg: 'var(--ok-bg)',      color: 'var(--ok)' },
+    LOW_STOCK:        { bg: 'var(--warn-bg)',    color: 'var(--warn)' },
+    CHECKED_OUT:      { bg: 'var(--danger-bg)',  color: 'var(--danger)' },
+    SHORTFALL_PENDING:{ bg: 'var(--warn-bg)',    color: 'var(--warn)' },
+    SCHEDULED:        { bg: 'var(--info-bg)',    color: 'var(--info)' },
+    IN_PROGRESS:      { bg: 'var(--ok-bg)',      color: 'var(--ok)' },
+    SENT_BACK:        { bg: '#fff3e0',           color: '#e65100' },
+  };
+  const s = cfg[status] ?? { bg: 'var(--surface)', color: 'var(--ink-muted)' };
+  return (
+    <span style={{
+      display: 'inline-block',
+      padding: '2px 8px',
+      borderRadius: 4,
+      font: '600 11px var(--font-mono)',
+      letterSpacing: '0.03em',
+      background: s.bg,
+      color: s.color,
+      whiteSpace: 'nowrap',
+    }}>
+      {status.replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+/** Primary action button */
+export function Btn({
+  children, variant = 'primary', size = 'md', loading: isLoading, ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+  size?: 'sm' | 'md' | 'lg';
+  loading?: boolean;
+}) {
+  const colors: Record<string, string> = {
+    primary:   'background:var(--teal);color:#fff;border:1px solid var(--teal-700);',
+    secondary: 'background:var(--white);color:var(--navy);border:1px solid var(--line);',
+    danger:    'background:var(--danger-bg);color:var(--danger);border:1px solid #f3caca;',
+    ghost:     'background:transparent;color:var(--teal);border:1px solid transparent;',
+  };
+  const sizes: Record<string, string> = {
+    sm: 'padding:5px 12px;font-size:12.5px;',
+    md: 'padding:8px 18px;font-size:13.5px;',
+    lg: 'padding:11px 24px;font-size:15px;',
+  };
+  return (
+    <button
+      {...props}
+      disabled={props.disabled || isLoading}
+      style={{
+        ...Object.fromEntries(
+          (colors[variant] + sizes[size])
+            .split(';').filter(Boolean)
+            .map((p) => p.split(':').map((v) => v.trim()))
+        ),
+        fontFamily: 'var(--font-body)',
+        fontWeight: 600,
+        borderRadius: 'var(--radius)',
+        cursor: props.disabled || isLoading ? 'not-allowed' : 'pointer',
+        opacity: props.disabled || isLoading ? 0.6 : 1,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        transition: 'opacity var(--t-fast), box-shadow var(--t-fast)',
+        whiteSpace: 'nowrap',
+        ...props.style,
+      }}
+    >
+      {isLoading ? '…' : children}
+    </button>
+  );
+}
+
+/** Generic error box */
+export function ErrorBox({ message }: { message: string }) {
+  return (
+    <div style={{
+      background: 'var(--danger-bg)',
+      color: 'var(--danger)',
+      border: '1px solid #f3caca',
+      borderRadius: 'var(--radius)',
+      padding: 'var(--sp-3) var(--sp-4)',
+      fontSize: 14,
+      marginBottom: 'var(--sp-4)',
+    }}>
+      {message}
+    </div>
+  );
+}
+
+/** Generic success box */
+export function SuccessBox({ message }: { message: string }) {
+  return (
+    <div style={{
+      background: 'var(--ok-bg)',
+      color: 'var(--ok)',
+      border: '1px solid #c2e6cd',
+      borderRadius: 'var(--radius)',
+      padding: 'var(--sp-3) var(--sp-4)',
+      fontSize: 14,
+      marginBottom: 'var(--sp-4)',
+    }}>
+      {message}
+    </div>
+  );
+}
+
+/** Empty state */
+export function EmptyState({ icon, title, body }: { icon?: ReactNode; title: string; body?: string }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      justifyContent: 'center', padding: 'var(--sp-10) var(--sp-5)',
+      color: 'var(--ink-muted)', textAlign: 'center',
+    }}>
+      {icon && (
+        <div style={{ color: 'var(--line)', marginBottom: 'var(--sp-4)', opacity: 0.6 }}>
+          {icon}
+        </div>
+      )}
+      <div style={{ font: '600 15px var(--font-display)', color: 'var(--ink-muted)', marginBottom: 6 }}>
+        {title}
+      </div>
+      {body && (
+        <div style={{ font: '13.5px var(--font-body)', color: 'var(--ink-faint)', maxWidth: 320 }}>
+          {body}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Skeleton line */
+export function Skeleton({ w = '100%', h = 16 }: { w?: number | string; h?: number }) {
+  return (
+    <div style={{
+      width: w, height: h,
+      background: 'var(--line-light)',
+      borderRadius: 4,
+      animation: 'pulse 1.4s ease infinite',
+    }}>
+      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }`}</style>
+    </div>
+  );
+}
+
+/** Table wrapper with horizontal scroll on small screens */
+export function TableWrapper({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <table style={{
+        width: '100%', borderCollapse: 'collapse',
+        fontSize: 13.5, minWidth: 480,
+      }}>
+        {children}
+      </table>
+    </div>
+  );
+}
+
+export const Th: React.CSSProperties = {
+  textAlign: 'left',
+  font: '600 11px var(--font-body)',
+  color: 'var(--ink-muted)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  padding: '0 var(--sp-3) var(--sp-3)',
+  borderBottom: '1px solid var(--line)',
+  whiteSpace: 'nowrap',
+};
+
+export const Td: React.CSSProperties = {
+  padding: 'var(--sp-3)',
+  borderBottom: '1px solid var(--line-light)',
+  color: 'var(--ink)',
+  verticalAlign: 'middle',
+};

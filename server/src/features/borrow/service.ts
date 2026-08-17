@@ -19,6 +19,9 @@ function mapDbError(e: unknown): AppError {
       if (e.constraint === 'uq_one_open_borrow_request') {
         return conflict('You already have a pending request. Wait for it to be reviewed before submitting another.', 'DUPLICATE');
       }
+      if (e.constraint === 'uq_article_single_open_lend') {
+        return conflict('One or more selected articles are already on loan. Refresh and select a different article.', 'ARTICLE_ON_LOAN');
+      }
       return conflict('That conflicts with an existing record.', 'DUPLICATE');
     }
     if (e.code === '23503') return badRequest('Referenced item does not exist.', 'FK');
@@ -79,8 +82,10 @@ export async function getReputation(userId: string) {
 }
 
 // ── requests (BORROW-01..14) ──
+
 export async function submitRequest(studentId: string, input: {
   equipmentTypeId: number; requestedStartAt: string; requestedReturnAt: string;
+  requestGroupId?: string;
 }) {
   // BORROW-13: 30-minute cooldown after a rejection.
   const lastRejected = await db.selectFrom('borrow_request').select('decided_at')
@@ -92,7 +97,14 @@ export async function submitRequest(studentId: string, input: {
       throw conflict(`You can resubmit in ${Math.ceil((cooldownEnds - Date.now()) / 60000)} minute(s).`, 'COOLDOWN');
     }
   }
-
+if (!input.requestGroupId) {
+  const openGroup = await db.selectFrom('borrow_request')
+    .select('request_group_id')
+    .where('requested_by', '=', studentId)
+    .where('status', 'in', ['PENDING', 'APPROVED'])
+    .limit(1).executeTakeFirst();
+  if (openGroup) throw conflict('You already have an active request. Wait for it to be reviewed or returned before submitting another.', 'DUPLICATE');
+}
   // BORROW-14: cannot request equipment with zero available units.
   // Archived types are excluded from the availability checker, but guard here
   // too in case of a direct API call with a stale/known type id.
@@ -123,7 +135,8 @@ export async function submitRequest(studentId: string, input: {
       equipment_type_id: input.equipmentTypeId,
       requested_start_at: input.requestedStartAt,
       requested_return_at: input.requestedReturnAt,
-    }).returning('borrow_request_id').executeTakeFirstOrThrow();
+      request_group_id: input.requestGroupId,
+    }).returning(['borrow_request_id', 'request_group_id']).executeTakeFirstOrThrow();
 
     await notifyStaff('QUEUE_NEW_ITEM', 'New equipment borrow request',
       'A student submitted a new equipment borrow request awaiting review.',
@@ -149,8 +162,10 @@ export async function listQueue() {
     .leftJoin('v_article_availability as va', 'va.equipment_type_id', 'br.equipment_type_id')
     .leftJoin('v_client_reputation as cr', 'cr.user_id', 'br.requested_by')
     .select([
-      'br.borrow_request_id', 'br.requested_start_at', 'br.requested_return_at', 'br.submitted_at',
+      'br.borrow_request_id', 'br.request_group_id',
+      'br.requested_start_at', 'br.requested_return_at', 'br.submitted_at',
       'br.equipment_type_id', 'et.name as equipment_type_name',
+      'et.lending_unit', 'et.max_borrow_duration_minutes',
       'u.user_id as student_id', 'u.full_name as student_name', 'u.email as student_email',
       sql<number>`coalesce(va.available_units, 0)`.as('available_units'),
       sql<number>`coalesce(cr.late_returns, 0)`.as('late_returns'),
@@ -162,8 +177,144 @@ export async function listQueue() {
     ...r,
     available_units: Number(r.available_units),
     is_bad_sport: Number(r.late_returns) >= BAD_SPORT_THRESHOLD,
-    late_returns: undefined, // don't leak raw count to client
+    late_returns: undefined,
   }));
+}
+
+// BORROW-12: mark PENDING requests whose start window has passed as EXPIRED
+// and notify both student and coordinator.
+export async function checkExpiredRequests() {
+  const expired = await db.selectFrom('borrow_request')
+    .select(['borrow_request_id', 'request_group_id', 'requested_by', 'equipment_type_id'])
+    .where('status', '=', 'PENDING')
+    .where('requested_start_at', '<', new Date())
+    .execute();
+
+  // Group by request_group_id so we send one notification per logical request
+  const groups = new Map<string, typeof expired>();
+  for (const r of expired) {
+    const g = groups.get(r.request_group_id) ?? [];
+    g.push(r);
+    groups.set(r.request_group_id, g);
+  }
+
+  for (const [, rows] of groups) {
+    const first = rows[0]!;
+    for (const row of rows) {
+      await db.updateTable('borrow_request')
+        .set({ status: 'EXPIRED' })
+        .where('borrow_request_id', '=', row.borrow_request_id)
+        .execute();
+    }
+    await notifyStudent('BORROW_REJECTED', first.requested_by,
+      'Your borrow request expired',
+      'Your borrow request was not reviewed before the requested start time and has expired. You may submit a new request.',
+      { borrowRequestId: first.borrow_request_id });
+    await notifyStaff('QUEUE_NEW_ITEM', 'Borrow request expired',
+      'A pending borrow request was not reviewed before the requested start time and has been marked as expired.',
+      { borrowRequestId: first.borrow_request_id, subjectUserId: first.requested_by });
+  }
+
+  return expired.length;
+}
+
+// Approve all rows in a request group atomically.
+export async function approveGroup(groupId: string, coordinatorId: string) {
+  const rows = await db.selectFrom('borrow_request')
+    .select(['borrow_request_id', 'requested_by', 'equipment_type_id', 'status'])
+    .where('request_group_id', '=', groupId)
+    .execute();
+
+  if (rows.length === 0) throw notFound('Request group not found.');
+  const pending = rows.filter((r) => r.status === 'PENDING');
+  if (pending.length === 0) throw conflict('All requests in this group are already actioned.');
+
+  // Check stock for all types in the group
+  for (const row of pending) {
+    const avail = await db.selectFrom('v_article_availability').select('available_units')
+      .where('equipment_type_id', '=', row.equipment_type_id).executeTakeFirst();
+    if (!avail || Number(avail.available_units) <= 0) {
+      const type = await db.selectFrom('equipment_type').select('name')
+        .where('equipment_type_id', '=', row.equipment_type_id).executeTakeFirst();
+      throw conflict(
+        `No units of ${type?.name ?? 'equipment'} are currently available. ` +
+        'Reject the request or wait for stock to free up.', 'NO_STOCK');
+    }
+  }
+
+  try {
+    await db.updateTable('borrow_request')
+      .set({ status: 'APPROVED', decided_by: coordinatorId, decided_at: sql`now()` })
+      .where('request_group_id', '=', groupId)
+      .where('status', '=', 'PENDING')
+      .execute();
+
+    await notifyStudent('BORROW_APPROVED', rows[0]!.requested_by,
+      'Your borrow request was approved',
+      'Bring your ID card to the sports office to collect your equipment.',
+      { borrowRequestId: rows[0]!.borrow_request_id });
+  } catch (e) { throw mapDbError(e); }
+}
+
+// Lend all items in a group in one transaction. articlesPerType maps
+// equipment_type_id → article_ids[] selected by the coordinator.
+export async function lendPlatformGroup(input: {
+  groupId: string;
+  articlesPerType: Record<number, string[]>;
+  agreedStartAt: string;
+  agreedReturnAt: string;
+}, coordinatorId: string) {
+  try {
+    const rows = await db.selectFrom('borrow_request')
+      .select(['borrow_request_id', 'requested_by', 'equipment_type_id', 'status'])
+      .where('request_group_id', '=', input.groupId)
+      .execute();
+
+    if (rows.length === 0) throw notFound('Request group not found.');
+    const approved = rows.filter((r) => r.status === 'APPROVED');
+    if (approved.length === 0) throw conflict('No approved requests found in this group. Approve the group first.');
+
+    const txnIds: string[] = [];
+
+    await db.transaction().execute(async (trx) => {
+      for (const row of approved) {
+        const articleIds = input.articlesPerType[row.equipment_type_id] ?? [];
+        if (articleIds.length === 0) {
+          throw badRequest(`No articles selected for equipment type ${row.equipment_type_id}.`);
+        }
+
+        const txn = await trx.insertInto('borrow_transaction').values({
+          path: 'PLATFORM',
+          borrow_request_id: row.borrow_request_id,
+          borrower_user_id: row.requested_by,
+          equipment_type_id: row.equipment_type_id,
+          agreed_start_at: input.agreedStartAt,
+          agreed_return_at: input.agreedReturnAt,
+          lent_by: coordinatorId,
+        }).returning('borrow_txn_id').executeTakeFirstOrThrow();
+
+        for (const articleId of articleIds) {
+          await trx.insertInto('borrow_transaction_article').values({
+            borrow_txn_id: txn.borrow_txn_id,
+            article_id: articleId,
+            selection_method: 'MANUAL_SELECT',
+          }).execute();
+        }
+        await markArticlesOnLoan(trx, articleIds);
+        txnIds.push(txn.borrow_txn_id);
+      }
+    });
+
+    // Notify student that equipment has been lent
+    if (rows[0]?.requested_by) {
+      await notifyStudent('BORROW_APPROVED', rows[0].requested_by,
+        'Your equipment has been lent',
+        'Your equipment has been handed out. Please return it by the agreed time.',
+        { borrowRequestId: rows[0].borrow_request_id });
+    }
+
+    return { borrowTxnIds: txnIds };
+  } catch (e) { throw mapDbError(e); }
 }
 
 export async function approveRequest(requestId: string, coordinatorId: string) {

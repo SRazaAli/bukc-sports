@@ -11,8 +11,15 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell, PrimaryButton } from '../auth/PortalShell.js';
 import { listAvailability, type AvailabilityRow } from '../availability/api.js';
+import { listTypes } from '../inventory/api.js';
 import { submitRequest } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
+import { api } from '../../lib/api.js';
+
+// Kit submit: POST /api/borrow/requests/kit
+function submitKitRequest(input: { sportCategoryId: number; requestedStartAt: string; requestedReturnAt: string }) {
+  return api<{ message: string; requestIds: string[] }>('/api/borrow/requests/kit', { method: 'POST', body: input });
+}
 
 function errMsg(e: unknown): string {
   if (e instanceof ApiRequestError) return e.body?.error ?? e.message ?? 'Something went wrong.';
@@ -24,10 +31,26 @@ function errMsg(e: unknown): string {
 const OPEN_HH = 8;
 const CLOSE_HH = 17;
 function toHHMM(m: number) { return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }
-function smartStart() { const now = new Date(); return toHHMM(Math.min(Math.max(Math.ceil((now.getHours() * 60 + now.getMinutes()) / 5) * 5, OPEN_HH * 60), CLOSE_HH * 60 - 5)); }
-function smartEnd(start: string, maxMin: number) { const p = start.split(':').map(Number); return toHHMM(Math.min((p[0] ?? 8) * 60 + (p[1] ?? 0) + maxMin, CLOSE_HH * 60)); }
-function todayStr() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
-function nowMinTime(date: string) { const today = todayStr(); if (date !== today) return `${OPEN_HH.toString().padStart(2, '0')}:00`; const now = new Date(); return toHHMM(Math.max(now.getHours() * 60 + now.getMinutes(), OPEN_HH * 60)); }
+function smartStart() {
+  const now = new Date();
+  const mins = Math.ceil((now.getHours() * 60 + now.getMinutes()) / 5) * 5;
+  return toHHMM(Math.min(Math.max(mins, OPEN_HH * 60), CLOSE_HH * 60 - 5));
+}
+function smartEnd(start: string, maxMin: number) {
+  const p = start.split(':').map(Number);
+  return toHHMM(Math.min((p[0] ?? 8) * 60 + (p[1] ?? 0) + maxMin, CLOSE_HH * 60));
+}
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function nowMinTime(date: string) {
+  const today = todayStr();
+  if (date !== today) return `${String(OPEN_HH).padStart(2, '0')}:00`;
+  const now = new Date();
+  const snapped = Math.ceil((now.getHours() * 60 + now.getMinutes()) / 5) * 5;
+  return toHHMM(Math.max(snapped, OPEN_HH * 60));
+}
 
 export default function EquipmentBorrowScreen() {
   const { user, loading } = useAuth();
@@ -87,25 +110,60 @@ export default function EquipmentBorrowScreen() {
     });
   }
 
+  // Effective max duration = minimum across main item + all selected related items
+  const effectiveMaxMinutes = (() => {
+    const mins = [row?.maxBorrowDurationMinutes ?? 480];
+    for (const id of selected) {
+      const rel = related.find((r) => r.equipmentTypeId === id);
+      if (rel?.maxBorrowDurationMinutes) mins.push(rel.maxBorrowDurationMinutes);
+    }
+    return Math.min(...mins);
+  })();
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!row) return;
     setSubmitting(true);
     setFormError(null);
 
-    const requestedStartAt = `${date}T${startTime}:00.000Z`;
-    const requestedReturnAt = `${date}T${endTime}:00.000Z`;
+    // Build ISO timestamps treating the user's selected date+time as local time
+    const toISO = (d: string, t: string) => {
+      const dt = new Date(`${d}T${t}`);
+      return dt.toISOString();
+    };
+    const requestedStartAt = toISO(date, startTime);
+    const requestedReturnAt = toISO(date, endTime);
 
-    // Submit main item + any ticked related items sequentially
+    // Validate duration client-side before hitting the server
+    const durationMin = (new Date(requestedReturnAt).getTime() - new Date(requestedStartAt).getTime()) / 60_000;
+    if (durationMin > effectiveMaxMinutes) {
+      const h = Math.floor(effectiveMaxMinutes / 60);
+      const m = effectiveMaxMinutes % 60;
+      const dur = h > 0 && m > 0 ? `${h}h ${m}m` : h > 0 ? `${h}h` : `${m}m`;
+      setFormError(`Maximum borrow duration for this selection is ${dur}.`);
+      setSubmitting(false);
+      return;
+    }
+
+    // Submit all items as ONE logical group:
+    // First item determines the group UUID; subsequent items pass that UUID in.
     const typeIds = [row.equipmentTypeId, ...Array.from(selected)];
     const itemErrors: { name: string; reason: string }[] = [];
+    let groupId: string | undefined;
 
     for (const id of typeIds) {
       const name = id === row.equipmentTypeId
         ? row.name
         : (related.find((r) => r.equipmentTypeId === id)?.name ?? String(id));
       try {
-        await submitRequest({ equipmentTypeId: id, requestedStartAt, requestedReturnAt });
+        const res = await submitRequest({
+          equipmentTypeId: id,
+          requestedStartAt,
+          requestedReturnAt,
+          requestGroupId: groupId,
+        });
+        // First successful response establishes the group for all subsequent items
+        if (!groupId) groupId = res.request.requestGroupId;
       } catch (err) {
         itemErrors.push({ name, reason: errMsg(err) });
       }
@@ -113,22 +171,17 @@ export default function EquipmentBorrowScreen() {
 
     setSubmitting(false);
 
-    const succeeded = typeIds.length - itemErrors.length;
-
     if (itemErrors.length === 0) {
-      // All succeeded
       const extras = typeIds.length - 1;
       setNotice(
         extras > 0
-          ? `Request submitted for ${row.name} + ${extras} related item${extras > 1 ? 's' : ''}! A Coordinator will review your requests.`
+          ? `Request submitted for ${row.name} + ${extras} related item${extras > 1 ? 's' : ''}. A Coordinator will review it shortly.`
           : 'Request submitted! A Coordinator will review it shortly.',
       );
-    } else if (succeeded > 0) {
-      // Some succeeded, some failed — show which failed and why
+    } else if (typeIds.length - itemErrors.length > 0) {
       const reasons = itemErrors.map((err) => `${err.name}: ${err.reason}`).join(' · ');
-      setNotice(`Partially submitted (${succeeded} of ${typeIds.length} items). Issues — ${reasons}`);
+      setNotice(`Partially submitted. Issues — ${reasons}`);
     } else {
-      // Everything failed — show the first error directly (usually the main item)
       setFormError(itemErrors[0]?.reason ?? 'Request failed. Please try again.');
     }
   }
@@ -136,7 +189,7 @@ export default function EquipmentBorrowScreen() {
   const badgeStyle: React.CSSProperties = !row ? {} :
     row.statusBadge === 'AVAILABLE' ? { background: '#d1fae5', color: '#065f46' } :
       row.statusBadge === 'LOW_STOCK' ? { background: '#fef3c7', color: '#92400e' } :
-        { background: '#fee2e2', color: '#991b1b' }; 
+        { background: '#fee2e2', color: '#991b1b' };
   const badgeText = !row ? '' :
     row.statusBadge === 'AVAILABLE' ? 'Available' :
       row.statusBadge === 'LOW_STOCK' ? 'Low Stock' : 'Checked Out';
@@ -202,16 +255,22 @@ export default function EquipmentBorrowScreen() {
                   <form onSubmit={handleSubmit} style={formGrid}>
                     <div style={field}>
                       <label style={fieldLabel}>Date</label>
-                      <input type="date" style={inp} value={date} min={todayStr()} onChange={(e) => setDate(e.target.value)} required />
+                      <input type="date" style={inp} value={date} min={todayStr()} onChange={(e) => {
+                        const newDate = e.target.value;
+                        setDate(newDate);
+                        const newStart = nowMinTime(newDate);
+                        setStartTime(newStart);
+                        setEndTime(smartEnd(newStart, effectiveMaxMinutes));
+                      }} required />
                     </div>
                     <div style={field}>
                       <label style={fieldLabel}>Start time</label>
                       <input type="time" style={inp} value={startTime} min={nowMinTime(date)} max="17:00" step={300}
-                        onChange={(e) => { setStartTime(e.target.value); setEndTime(smartEnd(e.target.value, 480)); }} required />
+                        onChange={(e) => { setStartTime(e.target.value); setEndTime(smartEnd(e.target.value, effectiveMaxMinutes)); }} required />
                     </div>
                     <div style={field}>
                       <label style={fieldLabel}>Return by</label>
-                      <input type="time" style={inp} value={endTime} min={startTime} max="17:00" step={300}
+                      <input type="time" style={inp} value={endTime} min={startTime} max={smartEnd(startTime, effectiveMaxMinutes)} step={300}
                         onChange={(e) => setEndTime(e.target.value)} required />
                     </div>
 

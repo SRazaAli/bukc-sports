@@ -217,7 +217,7 @@ export interface VArticleAvailability {
 
 // ── Borrowing domain (Feature 3) ──
 export type BorrowPath = 'PLATFORM' | 'WALK_IN';
-export type BorrowRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+export type BorrowRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'EXPIRED';
 export type BorrowTxnStatus = 'ACTIVE' | 'OVERDUE' | 'INCOMPLETE' | 'COMPLETED' | 'COMPLETED_LATE' | 'COMPLETED_DAMAGED';
 export type NotificationType =
   | 'ACCOUNT_VERIFIED' | 'BOOKING_APPROVED' | 'BOOKING_REJECTED' | 'BOOKING_CANCELLED'
@@ -234,6 +234,7 @@ export type NotificationType =
 
 export interface BorrowRequestTable {
   borrow_request_id: Generated<string>;
+  request_group_id: ColumnType<string, string | undefined, string>;
   requested_by: string;
   equipment_type_id: number;
   requested_start_at: Timestamp;

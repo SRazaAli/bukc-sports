@@ -17,6 +17,7 @@ export interface AvailabilityRow {
   lendingUnit: 'SINGLE' | 'PAIR';
   availableUnits: number;
   statusBadge: StatusBadge;
+  maxBorrowDurationMinutes: number;
   totalStock?: number; // present for SUPER_ADMIN / COORDINATOR only
 }
 

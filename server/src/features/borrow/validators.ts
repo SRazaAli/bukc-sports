@@ -5,6 +5,7 @@ export const submitRequestSchema = z.object({
   equipmentTypeId: z.number().int().positive(),
   requestedStartAt: z.string().datetime(),
   requestedReturnAt: z.string().datetime(),
+  requestGroupId: z.string().uuid().optional(),
 }).refine((v) => new Date(v.requestedReturnAt) > new Date(v.requestedStartAt), {
   message: 'Return time must be after start time', path: ['requestedReturnAt'],
 }).refine((v) => {
