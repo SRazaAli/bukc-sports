@@ -15,9 +15,12 @@
  * administrator, so the link stays disabled with a short hint for
  * those roles.
  */
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { PortalKey } from './AuthUI.js';
+import { useAuth } from '../../lib/auth.js';
+import { login, studentLogin } from './api.js';
+import { ApiRequestError } from '../../lib/api.js';
 
 const palette = {
   navy900: '#0F172B',   // page background / dark text on white panel
@@ -40,25 +43,28 @@ interface RoleOption {
   label: string;
   description: string;
   to: string;
+  expectedRole: 'SUPER_ADMIN' | 'COORDINATOR' | 'STUDENT' | 'EXTERNAL';
   registerTo?: string;
 }
 
+// `to` is kept only as a fallback deep-link (e.g. shared URLs); the sign-in
+// button below no longer navigates here — it logs the user in directly.
 const ROLES: RoleOption[] = [
   {
-    key: 'admin', label: 'Super Administrator', to: '/login/admin',
+    key: 'admin', label: 'Super Administrator', to: '/login/admin', expectedRole: 'SUPER_ADMIN',
     description: 'Full platform oversight - manages approvals.',
   },
   {
-    key: 'coordinator', label: 'Coordinator', to: '/login/coordinator',
+    key: 'coordinator', label: 'Coordinator', to: '/login/coordinator', expectedRole: 'COORDINATOR',
     description: 'Manage queues & conflicts for equipment and venues.',
   },
   {
-    key: 'student', label: 'Student', to: '/login/student',
+    key: 'student', label: 'Student', to: '/login/student', expectedRole: 'STUDENT',
     description: 'Book venues & borrow sports equipment.',
     registerTo: '/register/student',
   },
   {
-    key: 'external', label: 'External', to: '/login/external',
+    key: 'external', label: 'External', to: '/login/external', expectedRole: 'EXTERNAL',
     description: 'Request venues for a partner institution.',
     registerTo: '/register/external',
   },
@@ -66,12 +72,42 @@ const ROLES: RoleOption[] = [
 
 export default function LandingScreen() {
   const [selected, setSelected] = useState<PortalKey | null>(null);
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const { setUser } = useAuth();
   const navigate = useNavigate();
   const active = ROLES.find((r) => r.key === selected) ?? null;
+  const isStudent = active?.key === 'student';
+
+  // Signs the user in right here on the landing page — no more bouncing to
+  // a separate /login/<role> screen. On success we land straight on /home,
+  // the same place the old per-role login screen used to send people.
+  async function onSignIn(e: FormEvent) {
+    e.preventDefault();
+    if (!active) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const user = isStudent
+        ? await studentLogin(identifier, password)
+        : await login(identifier, password);
+
+      if (user.role !== active.expectedRole) {
+        setError(`These credentials are not for the ${active.label} portal.`);
+        setLoading(false);
+        return;
+      }
+      setUser(user);
+      navigate('/home');
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.body.error : 'Could not sign in. Try again.');
+      setLoading(false);
+    }
+  }
 
   return (
     <div style={s.page}>
@@ -125,81 +161,88 @@ export default function LandingScreen() {
             })}
           </div>
 
-          <div style={s.formGroup}>
-            <label style={s.formLabel} htmlFor="landing-email">Email</label>
-            <input
-              id="landing-email"
-              type="email"
-              placeholder="you@bukc.edu.pk"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={s.input}
-            />
-          </div>
+          <form onSubmit={onSignIn} noValidate>
+            {error && <div style={s.errorBanner}>{error}</div>}
 
-          <div style={s.formGroup}>
-            <label style={s.formLabel} htmlFor="landing-password">Password</label>
-            <div style={s.passwordWrap}>
+            <div style={s.formGroup}>
+              <label style={s.formLabel} htmlFor="landing-identifier">{isStudent ? 'Enrollment' : 'Email'}</label>
               <input
-                id="landing-password"
-                type={showPassword ? 'text' : 'password'}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={s.inputWithToggle}
+                id="landing-identifier"
+                type={isStudent ? 'text' : 'email'}
+                placeholder={isStudent ? 'e.g. 84-024000-123' : 'you@bukc.edu.pk'}
+                autoComplete="username"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                style={s.input}
+                required
               />
+            </div>
+
+            <div style={s.formGroup}>
+              <label style={s.formLabel} htmlFor="landing-password">Password</label>
+              <div style={s.passwordWrap}>
+                <input
+                  id="landing-password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  style={s.inputWithToggle}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  style={s.showToggle}
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
+            </div>
+
+            {/* Remember me + Forgot password share one row, directly below
+               the password field's Show/Hide toggle line. */}
+            <div style={s.rememberForgotRow}>
+              <label style={s.rememberRow}>
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  style={s.checkbox}
+                />
+                Remember me
+              </label>
+              <a href="/forgot-password" style={s.forgotLink}>Forgot password?</a>
+            </div>
+
+            {/* "Not a user? Register account" — routes to /register/student or
+               /register/external based on the role selected above. Admin and
+               Coordinator have no self-registration flow, so the link is
+               disabled with a short explanatory hint in that case. */}
+            <div style={s.registerRow}>
               <button
                 type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                style={s.showToggle}
+                disabled={!active?.registerTo}
+                onClick={() => active?.registerTo && navigate(active.registerTo)}
+                style={{ ...s.registerLink, ...(active?.registerTo ? s.registerLinkActive : s.registerLinkDisabled) }}
               >
-                {showPassword ? 'Hide' : 'Show'}
+                Not a user? <span style={s.registerLinkStrong}>Register account</span>
               </button>
+              {selected && !active?.registerTo && (
+                <p style={s.registerHint}>Self-registration isn&apos;t available for this role.</p>
+              )}
             </div>
-          </div>
 
-          {/* Remember me + Forgot password share one row, directly below
-             the password field's Show/Hide toggle line. */}
-          <div style={s.rememberForgotRow}>
-            <label style={s.rememberRow}>
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                style={s.checkbox}
-              />
-              Remember me
-            </label>
-            <a href="/forgot-password" style={s.forgotLink}>Forgot password?</a>
-          </div>
-
-          {/* "Not a user? Register account" — routes to /register/student or
-             /register/external based on the role selected above. Admin and
-             Coordinator have no self-registration flow, so the link is
-             disabled with a short explanatory hint in that case. */}
-          <div style={s.registerRow}>
             <button
-              type="button"
-              disabled={!active?.registerTo}
-              onClick={() => active?.registerTo && navigate(active.registerTo)}
-              style={{ ...s.registerLink, ...(active?.registerTo ? s.registerLinkActive : s.registerLinkDisabled) }}
+              type="submit"
+              disabled={!active || loading}
+              style={{ ...s.signInBtn, ...(active && !loading ? s.signInBtnActive : s.signInBtnDisabled) }}
             >
-              Not a user? <span style={s.registerLinkStrong}>Register account</span>
+              {loading ? 'Signing in…' : 'Sign into BUKC Sports Portal'}
+              {!loading && <ArrowIcon />}
             </button>
-            {selected && !active?.registerTo && (
-              <p style={s.registerHint}>Self-registration isn&apos;t available for this role.</p>
-            )}
-          </div>
-
-          <button
-            type="button"
-            disabled={!active}
-            onClick={() => active && navigate(active.to)}
-            style={{ ...s.signInBtn, ...(active ? s.signInBtnActive : s.signInBtnDisabled) }}
-          >
-            Sign into BUKC Sports Portal
-            <ArrowIcon />
-          </button>
+          </form>
 
           <p style={s.helperNote}>Choose a role, then enter your credentials</p>
         </div>
@@ -330,6 +373,11 @@ const s = {
   showToggle: {
     position: 'absolute', top: '50%', right: 12, transform: 'translateY(-50%)', background: 'none',
     border: 'none', color: palette.accent, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', padding: 0,
+  } as const,
+
+  errorBanner: {
+    background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FECACA',
+    borderRadius: 10, padding: '11px 14px', fontSize: 13, marginBottom: 16,
   } as const,
 
   rememberForgotRow: {

@@ -190,8 +190,8 @@ export default function RegisterScreen({ role }: { role: Role }) {
                   </p>
                 </div>
               </div>
-              <button type="button" style={s.backLink} onClick={() => navigate(cfg.loginLink)}>
-                ← Back to sign in
+              <button type="button" style={s.backLink} onClick={() => navigate('/')}>
+                ← Back to home page
               </button>
             </>
           ) : (
@@ -298,7 +298,7 @@ export default function RegisterScreen({ role }: { role: Role }) {
 
                 <p style={s.helperNote}>
                   Already have an account?{' '}
-                  <Link to={cfg.loginLink} style={s.inlineLink}>Sign in</Link>
+                  <Link to="/" style={s.inlineLink}>Sign in</Link>
                 </p>
               </form>
             </>
