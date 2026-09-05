@@ -1,21 +1,50 @@
 /**
  * ProfileUI — visual kit for the "My Profile" screen only.
  *
+ * Re-themed to match the site's ACTUAL current visual language — the one
+ * used by LandingScreen / HomeScreen / RegisterScreen — not the older
+ * mint/teal palette from AuthUI.tsx (that palette is now only used by the
+ * legacy Login/PasswordReset/AdminAccounts screens and was a mismatch here).
+ *
+ * Palette values below are copied verbatim from LandingScreen's/HomeScreen's
+ * local `palette` const: dark navy page (#0F172B) with two soft accent/slate
+ * glows, white content cards, navy900 headings, slate500/600 body text, and
+ * a single accent blue (#1C398E) used for every interactive/brand element —
+ * "the one blue, reserved for the active state" per HomeScreen's own notes.
+ * Font is Inter only (400–800), matching Landing/Home/Register exactly.
+ *
  * Deliberately its own file, mirroring how AuthUI.tsx is kept separate from
  * PortalShell: this redesign should never touch PortalShell.tsx (still used
  * by Home/AdminAccounts/history/etc.) or any other screen. ProfileScreen.tsx
  * is the only consumer of this file.
- *
- * Palette + role theme are imported (not duplicated) from AuthUI so the
- * profile page matches the landing/login redesign exactly:
- *   #EFF9F5 (mint-50)  #DFF0E8 (mint-100)  #498473 (teal-600)
- *   #E4EDF6 (sky-100)  #0B3754 (navy-900)
  */
 import { useState, type ReactNode } from 'react';
-import { palette, ROLE_THEME, type PortalKey } from './AuthUI.js';
 
-export { palette, ROLE_THEME };
-export type { PortalKey };
+/* ---------- theme (identical values to LandingScreen/HomeScreen `palette`) ---------- */
+
+export const palette = {
+  navy900: '#0F172B',
+  navy800: '#132357',
+  navyDeep: '#031636',
+  slate600: '#132357',
+  slate500: '#62748E',
+  slate400: '#90A1B9',
+  slate300: '#CAD5E2',
+  slate100: '#E2E8F0',
+  slate50: '#F8FAFC',
+  white: '#FFFFFF',
+  accent: '#1C398E',
+  accentSoft: '#DBEAFE',
+  accentWash: '#1C398E14',
+  errorBg: '#FEF2F2',
+  errorBorder: '#FECACA',
+  errorText: '#B91C1C',
+  okBg: '#ECFDF5',
+  okBorder: '#A7F3D0',
+  okText: '#047857',
+};
+
+export type PortalKey = 'student' | 'external' | 'coordinator' | 'admin';
 
 export function roleToPortalKey(role: string): PortalKey {
   switch (role) {
@@ -26,14 +55,21 @@ export function roleToPortalKey(role: string): PortalKey {
   }
 }
 
+const ROLE_LABEL: Record<PortalKey, string> = {
+  student: 'Student',
+  external: 'External',
+  coordinator: 'Coordinator',
+  admin: 'Administration Staff',
+};
+
 /* ---------- Page chrome ---------- */
 
 export function ProfilePage({ children }: { children: ReactNode }) {
   return (
-    <div className="profile-ui" style={s.page}>
+    <div className="bukc-profile" style={s.page}>
       <ProfileStyleSheet />
-      <div style={s.blobA} aria-hidden />
-      <div style={s.blobB} aria-hidden />
+      <div style={s.glowA} aria-hidden />
+      <div style={s.glowB} aria-hidden />
       {children}
     </div>
   );
@@ -42,24 +78,31 @@ export function ProfilePage({ children }: { children: ReactNode }) {
 function ProfileStyleSheet() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
-      .profile-ui { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; position: relative; }
-      .profile-ui h1, .profile-ui h2, .profile-ui .pf-display { font-family: 'Poppins', 'Segoe UI', system-ui, sans-serif; }
-      .pf-card-anim { animation: pfFadeUp .45s ease both; }
-      @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-      .pf-btn { transition: transform .15s ease, box-shadow .15s ease, filter .15s ease, background .15s ease; cursor: pointer; }
-      .pf-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
-      .pf-btn:active:not(:disabled) { transform: translateY(0); }
-      .pf-btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
-      .pf-ghost-btn:hover { background: rgba(11,55,84,0.08) !important; }
-      .pf-input { transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
-      .pf-input:focus { outline: none; border-color: ${palette.navy}; box-shadow: 0 0 0 4px rgba(11,55,84,0.12); background: #fff; }
-      .pf-link { transition: color .15s ease, gap .15s ease; }
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+      .bukc-profile { font-family: 'Inter', system-ui, sans-serif; position: relative; }
+      .bukc-profile * { box-sizing: border-box; }
+      .pf-card-anim { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.2,.75,.25,1) forwards; }
+      @keyframes pfFadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+      .pf-btn { transition: filter .15s ease, transform .15s ease, background-color .18s ease, border-color .18s ease, color .18s ease; cursor: pointer; }
+      .pf-btn:hover:not(:disabled) { filter: brightness(1.08); }
+      .pf-btn:active:not(:disabled) { transform: translateY(1px); }
+      .pf-btn:disabled { opacity: .6; cursor: not-allowed; }
+      .pf-signout { background: transparent; border: 1.5px solid ${palette.slate400}; color: ${palette.slate100}; }
+      .pf-signout:hover { background-color: ${palette.accent}; border-color: ${palette.accent}; color: ${palette.white}; }
+      .pf-ghost-btn { background: transparent; border: 1.5px solid ${palette.slate400}; color: ${palette.slate100}; }
+      .pf-ghost-btn:hover { background-color: rgba(255,255,255,0.08); border-color: ${palette.slate100}; }
+      .pf-input { transition: border-color .15s ease, box-shadow .15s ease; }
+      .pf-input:focus { outline: none; border-color: ${palette.accent} !important; box-shadow: 0 0 0 3px ${palette.accentSoft}; }
+      .pf-link { transition: opacity .15s ease; }
       .pf-link:hover { text-decoration: underline; }
-      .pf-notif:hover { background: ${palette.mint50} !important; }
-      .pf-row { animation: pfFadeUp .4s ease both; }
+      .pf-notif:hover { background: ${palette.slate50} !important; }
+      .pf-quicklink:hover { background: ${palette.slate50} !important; color: ${palette.accent} !important; }
+      .pf-quicklink:hover svg { transform: translateX(2px); }
+      .pf-quicklink svg { transition: transform .15s ease; }
+      .pf-sidebar { position: sticky; top: 20px; }
       @media (max-width: 900px) {
         .pf-grid { grid-template-columns: 1fr !important; }
+        .pf-sidebar { position: static !important; top: auto !important; }
       }
       @media (max-width: 640px) {
         .pf-topbar { padding: 14px 16px !important; }
@@ -67,7 +110,7 @@ function ProfileStyleSheet() {
         .pf-main { padding: 20px 14px 40px !important; }
       }
       @media (prefers-reduced-motion: reduce) {
-        .pf-card-anim, .pf-row { animation: none !important; opacity: 1 !important; }
+        .pf-card-anim { animation: none !important; opacity: 1 !important; }
       }
     `}</style>
   );
@@ -75,13 +118,13 @@ function ProfileStyleSheet() {
 
 const s = {
   page: {
-    minHeight: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden',
-    background: `radial-gradient(1200px 600px at 12% -10%, ${palette.sky100} 0%, transparent 55%),
-                 radial-gradient(1000px 600px at 100% 0%, ${palette.mint100} 0%, transparent 55%),
-                 ${palette.mint50}`,
+    minHeight: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden',
+    background: `radial-gradient(1100px 700px at 15% 0%, ${palette.navy800}aa 0%, transparent 60%),
+                 radial-gradient(900px 600px at 100% 100%, ${palette.accent}22 0%, transparent 55%),
+                 ${palette.navy900}`,
   } as const,
-  blobA: { position: 'absolute', width: 340, height: 340, borderRadius: '50%', background: `${palette.teal}1c`, top: -120, left: -100, filter: 'blur(10px)', pointerEvents: 'none' } as const,
-  blobB: { position: 'absolute', width: 300, height: 300, borderRadius: '50%', background: `${palette.navy}14`, top: 260, right: -110, filter: 'blur(10px)', pointerEvents: 'none' } as const,
+  glowA: { position: 'absolute', width: 420, height: 420, borderRadius: '50%', background: `${palette.accent}1a`, top: -160, left: -140, filter: 'blur(30px)', pointerEvents: 'none' } as const,
+  glowB: { position: 'absolute', width: 380, height: 380, borderRadius: '50%', background: `${palette.slate600}22`, bottom: -160, right: -120, filter: 'blur(30px)', pointerEvents: 'none' } as const,
 };
 
 /* ---------- Top bar: brand + Go back / Sign out ---------- */
@@ -90,15 +133,17 @@ export function ProfileTopBar({ onBack, onSignOut }: { onBack: () => void; onSig
   return (
     <header className="pf-topbar" style={tb.wrap}>
       <div style={tb.brand}>
-        <span style={tb.logoMark}>BU</span>
-        <span style={tb.wordmark}>Bahria University</span>
-        <span style={tb.tag}>Sports Management Portal</span>
+        <img src="/landing/bu_logo.png" alt="Bahria University" style={tb.logoImg} />
+        <div>
+          <div style={tb.wordmark}>Bahria University</div>
+          <div style={tb.wordmarkSub}>Sports Management Portal</div>
+        </div>
       </div>
       <div className="pf-topbar-actions" style={tb.actions}>
         <button className="pf-btn pf-ghost-btn" style={tb.ghostBtn} onClick={onBack}>
           <ArrowLeftIcon /> <span className="pf-btn-label">Go back</span>
         </button>
-        <button className="pf-btn" style={tb.solidBtn} onClick={onSignOut}>
+        <button className="pf-btn pf-signout" style={tb.signOutBtn} onClick={onSignOut}>
           <LogoutIcon /> <span className="pf-btn-label">Sign out</span>
         </button>
       </div>
@@ -108,25 +153,29 @@ export function ProfileTopBar({ onBack, onSignOut }: { onBack: () => void; onSig
 
 const tb = {
   wrap: { position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 32px', flexWrap: 'wrap', gap: 12 } as const,
-  brand: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' } as const,
-  logoMark: { width: 32, height: 32, borderRadius: 9, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: palette.navy, color: '#fff', fontFamily: 'Poppins, sans-serif', fontWeight: 800, fontSize: 13 } as const,
-  wordmark: { fontFamily: 'Poppins, sans-serif', fontSize: 17, fontWeight: 600, color: palette.navy } as const,
-  tag: { fontSize: 12.5, color: palette.muted, fontWeight: 500, paddingLeft: 10, marginLeft: 2, borderLeft: `1px solid ${palette.line}` } as const,
+  brand: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' } as const,
+  logoImg: { width: 40, height: 40, borderRadius: 10, objectFit: 'contain', background: palette.slate50, padding: 4, border: `1px solid ${palette.slate300}` } as const,
+  wordmark: { fontSize: 16, fontWeight: 700, color: palette.white, lineHeight: 1.2 } as const,
+  wordmarkSub: { fontSize: 12, color: palette.slate400, marginTop: 1 } as const,
   actions: { display: 'flex', alignItems: 'center', gap: 10 } as const,
-  ghostBtn: { display: 'inline-flex', alignItems: 'center', gap: 7, background: '#fff', color: palette.navy, border: `1.5px solid ${palette.line}`, borderRadius: 999, padding: '9px 16px', fontSize: 13.5, fontWeight: 700, fontFamily: 'inherit' } as const,
-  solidBtn: { display: 'inline-flex', alignItems: 'center', gap: 7, background: palette.navy, color: '#fff', border: 'none', borderRadius: 999, padding: '9px 16px', fontSize: 13.5, fontWeight: 700, fontFamily: 'inherit', boxShadow: `0 10px 20px -10px ${palette.navy}aa` } as const,
+  ghostBtn: { display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, padding: '9px 16px', fontSize: 13.5, fontWeight: 700, fontFamily: 'inherit' } as const,
+  signOutBtn: { display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 999, padding: '9px 16px', fontSize: 13.5, fontWeight: 700, fontFamily: 'inherit', border: 'none' } as const,
 };
 
 /* ---------- Main wrap + grid ---------- */
 
 export function ProfileMain({ children }: { children: ReactNode }) {
-  return <main className="pf-main" style={{ position: 'relative', zIndex: 1, flex: 1, padding: '8px 32px 56px', maxWidth: 1140, margin: '0 auto', width: '100%' }}>{children}</main>;
+  return <main className="pf-main bukc-container" style={{ position: 'relative', zIndex: 1, flex: 1, padding: '8px 0 56px', maxWidth: 1320, margin: '0 auto', width: '100%', paddingLeft: 22, paddingRight: 22 }}>{children}</main>;
 }
 
 export function ProfileGrid({ sidebar, children }: { sidebar: ReactNode; children: ReactNode }) {
   return (
     <div className="pf-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 320px) 1fr', gap: 20, alignItems: 'start' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>{sidebar}</div>
+      {/* Sticky on desktop: the sidebar is naturally shorter than the activity
+          column, so pinning it while the right column scrolls removes the
+          dead whitespace that used to open up beneath it. Reverts to normal
+          static flow on mobile where the grid stacks to one column. */}
+      <div className="pf-sidebar" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>{sidebar}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>{children}</div>
     </div>
   );
@@ -134,8 +183,8 @@ export function ProfileGrid({ sidebar, children }: { sidebar: ReactNode; childre
 
 export function ProfileFooter() {
   return (
-    <footer style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '20px 24px', fontSize: 12.5, color: palette.muted, borderTop: `1px solid ${palette.line}` }}>
-      2026 © <a href="/" style={{ color: palette.navy, textDecoration: 'none', fontWeight: 600 }}>Bahria University</a> — Sports Management Portal
+    <footer className="bukc-container" style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '20px 22px', fontSize: 12.5, color: palette.slate400, borderTop: `1px solid ${palette.slate600}55` }}>
+      2026 © <a href="/" style={{ color: palette.accentSoft, textDecoration: 'none', fontWeight: 600 }}>Bahria University</a> — Sports Management Portal
     </footer>
   );
 }
@@ -145,12 +194,11 @@ export function ProfileFooter() {
 export function IdentityCard({
   portal, name, email, roleLabel, deactivated,
 }: { portal: PortalKey; name: string; email: string; roleLabel: string; deactivated?: boolean }) {
-  const theme = ROLE_THEME[portal];
   return (
     <section className="pf-card-anim" style={id.card}>
-      <div style={{ ...id.banner, background: `linear-gradient(135deg, ${theme.from}, ${theme.to})` }} />
+      <div style={id.banner} />
       <div style={id.avatarWrap}>
-        <div style={{ ...id.avatar, background: `linear-gradient(135deg, ${theme.from}, ${theme.to})` }}>
+        <div style={id.avatar}>
           <RoleIconFor portal={portal} />
         </div>
       </div>
@@ -158,22 +206,30 @@ export function IdentityCard({
       <div style={id.name}>{name}</div>
       <div style={id.email}>{email}</div>
       <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-        <span style={{ ...id.badge, background: theme.soft, color: theme.solid }}>{roleLabel}</span>
-        {deactivated && <span style={{ ...id.badge, background: '#FDECEC', color: '#8F2323' }}>Deactivated</span>}
+        <span style={id.badge}>{roleLabel || ROLE_LABEL[portal]}</span>
+        {deactivated && <span style={{ ...id.badge, background: palette.errorBg, color: palette.errorText }}>Deactivated</span>}
       </div>
     </section>
   );
 }
 
 const id = {
-  card: { position: 'relative', overflow: 'hidden', background: '#fff', borderRadius: 22, border: `1px solid ${palette.line}`, boxShadow: '0 1px 2px rgba(11,55,84,0.05), 0 20px 40px -28px rgba(11,55,84,0.28)', textAlign: 'center', paddingBottom: 22 } as const,
-  banner: { height: 72, width: '100%' } as const,
+  card: {
+    position: 'relative', overflow: 'hidden', background: 'linear-gradient(145deg, #F8FAFF 0%, #EAF0FC 100%)',
+    borderRadius: 16, border: `1px solid ${palette.slate300}e6`, boxShadow: '0 12px 30px -22px rgba(3,22,54,.85)',
+    textAlign: 'center', paddingBottom: 22,
+  } as const,
+  banner: { height: 72, width: '100%', background: `linear-gradient(120deg, ${palette.navy800}, ${palette.accent})` } as const,
   avatarWrap: { marginTop: -40, marginBottom: 10 } as const,
-  avatar: { width: 80, height: 80, borderRadius: '50%', margin: '0 auto', border: '4px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 20px -8px rgba(11,55,84,0.45)' } as const,
-  eyebrow: { fontSize: 12, color: palette.muted, padding: '0 18px' } as const,
-  name: { fontFamily: 'Poppins, sans-serif', fontSize: 19, fontWeight: 700, color: palette.ink, marginTop: 3, padding: '0 18px', wordBreak: 'break-word' } as const,
-  email: { fontSize: 13, color: palette.muted, marginTop: 3, padding: '0 18px', wordBreak: 'break-word' } as const,
-  badge: { display: 'inline-block', fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', padding: '4px 11px', borderRadius: 999 } as const,
+  avatar: {
+    width: 80, height: 80, borderRadius: '50%', margin: '0 auto', border: '4px solid #fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: palette.accent, boxShadow: '0 10px 20px -8px rgba(3,22,54,.55)',
+  } as const,
+  eyebrow: { fontSize: 12, color: palette.slate500, padding: '0 18px' } as const,
+  name: { fontSize: 19, fontWeight: 700, color: palette.navy900, marginTop: 3, padding: '0 18px', wordBreak: 'break-word' } as const,
+  email: { fontSize: 13, color: palette.slate500, marginTop: 3, padding: '0 18px', wordBreak: 'break-word' } as const,
+  badge: { display: 'inline-block', fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', padding: '4px 11px', borderRadius: 999, background: palette.accentWash, color: palette.accent } as const,
 };
 
 /* ---------- Panel (card with header) ---------- */
@@ -182,7 +238,7 @@ export function Panel({
   title, icon, action, accent, children,
 }: { title: string; icon?: ReactNode; action?: ReactNode; accent?: boolean; children: ReactNode }) {
   return (
-    <section className="pf-card-anim" style={{ ...pn.card, ...(accent ? { borderLeft: `4px solid ${palette.teal}` } : {}) }}>
+    <section className="pf-card-anim" style={{ ...pn.card, ...(accent ? { borderLeft: `4px solid ${palette.accent}` } : {}) }}>
       <div style={pn.head}>
         <span style={pn.title}>{icon}{title}</span>
         {action}
@@ -193,15 +249,36 @@ export function Panel({
 }
 
 const pn = {
-  card: { background: '#fff', borderRadius: 20, border: `1px solid ${palette.line}`, boxShadow: '0 1px 2px rgba(11,55,84,0.05), 0 16px 32px -28px rgba(11,55,84,0.25)', overflow: 'hidden' } as const,
-  head: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '15px 20px', borderBottom: `1px solid ${palette.line}`, background: palette.mint50 } as const,
-  title: { display: 'flex', alignItems: 'center', gap: 9, fontFamily: 'Poppins, sans-serif', fontSize: 14.5, fontWeight: 700, color: palette.navy } as const,
+  card: {
+    background: 'linear-gradient(145deg, #F8FAFF 0%, #EAF0FC 100%)', borderRadius: 16,
+    border: `1px solid ${palette.slate300}e6`, boxShadow: '0 12px 30px -22px rgba(3,22,54,.85)', overflow: 'hidden',
+  } as const,
+  head: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '15px 20px', borderBottom: `1px solid ${palette.slate300}`, background: palette.white } as const,
+  title: { display: 'flex', alignItems: 'center', gap: 9, fontSize: 14.5, fontWeight: 700, color: palette.navy900 } as const,
   body: { padding: 20 } as const,
 };
 
 export function LinkBtn({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button className="pf-link" {...props} style={{ background: 'none', border: 'none', font: '700 13px inherit', color: palette.teal, cursor: 'pointer', padding: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>{children}</button>;
+  return <button className="pf-link" {...props} style={{ background: 'none', border: 'none', font: '700 13px inherit', color: palette.accent, cursor: 'pointer', padding: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>{children}</button>;
 }
+
+/* ---------- Quick link row (sidebar navigation shortcuts) ---------- */
+
+export function QuickLinkItem({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" className="pf-quicklink" onClick={onClick} style={ql.item}>
+      <span>{label}</span>
+      <ArrowRightIcon />
+    </button>
+  );
+}
+const ql = {
+  item: {
+    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+    background: 'none', border: 'none', borderRadius: 10, padding: '9px 10px', margin: 0,
+    font: '600 13.5px inherit', color: palette.navy900, cursor: 'pointer', textAlign: 'left',
+  } as const,
+};
 
 /* ---------- Personal details ---------- */
 
@@ -214,18 +291,18 @@ export function DetailRow({ label, value }: { label: string; value?: string }) {
   );
 }
 const dr = {
-  row: { padding: '9px 0', borderBottom: `1px solid ${palette.mint100}` } as const,
-  label: { fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: palette.muted, marginBottom: 2 } as const,
-  value: { fontSize: 14.5, color: palette.ink, fontWeight: 500, wordBreak: 'break-word' } as const,
+  row: { padding: '9px 0', borderBottom: `1px solid ${palette.slate100}` } as const,
+  label: { fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: palette.slate500, marginBottom: 2 } as const,
+  value: { fontSize: 14.5, color: palette.navy900, fontWeight: 500, wordBreak: 'break-word' } as const,
 };
 
 /* ---------- Banners ---------- */
 
 export function Banner({ kind, children }: { kind: 'error' | 'ok'; children: ReactNode }) {
   const style = kind === 'error'
-    ? { background: '#FDECEC', color: '#8F2323', border: '1px solid #F3CACA' }
-    : { background: palette.mint100, color: '#245A45', border: `1px solid ${palette.teal}55` };
-  return <div style={{ ...style, borderRadius: 14, padding: '12px 16px', marginBottom: 16, fontSize: 14 }}>{children}</div>;
+    ? { background: palette.errorBg, color: palette.errorText, border: `1px solid ${palette.errorBorder}` }
+    : { background: palette.okBg, color: palette.okText, border: `1px solid ${palette.okBorder}` };
+  return <div style={{ ...style, borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 14 }}>{children}</div>;
 }
 
 /* ---------- Notifications ---------- */
@@ -251,32 +328,32 @@ export function NotifItem({
   );
 }
 const nf = {
-  item: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '11px 12px', borderRadius: 12, marginBottom: 8, background: '#fbfdfc', border: `1px solid ${palette.line}` } as const,
-  itemUnread: { background: '#fff', borderLeft: `3px solid ${palette.teal}`, boxShadow: '0 1px 2px rgba(11,55,84,0.05)' } as const,
-  dot: { width: 6, height: 6, borderRadius: '50%', background: palette.teal, flexShrink: 0 } as const,
-  title: { fontSize: 13.5, color: palette.navy } as const,
-  body: { fontSize: 12.5, color: palette.muted, marginTop: 2, lineHeight: 1.4 } as const,
-  time: { fontSize: 11, color: '#94A3B0', whiteSpace: 'nowrap', flexShrink: 0, paddingTop: 1 } as const,
+  item: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '11px 12px', borderRadius: 10, marginBottom: 8, background: palette.white, border: `1px solid ${palette.slate300}` } as const,
+  itemUnread: { borderLeft: `3px solid ${palette.accent}`, boxShadow: '0 1px 2px rgba(3,22,54,0.06)' } as const,
+  dot: { width: 6, height: 6, borderRadius: '50%', background: palette.accent, flexShrink: 0 } as const,
+  title: { fontSize: 13.5, color: palette.navy900 } as const,
+  body: { fontSize: 12.5, color: palette.slate500, marginTop: 2, lineHeight: 1.4 } as const,
+  time: { fontSize: 11, color: palette.slate400, whiteSpace: 'nowrap', flexShrink: 0, paddingTop: 1 } as const,
 };
 
 export function CountPill({ children }: { children: ReactNode }) {
-  return <span style={{ fontSize: 11.5, fontWeight: 700, background: palette.mint100, color: palette.tealDeep, padding: '3px 10px', borderRadius: 999 }}>{children}</span>;
+  return <span style={{ fontSize: 11.5, fontWeight: 700, background: palette.accentWash, color: palette.accent, padding: '3px 10px', borderRadius: 999 }}>{children}</span>;
 }
 
 /* ---------- Stats ---------- */
 
 export function StatBox({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
   return (
-    <div style={{ flex: 1, textAlign: 'center', padding: '14px 8px', background: warn ? '#FEF2F1' : palette.mint50, borderRadius: 14, border: `1px solid ${warn ? '#F3CACA' : palette.mint100}` }}>
-      <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'Poppins, sans-serif', color: warn ? '#B3352B' : palette.navy }}>{value}</div>
-      <div style={{ fontSize: 11.5, color: palette.muted, marginTop: 2 }}>{label}</div>
+    <div style={{ flex: 1, textAlign: 'center', padding: '14px 8px', background: warn ? palette.errorBg : palette.white, borderRadius: 12, border: `1px solid ${warn ? palette.errorBorder : palette.slate300}` }}>
+      <div style={{ fontSize: 22, fontWeight: 800, color: warn ? palette.errorText : palette.navy900 }}>{value}</div>
+      <div style={{ fontSize: 11.5, color: palette.slate500, marginTop: 2 }}>{label}</div>
     </div>
   );
 }
 
 export function WarnBanner({ children }: { children: ReactNode }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#FEF0EE', color: '#8F2323', border: '1px solid #F3CACA', borderRadius: 12, padding: '10px 14px', marginBottom: 12, fontSize: 13.5, fontWeight: 600 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: palette.errorBg, color: palette.errorText, border: `1px solid ${palette.errorBorder}`, borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13.5, fontWeight: 600 }}>
       <WarnIcon /> {children}
     </div>
   );
@@ -285,10 +362,10 @@ export function WarnBanner({ children }: { children: ReactNode }) {
 /* ---------- Status pill (borrow/booking status) ---------- */
 
 export function StatusPill({ status }: { status: string }) {
-  let bg = palette.sky100, fg = palette.muted;
-  if (['APPROVED', 'ACTIVE', 'COMPLETED'].includes(status)) { bg = palette.mint100; fg = palette.tealDeep; }
-  else if (['REJECTED', 'CANCELLED', 'COMPLETED_LATE', 'COMPLETED_DAMAGED'].includes(status)) { bg = '#FDECEC'; fg = '#8F2323'; }
-  return <span style={{ font: '700 10.5px "JetBrains Mono", ui-monospace, monospace', padding: '3px 9px', borderRadius: 999, background: bg, color: fg, whiteSpace: 'nowrap' }}>{status}</span>;
+  let bg: string = palette.slate100, fg: string = palette.slate500;
+  if (['APPROVED', 'ACTIVE', 'COMPLETED'].includes(status)) { bg = palette.okBg; fg = palette.okText; }
+  else if (['REJECTED', 'CANCELLED', 'COMPLETED_LATE', 'COMPLETED_DAMAGED'].includes(status)) { bg = palette.errorBg; fg = palette.errorText; }
+  return <span style={{ font: '700 10.5px ui-monospace, "JetBrains Mono", monospace', padding: '3px 9px', borderRadius: 999, background: bg, color: fg, whiteSpace: 'nowrap' }}>{status}</span>;
 }
 
 /* ---------- Table (borrow requests) ---------- */
@@ -298,43 +375,42 @@ export function DataTable({ head, children }: { head: string[]; children: ReactN
     <div style={{ overflowX: 'auto', marginTop: 12 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
         <thead>
-          <tr>{head.map((h) => <th key={h} style={{ textAlign: 'left', font: '700 10.5px Inter', color: palette.muted, textTransform: 'uppercase', letterSpacing: 0.4, padding: '0 10px 8px', borderBottom: `1px solid ${palette.line}` }}>{h}</th>)}</tr>
+          <tr>{head.map((h) => <th key={h} style={{ textAlign: 'left', font: '700 10.5px Inter', color: palette.slate500, textTransform: 'uppercase', letterSpacing: 0.4, padding: '0 10px 8px', borderBottom: `1px solid ${palette.slate300}` }}>{h}</th>)}</tr>
         </thead>
         <tbody>{children}</tbody>
       </table>
     </div>
   );
 }
-export const td: React.CSSProperties = { padding: '10px 10px', borderBottom: `1px solid ${palette.mint100}`, color: palette.ink };
+export const td: React.CSSProperties = { padding: '10px 10px', borderBottom: `1px solid ${palette.slate100}`, color: palette.navy900 };
 
 export function ActivityRow({ children }: { children: ReactNode }) {
-  return <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 4px', borderBottom: `1px solid ${palette.mint100}`, fontSize: 13.5, color: palette.ink }}>{children}</div>;
+  return <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 4px', borderBottom: `1px solid ${palette.slate100}`, fontSize: 13.5, color: palette.navy900 }}>{children}</div>;
 }
 
 export function Muted({ children }: { children: ReactNode }) {
-  return <p style={{ color: palette.muted, fontSize: 13.5, margin: 0 }}>{children}</p>;
+  return <p style={{ color: palette.slate500, fontSize: 13.5, margin: 0 }}>{children}</p>;
 }
 
 /* ---------- Form primitives (password change) ---------- */
 
-export function PfField({ label, icon, children }: { label: string; icon?: ReactNode; children: ReactNode }) {
+export function PfField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <label style={{ display: 'block', fontWeight: 700, fontSize: 13, color: palette.ink, marginBottom: 6 }}>{label}</label>
-      <div style={{ position: 'relative' }}>
-        {icon && <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: palette.muted, display: 'flex' }}>{icon}</span>}
-        {children}
-      </div>
+      <label style={{ display: 'block', fontWeight: 600, fontSize: 12.5, color: palette.slate600, marginBottom: 6 }}>{label}</label>
+      {children}
     </div>
   );
 }
 
 export function PfInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className="pf-input" style={{ width: '100%', fontSize: 14.5, padding: '11px 14px 11px 40px', borderRadius: 12, border: `1.5px solid ${palette.line}`, background: palette.mint50, color: palette.ink, outline: 'none', fontFamily: 'inherit' }} />;
+  return <input {...props} className="pf-input" style={{ width: '100%', fontSize: 13.5, padding: '11px 14px', borderRadius: 10, border: `1.5px solid ${palette.slate300}`, background: palette.slate50, color: palette.navy900, outline: 'none', fontFamily: 'inherit' }} />;
 }
 
 /** Password input with a show/hide eye toggle on the right. Same look as
- *  PfInput; type flips between 'password' and 'text' on click. */
+ *  PfInput; type flips between 'password' and 'text' on click. No left
+ *  icon — matches the plain (no-icon) password fields used on Landing and
+ *  Register, so there's no reserved dead space on the left. */
 export function PfPasswordInput(props: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>) {
   const [visible, setVisible] = useState(false);
   return (
@@ -343,14 +419,14 @@ export function PfPasswordInput(props: Omit<React.InputHTMLAttributes<HTMLInputE
         {...props}
         type={visible ? 'text' : 'password'}
         className="pf-input"
-        style={{ width: '100%', fontSize: 14.5, padding: '11px 42px 11px 40px', borderRadius: 12, border: `1.5px solid ${palette.line}`, background: palette.mint50, color: palette.ink, outline: 'none', fontFamily: 'inherit' }}
+        style={{ width: '100%', fontSize: 13.5, padding: '11px 42px 11px 14px', borderRadius: 10, border: `1.5px solid ${palette.slate300}`, background: palette.slate50, color: palette.navy900, outline: 'none', fontFamily: 'inherit' }}
       />
       <button
         type="button"
         onClick={() => setVisible((v) => !v)}
         aria-label={visible ? 'Hide password' : 'Show password'}
         aria-pressed={visible}
-        style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 4, display: 'flex', alignItems: 'center', color: palette.muted, cursor: 'pointer' }}
+        style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 4, display: 'flex', alignItems: 'center', color: palette.slate400, cursor: 'pointer' }}
       >
         {visible ? <EyeOffIcon /> : <EyeIcon />}
       </button>
@@ -359,16 +435,15 @@ export function PfPasswordInput(props: Omit<React.InputHTMLAttributes<HTMLInputE
 }
 
 export function PfButton({
-  portal, children, ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { portal: PortalKey }) {
-  const t = ROLE_THEME[portal];
+  children, ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       {...props}
       className="pf-btn"
       style={{
-        width: '100%', color: '#fff', fontSize: 15, fontWeight: 700, padding: '12px', border: 'none', borderRadius: 12,
-        fontFamily: 'inherit', background: `linear-gradient(135deg, ${t.from}, ${t.to})`, boxShadow: `0 10px 22px -10px ${t.solid}aa`,
+        width: '100%', color: palette.white, fontSize: 14.5, fontWeight: 700, padding: '12px', border: 'none', borderRadius: 10,
+        fontFamily: 'inherit', background: palette.accent, boxShadow: '0 10px 22px -12px rgba(28,57,142,.75)',
       }}
     >
       {children}
@@ -422,6 +497,9 @@ export function ShieldCheckIcon() {
 export function ChartIcon() {
   return <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M1 14V2h1.5v10.5H14V14H1zm2.5-2.5V7H5v4.5H3.5zm3.2 0V4H8v7.5H6.7zm3.3 0v-6h1.5v6H10z"/></svg>;
 }
+export function CompassIcon() {
+  return <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.8" stroke="currentColor" strokeWidth="1.4"/><path d="M10.3 5.7 8.9 8.9l-3.2 1.4 1.4-3.2 3.2-1.4z" fill="currentColor"/></svg>;
+}
 export function CalendarIcon() {
   return <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1h1v1.5h6V1h1v1.5h2A1.5 1.5 0 0 1 15.5 4v9A1.5 1.5 0 0 1 14 14.5H2A1.5 1.5 0 0 1 .5 13V4A1.5 1.5 0 0 1 2 2.5h2V1zM1.5 6v7A.5.5 0 0 0 2 13.5h12a.5.5 0 0 0 .5-.5V6h-13z"/></svg>;
 }
@@ -432,5 +510,5 @@ export function EyeOffIcon() {
   return <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.7-5 7-5c1.4 0 2.6.4 3.7 1M15 8s-2.7 5-7 5c-1.4 0-2.6-.4-3.7-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M6 9.7A2.2 2.2 0 0 1 8 5.8M10 6.3c.5.4.8 1 .8 1.7 0 .3-.05.6-.15.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M1.5 1.5l13 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
 }
 function WarnIcon() {
-  return <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1 15.5 14H.5L8 1zm0 4.5v4M8 11.5h.01" stroke="#8F2323" strokeWidth="1.5" strokeLinecap="round" fill="none"/></svg>;
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1 15.5 14H.5L8 1zm0 4.5v4M8 11.5h.01" stroke="#B91C1C" strokeWidth="1.5" strokeLinecap="round" fill="none"/></svg>;
 }

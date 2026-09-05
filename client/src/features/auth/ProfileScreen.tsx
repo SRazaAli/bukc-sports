@@ -23,8 +23,9 @@ import {
   ProfilePage, ProfileTopBar, ProfileMain, ProfileGrid, ProfileFooter,
   IdentityCard, Panel, LinkBtn, DetailRow, Banner, NotifItem, CountPill,
   StatBox, WarnBanner, StatusPill, DataTable, td, ActivityRow, Muted,
-  PfField, PfInput, PfPasswordInput, PfButton, roleToPortalKey, type PortalKey,
-  BellIcon, IdCardIcon, KeyIcon, ShieldCheckIcon, ChartIcon, CalendarIcon,
+  PfField, PfInput, PfPasswordInput, PfButton, QuickLinkItem, palette,
+  roleToPortalKey, type PortalKey,
+  BellIcon, IdCardIcon, KeyIcon, ChartIcon, CalendarIcon, CompassIcon,
 } from './ProfileUI.js';
 
 function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
@@ -81,12 +82,13 @@ export default function ProfileScreen() {
                 deactivated={account?.status === 'DEACTIVATED'}
               />
               {account && <PersonalDetails account={account} />}
+              <QuickLinks role={user.role} navigate={navigate} />
             </>
           }
         >
           <NotificationInbox onError={setError} />
 
-          <ChangePasswordCard portal={portal} onDone={(m) => { setNotice(m); setError(null); }} onError={(m) => { setError(m); setNotice(null); }} />
+          <ChangePasswordCard onDone={(m) => { setNotice(m); setError(null); }} onError={(m) => { setError(m); setNotice(null); }} />
 
           {user.role === 'STUDENT' && <StudentActivity userId={user.userId} onError={setError} />}
           {user.role === 'EXTERNAL' && <ExternalActivity onError={setError} />}
@@ -170,9 +172,58 @@ function PersonalDetails({ account: a }: { account: ManagedAccount }) {
   return (
     <Panel icon={<IdCardIcon />} title="Personal Details">
       {rows.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)}
-      <p style={{ fontSize: 12, color: '#5C7180', marginTop: 12, marginBottom: 0, lineHeight: 1.5 }}>
+      <p style={{ fontSize: 12, color: palette.slate500, marginTop: 12, marginBottom: 0, lineHeight: 1.5 }}>
         Need to correct any of this? Contact the sports office — these fields aren't self-editable to keep enrollment/institution records reliable.
       </p>
+    </Panel>
+  );
+}
+
+// ── Quick links (role-based shortcuts) ──
+// Fills out the sidebar with real navigation instead of leaving it as just
+// two short cards — the sidebar is otherwise much shorter than the activity
+// column, which is what left that empty gap on the left as you scrolled.
+function QuickLinks({ role, navigate }: { role: string; navigate: (to: string) => void }) {
+  const links: Array<{ label: string; to: string }> =
+    role === 'STUDENT'
+      ? [
+          { label: 'Browse Equipment', to: '/availability' },
+          { label: 'My Borrow Requests', to: '/my-borrows' },
+          { label: 'Book a Venue', to: '/book-venue' },
+          { label: 'Usage History', to: '/usage-history' },
+        ]
+      : role === 'EXTERNAL'
+      ? [
+          { label: 'Book a Venue', to: '/book-venue' },
+          { label: 'Usage History', to: '/usage-history' },
+        ]
+      : role === 'COORDINATOR'
+      ? [
+          { label: 'Dashboard', to: '/dashboard' },
+          { label: 'Borrow Queue', to: '/borrow-queue' },
+          { label: 'Venue Queue', to: '/venue-queue' },
+          { label: 'Equipment Alerts', to: '/equipment-alerts' },
+          { label: 'Manage Accounts', to: '/admin/accounts' },
+          { label: 'Inventory', to: '/inventory' },
+          { label: 'Usage History', to: '/usage-history' },
+        ]
+      : [
+          { label: 'Dashboard', to: '/dashboard' },
+          { label: 'Manage Accounts', to: '/admin/accounts' },
+          { label: 'Inventory', to: '/inventory' },
+          { label: 'Active Borrows', to: '/active-borrows' },
+          { label: 'Venue Approvals', to: '/venue-approvals' },
+          { label: 'Conflict Detection', to: '/conflict-detection' },
+          { label: 'Usage History', to: '/usage-history' },
+        ];
+
+  return (
+    <Panel icon={<CompassIcon />} title="Quick Links">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {links.map((l) => (
+          <QuickLinkItem key={l.to} label={l.label} onClick={() => navigate(l.to)} />
+        ))}
+      </div>
     </Panel>
   );
 }
@@ -181,7 +232,7 @@ function PersonalDetails({ account: a }: { account: ManagedAccount }) {
 // AUTH-17, two-step: fill current+new+confirm, submit sends an OTP to your
 // email (step-up confirmation, GitHub-"Verify via email"-style); entering
 // that code actually applies the change.
-function ChangePasswordCard({ portal, onDone, onError }: { portal: PortalKey; onDone: (m: string) => void; onError: (m: string) => void }) {
+function ChangePasswordCard({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
   const [step, setStep] = useState<'form' | 'code'>('form');
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -221,26 +272,26 @@ function ChangePasswordCard({ portal, onDone, onError }: { portal: PortalKey; on
     <Panel icon={<KeyIcon />} title="Change Password">
       {step === 'form' ? (
         <form onSubmit={onSubmitForm} noValidate style={{ maxWidth: 400 }}>
-          <PfField label="Current password:" icon={<KeyIcon />}>
+          <PfField label="Current password:">
             <PfPasswordInput value={current} onChange={(e) => setCurrent(e.target.value)} required />
           </PfField>
-          <PfField label="New password:" icon={<KeyIcon />}>
+          <PfField label="New password:">
             <PfPasswordInput value={next} onChange={(e) => setNext(e.target.value)} required />
           </PfField>
-          <PfField label="Confirm new password:" icon={<ShieldCheckIcon />}>
+          <PfField label="Confirm new password:">
             <PfPasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
           </PfField>
-          <PfButton portal={portal} type="submit" disabled={loading}>{loading ? 'Sending code…' : 'Send Confirmation Code'}</PfButton>
+          <PfButton type="submit" disabled={loading}>{loading ? 'Sending code…' : 'Send Confirmation Code'}</PfButton>
         </form>
       ) : (
         <form onSubmit={onSubmitCode} noValidate style={{ maxWidth: 400 }}>
           <Muted>We emailed an 8-digit code to confirm this change. It expires in 15 minutes.</Muted>
           <div style={{ height: 12 }} />
-          <PfField label="Confirmation code:" icon={<ShieldCheckIcon />}>
+          <PfField label="Confirmation code:">
             <PfInput placeholder="XXXXXXXX" inputMode="numeric" maxLength={8} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} required />
           </PfField>
           <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-            <PfButton portal={portal} type="submit" disabled={loading}>{loading ? 'Confirming…' : 'Confirm Change'}</PfButton>
+            <PfButton type="submit" disabled={loading}>{loading ? 'Confirming…' : 'Confirm Change'}</PfButton>
             <LinkBtn type="button" onClick={() => setStep('form')}>Back</LinkBtn>
           </div>
         </form>
