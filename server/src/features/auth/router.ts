@@ -135,12 +135,22 @@ authRouter.delete('/admin/coordinator-invites/:id', requireAuth, requireRole('SU
 }));
 
 // ── Super Admin: Active Accounts tab — list + search across roles ──
-// AUTH-16: Coordinator has read-only access to all user profiles — so these
-// two GET routes allow COORDINATOR too, while every mutation below (verify,
-// deactivate, reactivate, delete, reject, invite) and the pending queue stay
-// SUPER_ADMIN-only.
+// AUTH-16: Coordinator has read-only access to all user profiles — but
+// "all" here means every Student/External account they'd deal with day to
+// day, not other Coordinators or the Super Admin. So a Coordinator caller's
+// role filter is clamped to STUDENT/EXTERNAL server-side (defense in depth
+// — the UI already only offers those two filter chips to a Coordinator).
+// Super Admin is unrestricted, with the requested filter applied as-is.
+const COORDINATOR_VISIBLE_ROLES: UserRole[] = ['STUDENT', 'EXTERNAL'];
+function resolveRoleFilter(callerRole: UserRole, requestedRole: UserRole | undefined): UserRole | UserRole[] | undefined {
+  if (callerRole !== 'COORDINATOR') return requestedRole;
+  if (requestedRole && COORDINATOR_VISIBLE_ROLES.includes(requestedRole)) return requestedRole;
+  return COORDINATOR_VISIBLE_ROLES;
+}
+
 authRouter.get('/admin/accounts', requireAuth, requireRole('SUPER_ADMIN', 'COORDINATOR'), asyncHandler(async (req, res) => {
-  const role = req.query.role as UserRole | undefined;
+  const requestedRole = req.query.role as UserRole | undefined;
+  const role = resolveRoleFilter(req.user!.role, requestedRole);
   res.json({ accounts: await svc.listActiveAccounts(role) });
 }));
 
@@ -150,7 +160,8 @@ authRouter.get('/admin/accounts/search', requireAuth, requireRole('SUPER_ADMIN',
     role: req.query.role || undefined,
     limit: req.query.limit ? Number(req.query.limit) : undefined,
   });
-  res.json({ accounts: await svc.searchAccounts(input.q, input.role, input.limit ?? 10) });
+  const role = resolveRoleFilter(req.user!.role, input.role);
+  res.json({ accounts: await svc.searchAccounts(input.q, role, input.limit ?? 10) });
 }));
 
 authRouter.post('/admin/verify', requireAuth, requireRole('SUPER_ADMIN'), asyncHandler(async (req, res) => {
