@@ -19,10 +19,27 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
-import { palette } from '../auth/AuthUI.js';
 import { ApiRequestError } from '../../lib/api.js';
 import * as offlineApi from './api.js';
 import type { AuditEntry } from './api.js';
+
+/* ---------- theme (identical values to LandingScreen/HomeScreen/ProfileUI/
+   UsageHistoryScreen/AdminAccountsScreen `palette`) ---------- */
+const palette = {
+  navy900: '#0F172B',
+  navy800: '#132357',
+  navyDeep: '#031636',
+  slate600: '#132357',
+  slate500: '#62748E',
+  slate400: '#90A1B9',
+  slate300: '#CAD5E2',
+  slate100: '#E2E8F0',
+  slate50: '#F8FAFC',
+  white: '#FFFFFF',
+  accent: '#1C398E',
+  accentSoft: '#DBEAFE',
+  accentWash: '#1C398E14',
+};
 
 type TxnKind      = 'BOOKING' | 'BORROW' | 'RETURN';
 type BorrowerKind = 'REGISTERED' | 'GUEST';
@@ -452,9 +469,9 @@ function toIso(local: string): string {
 }
 
 function kindBadgeColor(k: string): React.CSSProperties {
-  if (k === 'BOOKING') return { background: '#e4edf6', color: '#0e5da8' };
-  if (k === 'BORROW')  return { background: '#DFF0E8', color: GREEN_DARK };
-  return { background: '#fdf1de', color: '#a5610f' };
+  if (k === 'BOOKING') return { background: '#E3F2FF', color: '#1565C0' };
+  if (k === 'BORROW')  return { background: '#E6F4EC', color: '#1F7A45' };
+  return { background: '#FDF1E3', color: AMBER };
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -488,13 +505,14 @@ function Shell({ onBack, onSignOut, children }: { onBack: () => void; onSignOut:
       <style>{OFL_CSS}</style>
       <div className="ofl-blob ofl-blob-a" aria-hidden />
       <div className="ofl-blob ofl-blob-b" aria-hidden />
-      <div className="ofl-blob ofl-blob-c" aria-hidden />
-      <div className="ofl-blob ofl-blob-d" aria-hidden />
 
       <header style={topbar}>
         <div style={brandRow}>
-          <span style={crest}>BU</span>
-          <span style={wordmark}>Bahria University</span>
+          <img src="/landing/bu_logo.png" alt="Bahria University" style={crest} />
+          <div>
+            <div style={wordmark}>Bahria University</div>
+            <div style={wordmarkSub}>Sports Management Portal</div>
+          </div>
         </div>
         <div style={headerActions}>
           <button type="button" className="ofl-back-btn" style={backBtn} onClick={onBack}>
@@ -506,12 +524,20 @@ function Shell({ onBack, onSignOut, children }: { onBack: () => void; onSignOut:
         </div>
       </header>
 
-      <div style={titleBand}>
-        <span style={eyebrow}>Staff Tools</span>
-        <h1 style={pageTitle}>Offline Fallback Entry</h1>
-      </div>
-
-      <main style={main}>{children}</main>
+      <main style={main}>
+        {/* Frosted glassmorphism shell around everything below the header —
+            title, banner, forms, and audit log all sit inside this one
+            translucent panel so the whole screen reads as a single surface
+            floating over the dark page (same treatment as Usage History
+            and the Accounts screen). */}
+        <div className="ofl-glass" style={glassPanel}>
+          <div style={titleBand}>
+            <span style={eyebrow}>Staff Tools</span>
+            <h1 style={pageTitle}>Offline Fallback Entry</h1>
+          </div>
+          {children}
+        </div>
+      </main>
 
       <footer style={footer}>
         2026 © <a href="/" style={footerLink}>Bahria University</a>
@@ -522,19 +548,15 @@ function Shell({ onBack, onSignOut, children }: { onBack: () => void; onSignOut:
 
 /* ————————————————————————————————— Inline glyphs ————————————————————————————————— */
 
-const GREEN = '#498473';
-const GREEN_DARK = '#356255';
-const NAVY = '#0B3754';
-const MINT = '#DFF0E8';
-const SKY = '#E4EDF6';
-const PAPER = '#EFF9F5';
-const AMBER = '#a5610f';
+const GREEN = palette.accent;
+const NAVY = palette.navy900;
+const MINT = palette.accentWash;
+const AMBER = '#9A6412';
 
 function BackGlyph() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-      <path d="M9.5 3 4 8l5.5 5" stroke={GREEN_DARK} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8H13" stroke={GREEN_DARK} strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M9.5 3 4 8l5.5 5M4.5 8H14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -549,7 +571,7 @@ function SignOutGlyph() {
 function InfoGlyph() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="12" r="10" fill="#fdf1de" stroke={AMBER} strokeWidth="1.6" />
+      <circle cx="12" cy="12" r="10" fill="#FDF1E3" stroke={AMBER} strokeWidth="1.6" />
       <path d="M12 11v5.5" stroke={AMBER} strokeWidth="1.8" strokeLinecap="round" />
       <circle cx="12" cy="7.7" r="1.05" fill={AMBER} />
     </svg>
@@ -627,17 +649,17 @@ function AuditGlyph() {
 function AlertGlyph() {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-      <path d="M12 3 2 21h20L12 3Z" fill="#991b1b" fillOpacity="0.14" stroke="#991b1b" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M12 10v5" stroke="#991b1b" strokeWidth="1.8" strokeLinecap="round" />
-      <circle cx="12" cy="17.6" r="1" fill="#991b1b" />
+      <path d="M12 3 2 21h20L12 3Z" fill="#8F2323" fillOpacity="0.14" stroke="#8F2323" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M12 10v5" stroke="#8F2323" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="12" cy="17.6" r="1" fill="#8F2323" />
     </svg>
   );
 }
 function CheckGlyph() {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="10" fill="#166534" fillOpacity="0.14" stroke="#166534" strokeWidth="1.6" />
-      <path d="m7.5 12.5 3 3 6-6.5" stroke="#166534" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="10" fill="#1F7A45" fillOpacity="0.14" stroke="#1F7A45" strokeWidth="1.6" />
+      <path d="m7.5 12.5 3 3 6-6.5" stroke="#1F7A45" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -645,67 +667,67 @@ function CheckGlyph() {
 /* ————————————————————————————————————— CSS (blobs / hover / motion) ————————————————————————————————————— */
 
 const OFL_CSS = `
-@keyframes oflFloatA { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(30px,-24px) scale(1.06); } }
-@keyframes oflFloatB { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-26px,20px) scale(1.08); } }
-@keyframes oflFloatC { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(18px,26px) scale(1.05); } }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @keyframes oflFadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes oflSlideIn { from { opacity: 0; transform: translateY(14px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes oflSpin { to { transform: rotate(360deg); } }
 @keyframes oflRowIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
 
-.ofl-blob { position: fixed; border-radius: 50%; filter: blur(10px); pointer-events: none; z-index: 0; }
-.ofl-blob-a { width: 340px; height: 340px; top: -140px; left: -100px; background: #49847322; animation: oflFloatA 26s ease-in-out infinite; }
-.ofl-blob-b { width: 300px; height: 300px; bottom: -160px; right: -80px; background: #0B375418; animation: oflFloatB 30s ease-in-out infinite; }
-.ofl-blob-c { width: 260px; height: 260px; top: 32%; right: -120px; background: #DFF0E866; animation: oflFloatC 22s ease-in-out infinite; }
-.ofl-blob-d { width: 220px; height: 220px; bottom: 14%; left: 6%; background: #E4EDF677; animation: oflFloatB 24s ease-in-out infinite; }
+.ofl-blob { position: fixed; border-radius: 50%; filter: blur(30px); pointer-events: none; z-index: 0; }
+.ofl-blob-a { width: 420px; height: 420px; top: -160px; left: -140px; background: ${palette.accent}1a; }
+.ofl-blob-b { width: 380px; height: 380px; bottom: -160px; right: -120px; background: ${palette.slate600}22; }
 
 .ofl-fade-in { animation: oflFadeIn 0.45s ease both; }
 .ofl-slide-in { animation: oflSlideIn 0.32s cubic-bezier(0.22,1,0.36,1) both; }
 .ofl-alert { animation: oflFadeIn 0.3s ease both; }
 
 .ofl-back-btn, .ofl-signout-btn { transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
-.ofl-back-btn:hover { background: #DFF0E8; border-color: #498473aa; color: #356255; }
-.ofl-signout-btn:hover { background: #FDECEC; border-color: #F3CACA; color: #8F2323; }
+.ofl-back-btn:hover { background-color: rgba(255,255,255,0.08); border-color: ${palette.slate100}; }
+.ofl-signout-btn:hover { background-color: ${palette.accent} !important; border-color: ${palette.accent} !important; color: #fff !important; }
 
-.ofl-input { transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease; }
-.ofl-input:focus { outline: none; border-color: #498473 !important; box-shadow: 0 0 0 3px rgba(73,132,115,0.16); background: #fff !important; }
-.ofl-input:hover { border-color: #498473aa; }
+.ofl-input { transition: border-color 0.18s ease, box-shadow 0.18s ease; }
+.ofl-input:focus { outline: none; border-color: ${palette.accent} !important; box-shadow: 0 0 0 3px ${palette.accentSoft}; }
+.ofl-input:hover { border-color: ${palette.accent}aa; }
 
-.ofl-seg-wrap { position: relative; display: grid; gap: 6px; background: #eef4f1; border-radius: 12px; padding: 5px; }
+.ofl-seg-wrap { position: relative; display: grid; gap: 6px; background: ${palette.slate100}; border-radius: 12px; padding: 5px; }
 .ofl-seg-thumb {
   position: absolute; top: 5px; left: 5px; bottom: 5px; border-radius: 9px;
-  background: linear-gradient(135deg, #498473, #356255);
-  box-shadow: 0 4px 12px rgba(73,132,115,0.35);
+  background: ${palette.accent};
+  box-shadow: 0 4px 12px rgba(28,57,142,0.35);
   transition: transform 0.28s cubic-bezier(0.22,1,0.36,1);
   z-index: 0;
 }
 .ofl-seg-btn {
   position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
   background: transparent; border: none; cursor: pointer; padding: 9px 10px; border-radius: 9px;
-  font: 700 13px var(--font-body); transition: color 0.2s ease;
+  font: 700 13px 'Inter', sans-serif; transition: color 0.2s ease;
 }
 
 .ofl-submit-btn { transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease; }
-.ofl-submit-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); box-shadow: 0 10px 22px rgba(73,132,115,0.38); }
+.ofl-submit-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.08); box-shadow: 0 14px 28px -12px rgba(28,57,142,.85); }
 .ofl-submit-btn:active:not(:disabled) { transform: translateY(0); }
 .ofl-submit-btn:disabled { opacity: 0.7; cursor: not-allowed; }
 
 .ofl-load-btn { transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease; }
-.ofl-load-btn:hover:not(:disabled) { background: #DFF0E8; border-color: #498473aa; transform: translateY(-1px); }
+.ofl-load-btn:hover:not(:disabled) { background: ${palette.slate50}; border-color: ${palette.accent}aa; transform: translateY(-1px); }
 .ofl-load-btn:disabled { opacity: 0.7; cursor: not-allowed; }
 
 .ofl-audit-row { animation: oflRowIn 0.32s ease both; transition: transform 0.15s ease, box-shadow 0.15s ease; }
-.ofl-audit-row:hover { transform: translateX(2px); box-shadow: 0 4px 14px rgba(11,55,84,0.08); }
+.ofl-audit-row:hover { transform: translateX(2px); box-shadow: 0 4px 14px rgba(3,22,54,0.12); }
 
 .ofl-spin { animation: oflSpin 0.85s linear infinite; }
 
 @media (max-width: 620px) {
   .ofl-seg-wrap { grid-template-columns: 1fr !important; }
   .ofl-seg-thumb { display: none; }
+  .ofl-glass { padding: 20px 14px 26px !important; border-radius: 18px !important; }
 }
 `;
 
 /* ————————————————————————————————————— Style objects ————————————————————————————————————— */
+
+const CARD_BG = 'linear-gradient(145deg, #F8FAFF 0%, #EAF0FC 100%)';
+const CARD_SHADOW = '0 12px 30px -22px rgba(3,22,54,.85)';
 
 const page: React.CSSProperties = {
   minHeight: '100%',
@@ -713,79 +735,92 @@ const page: React.CSSProperties = {
   flexDirection: 'column',
   position: 'relative',
   overflow: 'hidden',
-  background: `radial-gradient(1200px 600px at 10% -10%, ${SKY} 0%, transparent 55%),
-               radial-gradient(1000px 600px at 100% 0%, ${MINT} 0%, transparent 55%),
-               ${PAPER}`,
-  fontFamily: 'var(--font-body)',
+  background: `radial-gradient(1100px 700px at 15% 0%, ${palette.navy800}aa 0%, transparent 60%),
+               radial-gradient(900px 600px at 100% 100%, ${palette.accent}22 0%, transparent 55%),
+               ${palette.navy900}`,
+  fontFamily: "'Inter', system-ui, sans-serif",
 };
 
 const topbar: React.CSSProperties = {
   position: 'relative', zIndex: 2,
   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-  padding: '20px 40px', borderBottom: `1px solid ${palette.line}`,
+  padding: '18px 32px', flexWrap: 'wrap', gap: 12,
 };
-const brandRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10 };
+const brandRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' };
 const crest: React.CSSProperties = {
-  width: 32, height: 32, borderRadius: 9, background: NAVY,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  color: '#fff', fontFamily: 'Poppins, sans-serif', fontWeight: 800, fontSize: 13,
+  width: 40, height: 40, borderRadius: 10, objectFit: 'contain',
+  background: palette.slate50, padding: 4, border: `1px solid ${palette.slate300}`,
 };
-const wordmark: React.CSSProperties = { fontFamily: 'Poppins, sans-serif', fontSize: 18, fontWeight: 600, color: NAVY };
+const wordmark: React.CSSProperties = { fontSize: 16, fontWeight: 700, color: palette.white, lineHeight: 1.2 };
+const wordmarkSub: React.CSSProperties = { fontSize: 12, color: palette.slate400, marginTop: 1 };
 const headerActions: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10 };
 const backBtn: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 7, background: '#fff', color: GREEN_DARK,
-  border: `1.5px solid ${palette.line}`, borderRadius: 999, padding: '8px 16px', fontSize: 13.5, fontWeight: 700,
+  display: 'inline-flex', alignItems: 'center', gap: 7, background: 'transparent', color: palette.slate100,
+  border: `1.5px solid ${palette.slate400}`, borderRadius: 999, padding: '9px 16px', fontSize: 13.5, fontWeight: 700,
   cursor: 'pointer', fontFamily: 'inherit',
 };
 const signOutBtn: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 7, background: '#fff', color: palette.muted,
-  border: `1.5px solid ${palette.line}`, borderRadius: 999, padding: '8px 16px', fontSize: 13.5, fontWeight: 700,
+  display: 'inline-flex', alignItems: 'center', gap: 7, background: 'transparent', color: palette.slate100,
+  border: `1.5px solid ${palette.slate400}`, borderRadius: 999, padding: '9px 16px', fontSize: 13.5, fontWeight: 700,
   cursor: 'pointer', fontFamily: 'inherit',
 };
 
-const titleBand: React.CSSProperties = { position: 'relative', zIndex: 2, textAlign: 'center', padding: '30px 24px 14px' };
+const titleBand: React.CSSProperties = { position: 'relative', textAlign: 'center', marginBottom: 22 };
 const eyebrow: React.CSSProperties = {
   display: 'inline-block', fontSize: 11.5, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase',
-  color: GREEN_DARK, background: 'rgba(73,132,115,0.12)', padding: '4px 12px', borderRadius: 999, marginBottom: 10,
+  color: palette.slate100, background: `${palette.navy800}88`, border: `1px solid ${palette.slate400}55`,
+  padding: '6px 14px', borderRadius: 999, marginBottom: 12,
 };
 const pageTitle: React.CSSProperties = {
-  margin: 0, fontSize: 32, fontWeight: 800, color: NAVY, letterSpacing: '-0.01em',
-  fontFamily: 'var(--font-display, "Segoe UI"), system-ui, sans-serif',
+  margin: 0, fontSize: 32, fontWeight: 800, color: palette.white, letterSpacing: '-0.02em',
 };
 
-const main: React.CSSProperties = { position: 'relative', zIndex: 2, flex: 1, padding: '28px 24px 56px' };
+const main: React.CSSProperties = { position: 'relative', zIndex: 1, flex: 1, padding: '20px 24px 56px', width: '100%', maxWidth: 1040, margin: '0 auto', boxSizing: 'border-box' };
 
 const footer: React.CSSProperties = {
-  position: 'relative', zIndex: 2, textAlign: 'center', padding: '16px 24px', fontSize: 13, color: '#3d5b52',
-  borderTop: '1px solid rgba(73,132,115,0.2)',
+  position: 'relative', zIndex: 1, textAlign: 'center', padding: '20px 24px', fontSize: 12.5, color: palette.slate400,
+  borderTop: `1px solid ${palette.slate600}55`,
 };
-const footerLink: React.CSSProperties = { color: GREEN_DARK, textDecoration: 'none', fontWeight: 600 };
+const footerLink: React.CSSProperties = { color: palette.accentSoft, textDecoration: 'none', fontWeight: 600 };
 
-const wrap: React.CSSProperties = { maxWidth: 760, margin: '0 auto' };
+/* Cards fill the full width of the glass panel (which is already capped at
+   the app-standard 1040px via `main`) instead of being capped again here —
+   a second, tighter cap was leaving a visible gutter between the card
+   edges and the glass panel's own edges. */
+const wrap: React.CSSProperties = { width: '100%' };
+
+/* Frosted glassmorphism shell around the whole form + audit log — the
+   individual sections below are solid white cards (CARD_BG) that sit on
+   top of this translucent panel, same two-layer look as Usage History and
+   the Accounts screen. */
+const glassPanel: React.CSSProperties = {
+  position: 'relative', background: 'rgba(255,255,255,0.07)',
+  backdropFilter: 'blur(22px) saturate(160%)', WebkitBackdropFilter: 'blur(22px) saturate(160%)',
+  border: '1px solid rgba(255,255,255,0.16)', borderRadius: 24,
+  padding: '28px 24px 32px',
+  boxShadow: '0 24px 60px -32px rgba(3,22,54,0.75), inset 0 1px 0 rgba(255,255,255,0.10)',
+};
 
 const glassCard: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.74)',
-  backdropFilter: 'blur(14px)',
-  WebkitBackdropFilter: 'blur(14px)',
-  border: '1px solid rgba(255,255,255,0.6)',
-  borderRadius: 18,
-  boxShadow: '0 8px 30px rgba(11,55,84,0.08)',
+  background: CARD_BG,
+  border: `1px solid ${palette.slate300}e6`,
+  borderRadius: 16,
+  boxShadow: CARD_SHADOW,
   overflow: 'hidden',
 };
 const sectionPad: React.CSSProperties = { padding: '20px 24px 22px' };
 
 const banner: React.CSSProperties = {
   display: 'flex', gap: 14, alignItems: 'flex-start',
-  background: 'rgba(253,241,222,0.85)', border: '1px solid #e8b26a',
+  background: '#FDF1E3', border: `1px solid ${AMBER}55`,
   borderRadius: 16, padding: '16px 20px', marginBottom: 20,
-  backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
 };
 const bannerIconWrap: React.CSSProperties = { flexShrink: 0, marginTop: 1 };
 const bannerTitle: React.CSSProperties = { color: AMBER, fontSize: 14, fontWeight: 800 };
-const bannerText: React.CSSProperties = { margin: '6px 0 0', fontSize: 13, lineHeight: 1.65, color: '#7a4c17' };
+const bannerText: React.CSSProperties = { margin: '6px 0 0', fontSize: 13, lineHeight: 1.65, color: '#7A4C17' };
 
 const sectionLabel: React.CSSProperties = {
-  display: 'block', fontWeight: 800, fontSize: 12, color: NAVY, marginBottom: 10,
+  display: 'block', fontWeight: 800, fontSize: 12, color: palette.navy900, marginBottom: 10,
   textTransform: 'uppercase', letterSpacing: '0.04em',
 };
 const segWrap: React.CSSProperties = { display: 'grid' };
@@ -796,24 +831,24 @@ const sectionHeadingIcon: React.CSSProperties = {
   width: 30, height: 30, borderRadius: 9, background: MINT,
   display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
 };
-const sectionHeadingTitle: React.CSSProperties = { margin: 0, fontSize: 15.5, fontWeight: 800, color: NAVY };
+const sectionHeadingTitle: React.CSSProperties = { margin: 0, fontSize: 15.5, fontWeight: 800, color: palette.navy900 };
 
-const fieldLabel: React.CSSProperties = { display: 'block', fontWeight: 700, fontSize: 13, color: '#1a2b33', marginBottom: 6 };
-const fieldHint: React.CSSProperties = { margin: '0 0 6px', fontSize: 11.5, color: '#7c8a90' };
+const fieldLabel: React.CSSProperties = { display: 'block', fontWeight: 700, fontSize: 13, color: palette.navy900, marginBottom: 6 };
+const fieldHint: React.CSSProperties = { margin: '0 0 6px', fontSize: 11.5, color: palette.slate500 };
 const inp: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', fontSize: 14, padding: '10px 13px',
-  border: '1.5px solid rgba(11,55,84,0.14)', borderRadius: 10, background: 'rgba(255,255,255,0.7)',
-  color: '#1a2b33', outline: 'none', fontFamily: 'inherit',
+  border: `1.5px solid ${palette.slate300}`, borderRadius: 10, background: palette.slate50,
+  color: palette.navy900, outline: 'none', fontFamily: 'inherit',
 };
 const twoCol: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 };
 
-const hintText: React.CSSProperties = { marginTop: 14, fontSize: 12, color: '#5c6f75', lineHeight: 1.7, textAlign: 'center' };
+const hintText: React.CSSProperties = { marginTop: 14, fontSize: 12, color: palette.slate300, lineHeight: 1.7, textAlign: 'center' };
 
 const submitBtn: React.CSSProperties = {
   width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
-  background: `linear-gradient(135deg, ${GREEN}, ${GREEN_DARK})`, color: '#fff', border: 'none',
+  background: palette.accent, color: '#fff', border: 'none',
   borderRadius: 12, padding: '13px', fontSize: 15, fontWeight: 800, cursor: 'pointer',
-  boxShadow: '0 6px 18px rgba(73,132,115,0.32)', fontFamily: 'inherit',
+  boxShadow: '0 10px 22px -12px rgba(28,57,142,.75)', fontFamily: 'inherit',
 };
 const btnSpinner: React.CSSProperties = {
   width: 15, height: 15, borderRadius: '50%', border: '2.5px solid rgba(255,255,255,0.4)',
@@ -821,9 +856,9 @@ const btnSpinner: React.CSSProperties = {
 };
 
 const panelHead: React.CSSProperties = {
-  padding: '14px 22px', borderBottom: '1px solid rgba(11,55,84,0.08)',
-  font: '700 14.5px var(--font-body)', color: NAVY,
-  background: 'linear-gradient(180deg, rgba(255,255,255,0.9), rgba(239,249,245,0.5))',
+  padding: '14px 22px', borderBottom: `1px solid ${palette.slate300}`,
+  font: '700 14.5px Inter, sans-serif', color: palette.navy900,
+  background: palette.white,
   display: 'flex', alignItems: 'center', gap: 10,
 };
 const panelHeadIcon: React.CSSProperties = {
@@ -833,40 +868,40 @@ const panelHeadIcon: React.CSSProperties = {
 const panelBody: React.CSSProperties = { padding: '16px 22px 20px' };
 const loadBtn: React.CSSProperties = {
   marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 7,
-  padding: '7px 14px', border: '1.5px solid rgba(11,55,84,0.16)', borderRadius: 9,
-  background: '#fff', color: NAVY, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
+  padding: '7px 14px', border: `1.5px solid ${palette.slate300}`, borderRadius: 9,
+  background: palette.white, color: palette.navy900, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
 };
 const loadSpinner: React.CSSProperties = {
   width: 12, height: 12, borderRadius: '50%', border: `2px solid ${MINT}`,
   borderTopColor: GREEN, display: 'inline-block',
 };
-const muted: React.CSSProperties = { color: '#7c8a90', fontSize: 13.5, margin: 0 };
+const muted: React.CSSProperties = { color: palette.slate500, fontSize: 13.5, margin: 0 };
 
 const auditList: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8 };
 const auditRow: React.CSSProperties = {
   display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14,
-  background: '#fff', border: '1px solid rgba(11,55,84,0.07)', borderRadius: 12,
-  padding: '10px 14px', boxShadow: '0 2px 8px rgba(11,55,84,0.04)',
+  background: palette.white, border: `1px solid ${palette.slate100}`, borderRadius: 12,
+  padding: '10px 14px', boxShadow: '0 2px 8px rgba(3,22,54,0.06)',
 };
 const kindBadge: React.CSSProperties = {
   display: 'inline-block', padding: '3px 9px', borderRadius: 999, fontSize: 10.5, fontWeight: 800,
-  fontFamily: 'var(--font-mono)', letterSpacing: '0.03em', flexShrink: 0,
+  fontFamily: 'ui-monospace, "JetBrains Mono", monospace', letterSpacing: '0.03em', flexShrink: 0,
 };
 const auditMain: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 130 };
-const auditWho: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: '#1a2b33' };
-const auditRole: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: '#8a949f', textTransform: 'uppercase', letterSpacing: '0.03em' };
-const auditWhen: React.CSSProperties = { fontSize: 12, color: '#5c6f75', fontFamily: 'var(--font-mono)', minWidth: 140 };
-const auditNote: React.CSSProperties = { fontSize: 12, color: '#8a949f', flex: 1, minWidth: 100 };
+const auditWho: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: palette.navy900 };
+const auditRole: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: palette.slate500, textTransform: 'uppercase', letterSpacing: '0.03em' };
+const auditWhen: React.CSSProperties = { fontSize: 12, color: palette.slate500, fontFamily: 'ui-monospace, "JetBrains Mono", monospace', minWidth: 140 };
+const auditNote: React.CSSProperties = { fontSize: 12, color: palette.slate500, flex: 1, minWidth: 100 };
 
 const box = {
   err: {
     display: 'flex', alignItems: 'center', gap: 9,
-    background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 12, padding: '11px 16px',
-    color: '#991b1b', marginBottom: 14, fontSize: 13.5, fontWeight: 600,
+    background: '#FDECEC', border: '1px solid #F3CACA', borderRadius: 12, padding: '11px 16px',
+    color: '#8F2323', marginBottom: 14, fontSize: 13.5, fontWeight: 600,
   } as React.CSSProperties,
   ok: {
     display: 'flex', alignItems: 'center', gap: 9,
-    background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 12, padding: '11px 16px',
-    color: '#166534', marginBottom: 14, fontSize: 13.5, fontWeight: 600,
+    background: '#E6F4EC', border: '1px solid #1F7A4555', borderRadius: 12, padding: '11px 16px',
+    color: '#1F7A45', marginBottom: 14, fontSize: 13.5, fontWeight: 600,
   } as React.CSSProperties,
 };
