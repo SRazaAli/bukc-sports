@@ -15,12 +15,18 @@
  *     Full Name/Email/Contact plus role-specific fields, matched text
  *     highlighted. Clicking a row opens the full registration detail.
  *
- * Visual design v2: brand-kit backdrop (mint/sky gradient + blobs, Poppins/
- * Inter type, role-tinted accents) plus real interaction upgrades — a live
- * animated stat strip, role pills that double as filters, a list/grid view
- * toggle, skeleton loading states, hover-revealed copy-to-clipboard and
- * quick-view affordances, and a sticky glass nav with Back/Sign out. Frontend
- * only — no API/route/logic changes.
+ * Re-themed to match the site's actual current visual language (Landing /
+ * Home / Register / Profile / Usage History): dark navy page (#0F172B) with
+ * two soft glow blobs, white/soft-gradient content cards, navy900 headings,
+ * slate500/600 body text, Inter type, and a single accent blue (#1C398E)
+ * for page chrome (buttons, tabs, links). Per-role Avatar/RoleBadge colors
+ * are kept as small informational badges (like the Kind/Outcome badges on
+ * Usage History) so rows stay easy to scan by role — that's a data-display
+ * convention, not the old per-role page tinting. Live animated stat strip,
+ * role pills that double as filters, a list/grid view toggle, skeleton
+ * loading states, hover-revealed copy-to-clipboard and quick-view
+ * affordances, and a sticky glass nav with Back/Sign out are unchanged.
+ * Frontend only — no API/route/logic changes.
  */
 import { useEffect, useState, useCallback, useRef, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -30,25 +36,41 @@ import {
   type PendingAccount, type ManagedAccount, type CoordinatorInviteRecord,
 } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
-import { LabeledInput, PersonIcon } from './PortalShell.js';
-import { palette, ROLE_THEME, type PortalKey } from './AuthUI.js';
 import { useAuth } from '../../lib/auth.js';
+
+/* ---------- theme (identical values to LandingScreen/HomeScreen/ProfileUI/UsageHistoryScreen `palette`) ---------- */
+const palette = {
+  navy900: '#0F172B',
+  navy800: '#132357',
+  navyDeep: '#031636',
+  slate600: '#132357',
+  slate500: '#62748E',
+  slate400: '#90A1B9',
+  slate300: '#CAD5E2',
+  slate100: '#E2E8F0',
+  slate50: '#F8FAFC',
+  white: '#FFFFFF',
+  accent: '#1C398E',
+  accentSoft: '#DBEAFE',
+  accentWash: '#1C398E14',
+};
 
 type Tab = 'pending' | 'active';
 type ViewMode = 'list' | 'grid';
 
 function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
 
-// Map each account role onto the same brand palette used for the four
-// landing-page portal tiles, so a role reads consistently everywhere.
-const ROLE_PORTAL_KEY: Partial<Record<string, PortalKey>> = {
-  STUDENT: 'student',
-  EXTERNAL: 'external',
-  COORDINATOR: 'coordinator',
-  SUPER_ADMIN: 'admin',
+// Small per-role badge colors — informational only (distinguishing rows by
+// role at a glance), same convention as the Kind/Outcome badges on Usage
+// History. Not page-chrome theming, which is a single accent everywhere.
+const ROLE_BADGE: Record<string, { solid: string; soft: string; from: string; to: string }> = {
+  STUDENT: { solid: '#1F7A45', soft: '#E6F4EC', from: '#2FA968', to: '#1F7A45' },
+  EXTERNAL: { solid: '#1565C0', soft: '#E3F2FF', from: '#3B87DB', to: '#1565C0' },
+  COORDINATOR: { solid: '#6B21A8', soft: '#F3E8FF', from: '#8E44C9', to: '#6B21A8' },
+  SUPER_ADMIN: { solid: palette.accent, soft: palette.accentWash, from: palette.navy800, to: palette.accent },
 };
 function roleTheme(role: string) {
-  return ROLE_THEME[ROLE_PORTAL_KEY[role] ?? 'coordinator'];
+  return ROLE_BADGE[role] ?? ROLE_BADGE.COORDINATOR!;
 }
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -82,7 +104,6 @@ export default function AdminAccountsScreen() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
-  const theme = roleTheme(user?.role ?? 'COORDINATOR');
   const [tab, setTab] = useState<Tab>('pending');
   const [pending, setPending] = useState<PendingAccount[] | null>(null);
   const [selected, setSelected] = useState<PendingAccount | null>(null);
@@ -132,8 +153,11 @@ export default function AdminAccountsScreen() {
 
       <header style={s.topbar}>
         <div style={s.brand}>
-          <span style={{ ...s.logoMark, background: theme.solid }}>BU</span>
-          <span style={s.wordmark}>Bahria University</span>
+          <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
+          <div>
+            <div style={s.wordmark}>Bahria University</div>
+            <div style={s.wordmarkSub}>Sports Management Portal</div>
+          </div>
         </div>
         <div style={s.topbarRight}>
           <Link to="/home" className="hist-topbtn" style={s.topBtn}><BackIcon /> Back</Link>
@@ -143,52 +167,53 @@ export default function AdminAccountsScreen() {
         </div>
       </header>
 
-      <div style={s.hero}>
-        <span style={{ ...s.heroEyebrow, color: isSuperAdmin ? palette.navy : palette.teal, background: isSuperAdmin ? palette.sky100 : palette.mint100 }}>
-          {isSuperAdmin ? <ShieldIcon /> : <EyeIcon />}
-          {isSuperAdmin ? 'Administration Staff' : 'Read-only Access'}
-        </span>
-        <h1 style={s.heroTitle}>Accounts</h1>
-        <p style={s.heroSubtitle}>
-          {isSuperAdmin
-            ? 'Review new registrations and manage every account across the platform.'
-            : 'Browse every verified account across the platform. You can search and open a profile, but not make changes here.'}
-        </p>
-      </div>
-
       <main style={s.main}>
-        {isSuperAdmin && (
-          <div style={s.tabRow} role="tablist">
-            {(['pending', 'active'] as Tab[]).map((t) => (
-              <button key={t} role="tab" aria-selected={tab === t} className="acc-tab"
-                onClick={() => { setTab(t); setError(null); setNotice(null); setSelected(null); }}
-                style={{ ...s.tabBtn, ...(tab === t ? s.tabActive : null) }}>
-                {t === 'pending' ? 'Pending Verification' : 'Active Accounts'}
-                {t === 'pending' && pending && pending.length > 0 && (
-                  <span style={s.tabCount}>{pending.length}</span>
-                )}
-              </button>
-            ))}
+        <div className="acc-glass" style={s.glassPanel}>
+          <div style={s.hero}>
+            <span style={s.heroEyebrow}>
+              {isSuperAdmin ? <ShieldIcon /> : <EyeIcon />}
+              {isSuperAdmin ? 'Administration Staff' : 'Read-only Access'}
+            </span>
+            <h1 style={s.heroTitle}>Accounts</h1>
+            <p style={s.heroSubtitle}>
+              {isSuperAdmin
+                ? 'Review new registrations and manage every account across the platform.'
+                : 'Browse every verified account across the platform. You can search and open a profile, but not make changes here.'}
+            </p>
           </div>
-        )}
 
-        {error && <div className="acc-toast" style={s.banner.error}><AlertIcon /> {error}</div>}
-        {notice && <div className="acc-toast" style={s.banner.ok}><CheckIcon /> {notice}</div>}
+          {isSuperAdmin && (
+            <div style={s.tabRow} role="tablist">
+              {(['pending', 'active'] as Tab[]).map((t) => (
+                <button key={t} role="tab" aria-selected={tab === t} className="acc-tab"
+                  onClick={() => { setTab(t); setError(null); setNotice(null); setSelected(null); }}
+                  style={{ ...s.tabBtn, ...(tab === t ? s.tabActive : null) }}>
+                  {t === 'pending' ? 'Pending Verification' : 'Active Accounts'}
+                  {t === 'pending' && pending && pending.length > 0 && (
+                    <span style={s.tabCount}>{pending.length}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
 
-        {isSuperAdmin && tab === 'pending' ? (
-          selected ? (
-            <ReviewPanel
-              account={selected}
-              onBack={() => setSelected(null)}
-              onAccept={() => onAccept(selected)}
-              onReject={(reason) => onReject(selected, reason)}
-            />
-          ) : (
-            <>
-              <Panel title="Pending Verification" icon={<QueueIcon />}>
-                {pending === null ? (
-                  <SkeletonRows rows={3} />
-                ) : pending.length === 0 ? (
+          {error && <div className="acc-toast" style={s.banner.error}><AlertIcon /> {error}</div>}
+          {notice && <div className="acc-toast" style={s.banner.ok}><CheckIcon /> {notice}</div>}
+
+          {isSuperAdmin && tab === 'pending' ? (
+            selected ? (
+              <ReviewPanel
+                account={selected}
+                onBack={() => setSelected(null)}
+                onAccept={() => onAccept(selected)}
+                onReject={(reason) => onReject(selected, reason)}
+              />
+            ) : (
+              <>
+                <Panel title="Pending Verification" icon={<QueueIcon />}>
+                  {pending === null ? (
+                    <SkeletonRows rows={3} />
+                  ) : pending.length === 0 ? (
                   <EmptyState icon={<CheckIcon />} text="No accounts are awaiting verification. New registrations appear here." />
                 ) : (
                   <div style={s.tableWrap}>
@@ -228,6 +253,7 @@ export default function AdminAccountsScreen() {
         ) : (
           <ActiveAccountsTab onError={setError} onNotice={setNotice} readOnly={!isSuperAdmin} />
         )}
+        </div>
       </main>
 
       <footer style={s.footer}>
@@ -240,13 +266,13 @@ export default function AdminAccountsScreen() {
 function AccStyles() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
-      .acc-ui { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; }
-      .acc-ui h1 { font-family: 'Poppins', 'Segoe UI', system-ui, sans-serif; }
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+      .acc-ui { font-family: 'Inter', system-ui, sans-serif; }
+      .acc-ui * { box-sizing: border-box; }
       .acc-card { animation: accFadeUp .45s ease both; }
       @keyframes accFadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
       .acc-row { transition: background-color .15s ease; cursor: pointer; }
-      .acc-row:hover { background: ${palette.mint50}; }
+      .acc-row:hover { background: ${palette.slate50}; }
       .acc-row-anim { opacity: 0; animation: accRowIn .35s ease forwards; }
       @keyframes accRowIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
       .acc-tab { transition: background-color .15s ease, color .15s ease, box-shadow .15s ease; }
@@ -254,7 +280,7 @@ function AccStyles() {
       .acc-btn:hover { transform: translateY(-1px); filter: brightness(1.04); }
       .acc-btn:active { transform: translateY(0); }
       .acc-input { transition: border-color .15s ease, box-shadow .15s ease; }
-      .acc-input:focus, .acc-select:focus { outline: none; border-color: ${palette.teal}; box-shadow: 0 0 0 4px rgba(73,132,115,0.15); }
+      .acc-input:focus, .acc-select:focus { outline: none; border-color: ${palette.accent} !important; box-shadow: 0 0 0 4px ${palette.accentSoft}; }
       .acc-modal-anim { animation: accPop .2s ease both; }
       @keyframes accPop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
       .acc-toast { animation: accToast .3s ease both; }
@@ -262,12 +288,12 @@ function AccStyles() {
       .acc-reveal { opacity: 0; transform: translateX(-4px); transition: opacity .15s ease, transform .15s ease; }
       .acc-row:hover .acc-reveal, .acc-card-tile:hover .acc-reveal { opacity: 1; transform: translateX(0); }
       .acc-card-tile { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; cursor: pointer; }
-      .acc-card-tile:hover { transform: translateY(-3px); box-shadow: 0 18px 34px -18px rgba(11,55,84,0.35); border-color: transparent; }
+      .acc-card-tile:hover { transform: translateY(-3px); box-shadow: 0 18px 34px -18px rgba(3,22,54,0.55); border-color: transparent; }
       .acc-chip { transition: background-color .15s ease, color .15s ease, border-color .15s ease, transform .1s ease; }
       .acc-chip:hover { transform: translateY(-1px); }
       .acc-stat { transition: transform .18s ease, box-shadow .18s ease; }
-      .acc-stat:hover { transform: translateY(-2px); box-shadow: 0 14px 26px -16px rgba(11,55,84,0.3); }
-      .acc-skel { position: relative; overflow: hidden; background: ${palette.line}; }
+      .acc-stat:hover { transform: translateY(-2px); box-shadow: 0 14px 26px -16px rgba(3,22,54,0.4); }
+      .acc-skel { position: relative; overflow: hidden; background: ${palette.slate300}; }
       .acc-skel::after {
         content: ''; position: absolute; inset: 0; transform: translateX(-100%);
         background: linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent);
@@ -276,10 +302,14 @@ function AccStyles() {
       @keyframes accShimmer { 100% { transform: translateX(100%); } }
       .acc-avatar-wrap:hover .acc-avatar-img { transform: scale(1.06); }
       .acc-avatar-img { transition: transform .18s ease; }
+      .hist-topbtn { transition: background-color .18s ease, border-color .18s ease, color .18s ease; text-decoration: none; }
+      .hist-topbtn:hover { background-color: rgba(255,255,255,0.08); border-color: ${palette.slate100}; }
+      .hist-signout:hover { background-color: ${palette.accent} !important; border-color: ${palette.accent} !important; color: #fff !important; }
       @media (max-width: 720px) {
         .acc-hide-mobile { display: none !important; }
         .acc-table-wrap { overflow-x: auto; }
         .acc-grid-mq { grid-template-columns: 1fr !important; }
+        .acc-glass { padding: 20px 16px 26px !important; border-radius: 18px !important; }
       }
       @media (prefers-reduced-motion: reduce) {
         .acc-card, .acc-row-anim, .acc-toast, .acc-modal-anim { animation: none !important; opacity: 1 !important; }
@@ -302,14 +332,24 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 const MIN_SEARCH_CHARS = 2;
 const LIVE_LIMIT = 10;
 const FULL_LIMIT = 100;
-const ROLE_FILTERS: Array<{ value: '' | ManagedAccount['role']; label: string }> = [
+// AUTH-16: a Coordinator's read-only access covers Student/External accounts
+// only — not other Coordinators or the Super Admin — so their filter chips
+// leave "Coordinator" out entirely. The server also clamps this server-side
+// (see resolveRoleFilter in the auth router) as defense in depth.
+const ROLE_FILTERS_FULL: Array<{ value: '' | ManagedAccount['role']; label: string }> = [
   { value: '', label: 'All roles' },
   { value: 'STUDENT', label: 'Student' },
   { value: 'EXTERNAL', label: 'External' },
   { value: 'COORDINATOR', label: 'Coordinator' },
 ];
+const ROLE_FILTERS_COORDINATOR_VIEW: Array<{ value: '' | ManagedAccount['role']; label: string }> = [
+  { value: '', label: 'All roles' },
+  { value: 'STUDENT', label: 'Student' },
+  { value: 'EXTERNAL', label: 'External' },
+];
 
 function ActiveAccountsTab({ onError, onNotice, readOnly }: { onError: (m: string) => void; onNotice: (m: string) => void; readOnly: boolean }) {
+  const ROLE_FILTERS = readOnly ? ROLE_FILTERS_COORDINATOR_VIEW : ROLE_FILTERS_FULL;
   const [accounts, setAccounts] = useState<ManagedAccount[] | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'' | ManagedAccount['role']>('');
@@ -367,10 +407,10 @@ function ActiveAccountsTab({ onError, onNotice, readOnly }: { onError: (m: strin
   return (
     <Panel title="Active Accounts" icon={<PeopleIcon />} subtitle={`${total} shown${roleFilter ? ` · ${roleFilter.toLowerCase()}` : ''}`}>
       <div style={s.statRow}>
-        <StatCard label="Total shown" value={animTotal} accent={palette.navy} icon={<PeopleIcon />} />
-        <StatCard label="Active" value={animActive} accent={palette.teal} icon={<CheckIcon />} />
-        <StatCard label="Deactivated" value={animDeactivated} accent="#c0392b" icon={<AlertIcon />} />
-        <StatCard label="Locked" value={animLocked} accent="#9a6412" icon={<LockDotIcon />} />
+        <StatCard label="Total shown" value={animTotal} accent={palette.accent} icon={<PeopleIcon />} />
+        <StatCard label="Active" value={animActive} accent="#1F7A45" icon={<CheckIcon />} />
+        <StatCard label="Deactivated" value={animDeactivated} accent="#B3352B" icon={<AlertIcon />} />
+        <StatCard label="Locked" value={animLocked} accent="#9A6412" icon={<LockDotIcon />} />
       </div>
 
       <div style={s.searchRow}>
@@ -400,7 +440,6 @@ function ActiveAccountsTab({ onError, onNotice, readOnly }: { onError: (m: strin
       <div style={s.chipRow}>
         {ROLE_FILTERS.map((f) => {
           const active = roleFilter === f.value;
-          const theme = f.value ? roleTheme(f.value) : null;
           return (
             <button
               key={f.value || 'all'}
@@ -409,9 +448,7 @@ function ActiveAccountsTab({ onError, onNotice, readOnly }: { onError: (m: strin
               onClick={() => setRoleFilter(f.value)}
               style={{
                 ...s.filterChip,
-                ...(active
-                  ? { background: theme ? theme.solid : palette.navy, color: '#fff', borderColor: 'transparent' }
-                  : {}),
+                ...(active ? { background: palette.accent, color: '#fff', borderColor: 'transparent' } : {}),
               }}
             >
               {f.label}
@@ -673,7 +710,7 @@ function AccountDetailModal({ account: a, onClose }: { account: ManagedAccount; 
       <div style={s.modalIdentity}>
         <Avatar name={a.fullName} theme={theme} size={48} />
         <div>
-          <div style={{ fontWeight: 700, color: palette.ink, fontSize: 15.5 }}>{a.fullName}</div>
+          <div style={{ fontWeight: 700, color: palette.navy900, fontSize: 15.5 }}>{a.fullName}</div>
           <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center', flexWrap: 'wrap' }}>
             <RoleBadge role={a.role} theme={theme} /> <StatusDisplay a={a} />
           </div>
@@ -817,7 +854,7 @@ function ConfirmModal({ title, message, confirmLabel, danger, onConfirm, onCance
 }) {
   return (
     <Modal title={title} onClose={onCancel}>
-      <p style={{ margin: '0 0 16px', fontSize: 14, color: palette.muted, lineHeight: 1.55 }}>{message}</p>
+      <p style={{ margin: '0 0 16px', fontSize: 14, color: palette.slate500, lineHeight: 1.55 }}>{message}</p>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
         <button type="button" onClick={onCancel} className="acc-btn" style={s.secondaryBtn}>Cancel</button>
         <button type="button" onClick={onConfirm} className="acc-btn" style={danger ? s.dangerBtn : s.reviewBtn}>{confirmLabel}</button>
@@ -850,7 +887,7 @@ function ReviewPanel({
     <Panel title={`Review ${a.role === 'STUDENT' ? 'Student' : 'External'} Application`} icon={<QueueIcon />}>
       <div style={s.modalIdentity}>
         <Avatar name={a.fullName} theme={theme} />
-        <div style={{ fontWeight: 700, color: palette.ink, fontSize: 15.5 }}>{a.fullName}</div>
+        <div style={{ fontWeight: 700, color: palette.navy900, fontSize: 15.5 }}>{a.fullName}</div>
       </div>
       <div style={{ marginBottom: 20 }}>
         {rows.map(([label, value]) => (
@@ -917,9 +954,15 @@ function InviteCoordinator({ onDone, onError }: { onDone: (m: string) => void; o
         The coordinator receives an email link to set their own password. You never handle their password.
       </p>
       <form onSubmit={onSubmit} noValidate style={{ maxWidth: 420 }}>
-        <LabeledInput label="Full name:" icon={<PersonIcon />} value={fullName} onChange={(e) => setFullName(e.target.value)} required />
-        <LabeledInput label="Email:" icon={<PersonIcon />} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <LabeledInput label="Contact number:" icon={<PersonIcon />} value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} required />
+        <FormField label="Full name:">
+          <FormInput value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+        </FormField>
+        <FormField label="Email:">
+          <FormInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </FormField>
+        <FormField label="Contact number:">
+          <FormInput value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} required />
+        </FormField>
         <button type="submit" className="acc-btn" style={{ ...s.primaryBtn, ...(loading ? s.primaryBtnDisabled : null) }} disabled={loading}>
           {loading ? 'Sending…' : 'Send Invitation'}
         </button>
@@ -1011,7 +1054,7 @@ function CoordinatorInviteLog({ onError }: { onError: (m: string) => void }) {
 }
 
 function inviteStatusStyle(status: CoordinatorInviteRecord['status']): React.CSSProperties {
-  if (status === 'ACCEPTED') return { background: palette.mint100, color: palette.tealDeep };
+  if (status === 'ACCEPTED') return { background: '#E6F4EC', color: '#1F7A45' };
   if (status === 'EXPIRED') return { background: '#fbe9e7', color: '#b3352b' };
   return { background: '#fdf1e3', color: '#9a6412' };
 }
@@ -1089,148 +1132,186 @@ function ArrowLeftIcon() { return <svg width="15" height="15" viewBox="0 0 16 16
 function ArrowRightIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
 function ChevronRightIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="m6 4 4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
 function SignOutIcon() { return <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M6.5 2H3.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /><path d="M10.5 5 14 8l-3.5 3M14 8H6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
+function PersonIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 1.5c-2.5 0-6 1.25-6 3.5V15h12v-2c0-2.25-3.5-3.5-6-3.5z"/></svg>; }
+
+/* ---------- plain form field (matches Profile/Usage History inputs — no
+   reserved left-icon gap, since none of those screens actually place an
+   icon inside the input itself) ---------- */
+function FormField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{ display: 'block', fontWeight: 600, fontSize: 12.5, color: palette.slate600, marginBottom: 6 }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+function FormInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className="acc-input"
+      style={{ width: '100%', fontSize: 14, padding: '10px 12px', borderRadius: 10, border: `1.5px solid ${palette.slate300}`, background: palette.slate50, color: palette.navy900, fontFamily: 'inherit' }}
+    />
+  );
+}
 
 /* ---------- style tokens (on-palette rebuild) ---------- */
+const CARD_BG = 'linear-gradient(145deg, #F8FAFF 0%, #EAF0FC 100%)';
+const CARD_SHADOW = '0 12px 30px -22px rgba(3,22,54,.85)';
 const s = {
   page: {
     minHeight: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden',
-    background: `radial-gradient(1200px 600px at 10% -10%, ${palette.sky100} 0%, transparent 55%),
-                 radial-gradient(1000px 600px at 100% 0%, ${palette.mint100} 0%, transparent 55%),
-                 ${palette.mint50}`,
+    background: `radial-gradient(1100px 700px at 15% 0%, ${palette.navy800}aa 0%, transparent 60%),
+                 radial-gradient(900px 600px at 100% 100%, ${palette.accent}22 0%, transparent 55%),
+                 ${palette.navy900}`,
   } as const,
-  blobA: { position: 'absolute', width: 320, height: 320, borderRadius: '50%', background: `${palette.teal}1f`, top: -130, left: -100, filter: 'blur(10px)', pointerEvents: 'none' } as const,
-  blobB: { position: 'absolute', width: 300, height: 300, borderRadius: '50%', background: `${palette.navy}18`, bottom: -140, right: -100, filter: 'blur(10px)', pointerEvents: 'none' } as const,
+  blobA: { position: 'absolute', width: 420, height: 420, borderRadius: '50%', background: `${palette.accent}1a`, top: -160, left: -140, filter: 'blur(30px)', pointerEvents: 'none' } as const,
+  blobB: { position: 'absolute', width: 380, height: 380, borderRadius: '50%', background: `${palette.slate600}22`, bottom: -160, right: -120, filter: 'blur(30px)', pointerEvents: 'none' } as const,
 
   topbar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '20px 32px',
-    borderBottom: `1px solid ${palette.line}`,
+    position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '18px 32px', flexWrap: 'wrap', gap: 12,
   } as const,
-  brand: { display: 'flex', alignItems: 'center', gap: 10 } as const,
-  logoMark: { width: 32, height: 32, borderRadius: 9, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: palette.navy, color: '#fff', fontFamily: 'Poppins, sans-serif', fontWeight: 800, fontSize: 13 } as const,
-  wordmark: { fontFamily: 'Poppins, serif', fontSize: 18, fontWeight: 600, color: palette.navy } as const,
-  topbarTag: { fontSize: 13, color: palette.muted, fontWeight: 500 } as const,
+  brand: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' } as const,
+  logoImg: { width: 40, height: 40, borderRadius: 10, objectFit: 'contain', background: palette.slate50, padding: 4, border: `1px solid ${palette.slate300}` } as const,
+  wordmark: { fontSize: 16, fontWeight: 700, color: palette.white, lineHeight: 1.2 } as const,
+  wordmarkSub: { fontSize: 12, color: palette.slate400, marginTop: 1 } as const,
+  topbarTag: { fontSize: 13, color: palette.slate400, fontWeight: 500 } as const,
   topbarActions: { display: 'flex', alignItems: 'center', gap: 10 } as const,
-  ghostBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff', color: palette.navy, border: `1.5px solid ${palette.line}`, borderRadius: 999, padding: '8px 16px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' } as const,
-  signOutBtn: { display: 'inline-flex', alignItems: 'center', gap: 7, background: '#fff', color: '#8f2323', border: '1.5px solid #f3caca', borderRadius: 999, padding: '8px 16px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' } as const,
+  ghostBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, background: 'transparent', color: palette.slate100, border: `1.5px solid ${palette.slate400}`, borderRadius: 999, padding: '8px 16px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' } as const,
+  signOutBtn: { display: 'inline-flex', alignItems: 'center', gap: 7, background: 'transparent', color: palette.slate100, border: `1.5px solid ${palette.slate400}`, borderRadius: 999, padding: '8px 16px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' } as const,
 
-  hero: { textAlign: 'center', maxWidth: 620, margin: '36px auto 8px', padding: '0 24px', position: 'relative' } as const,
-  heroEyebrow: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', padding: '6px 14px', borderRadius: 999, marginBottom: 14 } as const,
-  heroTitle: { fontFamily: 'Poppins, sans-serif', fontSize: 32, fontWeight: 700, color: palette.navy, margin: '0 0 8px' } as const,
-  heroSubtitle: { fontSize: 14.5, lineHeight: 1.55, color: palette.muted, margin: 0 } as const,
+  hero: { position: 'relative', textAlign: 'center', maxWidth: 560, margin: '0 auto 22px' } as const,
+  heroEyebrow: {
+    display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
+    padding: '6px 14px', borderRadius: 999, marginBottom: 14,
+    color: palette.slate100, background: `${palette.navy800}88`, border: `1px solid ${palette.slate400}55`,
+  } as const,
+  heroTitle: { fontSize: 32, fontWeight: 800, color: palette.white, margin: '0 0 8px', letterSpacing: '-0.5px' } as const,
+  heroSubtitle: { fontSize: 14.5, lineHeight: 1.55, color: palette.slate300, margin: 0 } as const,
 
-  main: { flex: 1, position: 'relative', padding: '28px 24px 48px', width: '100%', maxWidth: 1040, margin: '0 auto' } as const,
+  main: { flex: 1, position: 'relative', zIndex: 1, padding: '20px 24px 48px', width: '100%', maxWidth: 1040, margin: '0 auto', boxSizing: 'border-box' } as const,
+  /* Frosted glassmorphism shell around everything below the header — hero
+     title, tabs, banners, and every panel sit inside this one translucent
+     panel so the whole screen reads as a single "surface" floating over the
+     dark page, rather than separate opaque cards scattered directly on the
+     navy background (same treatment as Usage History). */
+  glassPanel: {
+    position: 'relative', background: 'rgba(255,255,255,0.07)',
+    backdropFilter: 'blur(22px) saturate(160%)', WebkitBackdropFilter: 'blur(22px) saturate(160%)',
+    border: '1px solid rgba(255,255,255,0.16)', borderRadius: 24,
+    padding: '28px 28px 34px',
+    boxShadow: '0 24px 60px -32px rgba(3,22,54,0.75), inset 0 1px 0 rgba(255,255,255,0.10)',
+  } as const,
 
-  tabRow: { display: 'flex', gap: 4, padding: 4, background: '#fff', border: `1px solid ${palette.line}`, borderRadius: 12, marginBottom: 20, boxShadow: '0 2px 10px -6px rgba(11,55,84,0.15)' } as const,
-  tabBtn: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, font: '600 14px Inter, sans-serif', padding: '10px 12px', border: 'none', background: 'transparent', color: palette.muted, borderRadius: 9, cursor: 'pointer' } as const,
-  tabActive: { background: palette.navy, color: '#fff', boxShadow: '0 8px 16px -8px rgba(11,55,84,0.5)' } as const,
+  tabRow: { display: 'flex', gap: 4, padding: 4, background: palette.white, border: `1px solid ${palette.slate300}`, borderRadius: 12, marginBottom: 20, boxShadow: '0 2px 10px -6px rgba(3,22,54,0.3)' } as const,
+  tabBtn: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, font: '600 14px Inter, sans-serif', padding: '10px 12px', border: 'none', background: 'transparent', color: palette.slate500, borderRadius: 9, cursor: 'pointer' } as const,
+  tabActive: { background: palette.accent, color: '#fff', boxShadow: '0 8px 16px -8px rgba(3,22,54,0.6)' } as const,
   tabCount: { fontSize: 11, fontWeight: 700, background: 'rgba(255,255,255,0.25)', padding: '1px 7px', borderRadius: 999 } as const,
 
   banner: {
-    error: { display: 'flex', alignItems: 'center', gap: 8, background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 12, padding: '11px 16px', fontSize: 14, marginBottom: 16 } as const,
-    ok: { display: 'flex', alignItems: 'center', gap: 8, background: palette.mint100, color: palette.tealDeep, border: `1px solid ${palette.teal}55`, borderRadius: 12, padding: '11px 16px', fontSize: 14, marginBottom: 16 } as const,
+    error: { display: 'flex', alignItems: 'center', gap: 8, background: '#FDECEC', color: '#8F2323', border: '1px solid #F3CACA', borderRadius: 12, padding: '11px 16px', fontSize: 14, marginBottom: 16 } as const,
+    ok: { display: 'flex', alignItems: 'center', gap: 8, background: '#E6F4EC', color: '#1F7A45', border: '1px solid #1F7A4555', borderRadius: 12, padding: '11px 16px', fontSize: 14, marginBottom: 16 } as const,
   },
 
-  panel: { background: '#fff', border: `1px solid ${palette.line}`, borderRadius: 18, boxShadow: '0 14px 32px -20px rgba(11,55,84,0.25)', marginBottom: 22, overflow: 'hidden' } as const,
-  panelHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '16px 22px', borderBottom: `1px solid ${palette.line}`, background: palette.mint50 } as const,
-  panelHeadLeft: { display: 'flex', alignItems: 'center', gap: 10, font: '700 15.5px Poppins, sans-serif', color: palette.navy } as const,
-  panelIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 9, background: palette.mint100, color: palette.teal } as const,
-  panelSubtitle: { fontSize: 12.5, color: palette.muted, fontWeight: 500 } as const,
+  panel: { background: CARD_BG, border: `1px solid ${palette.slate300}e6`, borderRadius: 18, boxShadow: CARD_SHADOW, marginBottom: 22, overflow: 'hidden' } as const,
+  panelHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '16px 22px', borderBottom: `1px solid ${palette.slate300}`, background: palette.white } as const,
+  panelHeadLeft: { display: 'flex', alignItems: 'center', gap: 10, font: '700 15.5px Inter, sans-serif', color: palette.navy900 } as const,
+  panelIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 9, background: palette.accentWash, color: palette.accent } as const,
+  panelSubtitle: { fontSize: 12.5, color: palette.slate500, fontWeight: 500 } as const,
   panelBody: { padding: 22 } as const,
 
-  muted: { color: palette.muted, fontSize: 14 } as const,
-  hintMuted: { color: palette.muted, fontSize: 12.5, margin: '4px 0 10px' } as const,
+  muted: { color: palette.slate500, fontSize: 14 } as const,
+  hintMuted: { color: palette.slate500, fontSize: 12.5, margin: '4px 0 10px' } as const,
 
   statRow: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 20 } as const,
-  statCard: { display: 'flex', alignItems: 'center', gap: 10, background: palette.mint50, border: `1px solid ${palette.line}`, borderRadius: 14, padding: '12px 14px' } as const,
+  statCard: { display: 'flex', alignItems: 'center', gap: 10, background: palette.slate50, border: `1px solid ${palette.slate300}`, borderRadius: 14, padding: '12px 14px' } as const,
   statIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10 } as const,
-  statValue: { fontFamily: 'Poppins, sans-serif', fontSize: 20, fontWeight: 700, lineHeight: 1.1 } as const,
-  statLabel: { fontSize: 11.5, color: palette.muted, fontWeight: 600, marginTop: 1 } as const,
+  statValue: { fontSize: 20, fontWeight: 800, lineHeight: 1.1 } as const,
+  statLabel: { fontSize: 11.5, color: palette.slate500, fontWeight: 600, marginTop: 1 } as const,
 
   tableWrap: { overflowX: 'auto' } as const,
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 14.5, minWidth: 480 } as const,
-  th: { textAlign: 'left', font: '700 11.5px Inter, sans-serif', color: palette.muted, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '0 12px 12px' } as const,
-  td: { padding: '13px 12px', borderTop: `1px solid ${palette.line}`, color: palette.ink, verticalAlign: 'middle' } as const,
+  th: { textAlign: 'left', font: '700 11.5px Inter, sans-serif', color: palette.slate500, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '0 12px 12px' } as const,
+  td: { padding: '13px 12px', borderTop: `1px solid ${palette.slate100}`, color: palette.navy900, verticalAlign: 'middle' } as const,
 
   nameCell: { display: 'flex', alignItems: 'center', gap: 12 } as const,
-  avatar: { borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontFamily: 'Poppins, sans-serif', boxShadow: '0 6px 14px -6px rgba(11,55,84,0.5)' } as const,
-  nameText: { fontWeight: 700, color: palette.navy, fontSize: 14.5 } as const,
-  subText: { fontSize: 12.5, color: palette.muted, marginTop: 2 } as const,
+  avatar: { borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, boxShadow: '0 6px 14px -6px rgba(3,22,54,0.6)' } as const,
+  nameText: { fontWeight: 700, color: palette.navy900, fontSize: 14.5 } as const,
+  subText: { fontSize: 12.5, color: palette.slate500, marginTop: 2 } as const,
 
   roleBadge: { display: 'inline-block', font: '700 11px Inter, sans-serif', padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' } as const,
 
   emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '36px 16px', textAlign: 'center' } as const,
-  emptyIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 46, height: 46, borderRadius: '50%', background: palette.mint100, color: palette.teal } as const,
+  emptyIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 46, height: 46, borderRadius: '50%', background: palette.accentWash, color: palette.accent } as const,
 
   searchRow: { display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' } as const,
   searchBox: { position: 'relative', flex: 1, minWidth: 240 } as const,
-  searchIcon: { position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: palette.muted, display: 'flex' } as const,
-  searchInput: { width: '100%', font: '14px Inter, sans-serif', padding: '10px 12px 10px 38px', border: `1.5px solid ${palette.line}`, borderRadius: 10, color: palette.ink, boxSizing: 'border-box', background: '#fff' } as const,
-  viewToggle: { display: 'flex', gap: 2, padding: 3, background: palette.mint50, border: `1px solid ${palette.line}`, borderRadius: 10 } as const,
-  viewToggleBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, border: 'none', background: 'transparent', color: palette.muted, borderRadius: 8, cursor: 'pointer' } as const,
-  viewToggleBtnActive: { background: '#fff', color: palette.navy, boxShadow: '0 2px 6px -2px rgba(11,55,84,0.3)' } as const,
+  searchIcon: { position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: palette.slate500, display: 'flex' } as const,
+  searchInput: { width: '100%', font: '14px Inter, sans-serif', padding: '10px 12px 10px 38px', border: `1.5px solid ${palette.slate300}`, borderRadius: 10, color: palette.navy900, boxSizing: 'border-box', background: palette.slate50 } as const,
+  viewToggle: { display: 'flex', gap: 2, padding: 3, background: palette.slate50, border: `1px solid ${palette.slate300}`, borderRadius: 10 } as const,
+  viewToggleBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, border: 'none', background: 'transparent', color: palette.slate500, borderRadius: 8, cursor: 'pointer' } as const,
+  viewToggleBtnActive: { background: palette.white, color: palette.navy900, boxShadow: '0 2px 6px -2px rgba(3,22,54,0.4)' } as const,
   chipRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 } as const,
-  filterChip: { font: '700 12.5px Inter, sans-serif', padding: '7px 14px', borderRadius: 999, border: `1.5px solid ${palette.line}`, background: '#fff', color: palette.muted, cursor: 'pointer' } as const,
-  showMoreBtn: { marginTop: 12, background: 'none', border: 'none', color: palette.teal, fontWeight: 700, fontSize: 13.5, cursor: 'pointer', padding: 0 } as const,
-  linkBtn: { background: 'none', border: 'none', font: '700 13px Inter, sans-serif', color: palette.teal, cursor: 'pointer', padding: '4px 8px' } as const,
-  copyBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, border: 'none', background: palette.mint100, color: palette.tealDeep, borderRadius: 6, cursor: 'pointer', padding: 0 } as const,
-  rowChevron: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: palette.muted, marginLeft: 6, cursor: 'pointer' } as const,
+  filterChip: { font: '700 12.5px Inter, sans-serif', padding: '7px 14px', borderRadius: 999, border: `1.5px solid ${palette.slate300}`, background: palette.white, color: palette.slate500, cursor: 'pointer' } as const,
+  showMoreBtn: { marginTop: 12, background: 'none', border: 'none', color: palette.accent, fontWeight: 700, fontSize: 13.5, cursor: 'pointer', padding: 0 } as const,
+  linkBtn: { background: 'none', border: 'none', font: '700 13px Inter, sans-serif', color: palette.accent, cursor: 'pointer', padding: '4px 8px' } as const,
+  copyBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, border: 'none', background: palette.accentWash, color: palette.accent, borderRadius: 6, cursor: 'pointer', padding: 0 } as const,
+  rowChevron: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: palette.slate500, marginLeft: 6, cursor: 'pointer' } as const,
   markStyle: { background: '#fff3b0', padding: '0 1px', borderRadius: 2 } as const,
 
   cardGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 14 } as const,
-  accountCard: { background: '#fff', border: `1px solid ${palette.line}`, borderRadius: 16, padding: 16 } as const,
+  accountCard: { background: palette.white, border: `1px solid ${palette.slate300}`, borderRadius: 16, padding: 16 } as const,
   accountCardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 } as const,
-  cardArrow: { color: palette.teal, display: 'inline-flex' } as const,
-  cardFooterRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTop: `1px solid ${palette.line}` } as const,
+  cardArrow: { color: palette.accent, display: 'inline-flex' } as const,
+  cardFooterRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTop: `1px solid ${palette.slate100}` } as const,
 
   statusBadge: {
-    active: { display: 'inline-flex', alignItems: 'center', gap: 6, font: '700 11.5px Inter, sans-serif', padding: '4px 10px 4px 8px', borderRadius: 999, background: palette.mint100, color: palette.tealDeep } as const,
-    deactivated: { display: 'inline-flex', alignItems: 'center', gap: 6, font: '700 11.5px Inter, sans-serif', padding: '4px 10px 4px 8px', borderRadius: 999, background: '#fbe9e7', color: '#b3352b' } as const,
-    locked: { font: '700 11px Inter, sans-serif', padding: '3px 9px', borderRadius: 999, background: '#fdf1e3', color: '#9a6412', display: 'inline-block', marginLeft: 6, cursor: 'help' } as const,
+    active: { display: 'inline-flex', alignItems: 'center', gap: 6, font: '700 11.5px Inter, sans-serif', padding: '4px 10px 4px 8px', borderRadius: 999, background: '#E6F4EC', color: '#1F7A45' } as const,
+    deactivated: { display: 'inline-flex', alignItems: 'center', gap: 6, font: '700 11.5px Inter, sans-serif', padding: '4px 10px 4px 8px', borderRadius: 999, background: '#FDECEC', color: '#B3352B' } as const,
+    locked: { font: '700 11px Inter, sans-serif', padding: '3px 9px', borderRadius: 999, background: '#FDF1E3', color: '#9A6412', display: 'inline-block', marginLeft: 6, cursor: 'help' } as const,
   },
   statusDot: {
-    active: { width: 6, height: 6, borderRadius: '50%', background: palette.teal, display: 'inline-block' } as const,
-    deactivated: { width: 6, height: 6, borderRadius: '50%', background: '#c0392b', display: 'inline-block' } as const,
+    active: { width: 6, height: 6, borderRadius: '50%', background: '#1F7A45', display: 'inline-block' } as const,
+    deactivated: { width: 6, height: 6, borderRadius: '50%', background: '#B3352B', display: 'inline-block' } as const,
   },
 
-  topBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fff', color: palette.muted, border: `1.5px solid ${palette.line}`, borderRadius: 999, padding: '7px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'none' } as const,
-  topbarRight: { display: 'flex', gap: 8 } as const,
-  reviewBtn: { background: palette.navy, color: '#fff', border: 'none', borderRadius: 9, padding: '8px 18px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' } as const,
-  primaryBtn: { width: '100%', background: `linear-gradient(135deg, ${palette.teal}, ${palette.tealDeep})`, color: '#fff', fontSize: 15, fontWeight: 700, padding: '12px', border: 'none', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit' } as const,
+  topBtn: { display: 'inline-flex', alignItems: 'center', gap: 7, background: 'transparent', color: palette.slate100, border: `1.5px solid ${palette.slate400}`, borderRadius: 999, padding: '9px 16px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'none' } as const,
+  topbarRight: { display: 'flex', gap: 10 } as const,
+  reviewBtn: { background: palette.accent, color: '#fff', border: 'none', borderRadius: 9, padding: '8px 18px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' } as const,
+  primaryBtn: { width: '100%', background: palette.accent, color: '#fff', fontSize: 15, fontWeight: 700, padding: '12px', border: 'none', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit' } as const,
   primaryBtnDisabled: { opacity: 0.6, cursor: 'not-allowed' } as const,
 
-  detailRow: { display: 'grid', gridTemplateColumns: '150px 1fr', padding: '11px 0', borderTop: `1px solid ${palette.line}` } as const,
-  detailLabel: { font: '700 12.5px Inter, sans-serif', color: palette.muted } as const,
-  detailValue: { fontSize: 14.5, color: palette.ink } as const,
+  detailRow: { display: 'grid', gridTemplateColumns: '150px 1fr', padding: '11px 0', borderTop: `1px solid ${palette.slate100}` } as const,
+  detailLabel: { font: '700 12.5px Inter, sans-serif', color: palette.slate500 } as const,
+  detailValue: { fontSize: 14.5, color: palette.navy900 } as const,
   modalIdentity: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } as const,
 
   actionRow: { display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' } as const,
-  acceptBtn: { background: `linear-gradient(135deg, ${palette.teal}, ${palette.tealDeep})`, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer' } as const,
-  rejectBtn: { background: '#c0392b', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer' } as const,
-  backBtn: { background: '#fff', color: palette.muted, border: `1.5px solid ${palette.line}`, borderRadius: 10, padding: '11px 22px', fontSize: 14.5, fontWeight: 600, cursor: 'pointer' } as const,
-  textarea: { width: '100%', font: '14px Inter, sans-serif', padding: '11px 13px', border: `1.5px solid ${palette.line}`, borderRadius: 10, marginTop: 6, resize: 'vertical', boxSizing: 'border-box' } as const,
+  acceptBtn: { background: palette.accent, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer' } as const,
+  rejectBtn: { background: '#B3352B', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer' } as const,
+  backBtn: { background: palette.white, color: palette.slate500, border: `1.5px solid ${palette.slate300}`, borderRadius: 10, padding: '11px 22px', fontSize: 14.5, fontWeight: 600, cursor: 'pointer' } as const,
+  textarea: { width: '100%', font: '14px Inter, sans-serif', padding: '11px 13px', border: `1.5px solid ${palette.slate300}`, borderRadius: 10, marginTop: 6, resize: 'vertical', boxSizing: 'border-box' } as const,
 
-  overlay: { position: 'fixed', inset: 0, background: 'rgba(11,55,84,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 } as const,
-  modalBox: { background: '#fff', borderRadius: 16, boxShadow: '0 24px 60px -20px rgba(11,55,84,0.45)', width: 460, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto' } as const,
-  modalHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: `1px solid ${palette.line}`, font: '700 15.5px Poppins, sans-serif', color: palette.navy, background: palette.mint50 } as const,
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(3,22,54,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 } as const,
+  modalBox: { background: palette.white, borderRadius: 16, boxShadow: '0 24px 60px -20px rgba(3,22,54,0.6)', width: 460, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto' } as const,
+  modalHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: `1px solid ${palette.slate300}`, font: '700 15.5px Inter, sans-serif', color: palette.navy900, background: palette.slate50 } as const,
   modalBody: { padding: 20 } as const,
-  closeBtn: { background: 'none', border: 'none', fontSize: 22, lineHeight: 1, color: palette.muted, cursor: 'pointer', padding: 0 } as const,
-  secondaryBtn: { background: '#fff', color: palette.navy, border: `1.5px solid ${palette.line}`, borderRadius: 9, padding: '9px 18px', fontSize: 14, fontWeight: 600, cursor: 'pointer' } as const,
-  dangerBtn: { background: '#c0392b', color: '#fff', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 14, fontWeight: 700, cursor: 'pointer' } as const,
-  radioRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: palette.navy, cursor: 'pointer', fontWeight: 600 } as const,
+  closeBtn: { background: 'none', border: 'none', fontSize: 22, lineHeight: 1, color: palette.slate500, cursor: 'pointer', padding: 0 } as const,
+  secondaryBtn: { background: palette.white, color: palette.navy900, border: `1.5px solid ${palette.slate300}`, borderRadius: 9, padding: '9px 18px', fontSize: 14, fontWeight: 600, cursor: 'pointer' } as const,
+  dangerBtn: { background: '#B3352B', color: '#fff', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 14, fontWeight: 700, cursor: 'pointer' } as const,
+  radioRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: palette.navy900, cursor: 'pointer', fontWeight: 600 } as const,
   presetGrid: { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, marginLeft: 24 } as const,
-  presetChip: { font: '13px Inter, sans-serif', padding: '7px 14px', borderRadius: 999, border: `1.5px solid ${palette.line}`, background: '#fff', color: palette.ink, cursor: 'pointer' } as const,
-  presetChipActive: { background: palette.navy, color: '#fff', borderColor: palette.navy } as const,
+  presetChip: { font: '13px Inter, sans-serif', padding: '7px 14px', borderRadius: 999, border: `1.5px solid ${palette.slate300}`, background: palette.white, color: palette.navy900, cursor: 'pointer' } as const,
+  presetChipActive: { background: palette.accent, color: '#fff', borderColor: palette.accent } as const,
   customRow: { display: 'flex', gap: 12, marginTop: 8, marginLeft: 24 } as const,
-  numFieldLabel: { display: 'block', font: '700 11px Inter, sans-serif', color: palette.muted, marginBottom: 3, textTransform: 'uppercase' } as const,
-  numFieldInput: { width: 64, font: '14px Inter, sans-serif', padding: '7px 9px', border: `1.5px solid ${palette.line}`, borderRadius: 8 } as const,
+  numFieldLabel: { display: 'block', font: '700 11px Inter, sans-serif', color: palette.slate500, marginBottom: 3, textTransform: 'uppercase' } as const,
+  numFieldInput: { width: 64, font: '14px Inter, sans-serif', padding: '7px 9px', border: `1.5px solid ${palette.slate300}`, borderRadius: 8 } as const,
 
-  skeletonRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderTop: `1px solid ${palette.line}` } as const,
+  skeletonRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderTop: `1px solid ${palette.slate100}` } as const,
   skeletonAvatar: { width: 36, height: 36, borderRadius: '50%', display: 'inline-block' } as const,
   skeletonLine: { display: 'inline-block', height: 10, borderRadius: 5 } as const,
 
-  footer: { textAlign: 'center', padding: '20px 24px', fontSize: 12.5, color: palette.muted, borderTop: `1px solid ${palette.line}`, position: 'relative' } as const,
-  footerLink: { color: palette.navy, textDecoration: 'none', fontWeight: 600 } as const,
+  footer: { textAlign: 'center', padding: '20px 24px', fontSize: 12.5, color: palette.slate400, borderTop: `1px solid ${palette.slate600}55`, position: 'relative', zIndex: 1 } as const,
+  footerLink: { color: palette.accentSoft, textDecoration: 'none', fontWeight: 600 } as const,
 } satisfies Record<string, React.CSSProperties | Record<string, React.CSSProperties>>;

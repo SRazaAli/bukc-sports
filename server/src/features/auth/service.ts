@@ -598,7 +598,7 @@ function mapManagedAccountRow(r: {
 // (with a rejection_reason) for a PENDING account that was never actually
 // verified, so verified_at is the correct signal to distinguish "was once a
 // real active account, now deactivated" from "never got past review".
-export async function listActiveAccounts(role?: UserRole): Promise<ManagedAccount[]> {
+export async function listActiveAccounts(role?: UserRole | UserRole[]): Promise<ManagedAccount[]> {
   await checkExpiredDeactivations();
 
   let q = db.selectFrom('app_user as u')
@@ -613,7 +613,7 @@ export async function listActiveAccounts(role?: UserRole): Promise<ManagedAccoun
     .where('u.deleted_at', 'is', null)
     .where('u.verified_at', 'is not', null)
     .where('u.status', 'in', ['ACTIVE', 'DEACTIVATED']);
-  if (role) q = q.where('u.role', '=', role);
+  if (role) q = Array.isArray(role) ? q.where('u.role', 'in', role) : q.where('u.role', '=', role);
 
   const rows = await q.orderBy('u.full_name').execute();
   return rows.map(mapManagedAccountRow);
@@ -654,7 +654,7 @@ function escapeLikeTerm(s: string): string {
 // never string-concatenated — so this is immune to injection regardless of
 // the LIKE-wildcard escaping above (which is a correctness fix, not a
 // security one).
-export async function searchAccounts(term: string, role: UserRole | undefined, limit: number): Promise<ManagedAccount[]> {
+export async function searchAccounts(term: string, role: UserRole | UserRole[] | undefined, limit: number): Promise<ManagedAccount[]> {
   const raw = term.trim();
   const escaped = escapeLikeTerm(raw);
   const containsPattern = `%${escaped}%`;
@@ -748,7 +748,11 @@ export async function searchAccounts(term: string, role: UserRole | undefined, l
           OR (${digitsContains}::text IS NOT NULL AND regexp_replace(u.contact_number, '[^0-9]', '', 'g') LIKE ${digitsContains})
         )
     ) combined
-    ${role ? sql`WHERE role = ${role}` : sql``}
+    ${role
+      ? Array.isArray(role)
+        ? sql`WHERE role = ANY(${role})`
+        : sql`WHERE role = ${role}`
+      : sql``}
     ORDER BY match_rank ASC, full_name ASC
     LIMIT ${limit}
   `.execute(db);
