@@ -222,6 +222,7 @@ export default function EquipmentBorrowScreen() {
       <EbwStyles />
       <div style={s.blobA} aria-hidden />
       <div style={s.blobB} aria-hidden />
+      <div style={s.blobC} aria-hidden />
 
       <header style={s.topbar}>
         <div style={s.brand}>
@@ -242,6 +243,7 @@ export default function EquipmentBorrowScreen() {
       <main style={s.main}>
         <div className="ebw-glass" style={s.glassPanel}>
           <div style={s.headRow}>
+            <span style={s.accentBar} />
             <span style={s.eyebrow}>Student Portal</span>
             <h1 style={s.title}>Request to Borrow</h1>
             <p style={s.subtitle}>Check an item's details and submit a request to borrow it.</p>
@@ -374,7 +376,7 @@ export default function EquipmentBorrowScreen() {
                       </div>
 
                       {row.availableUnits === 0 && (
-                        <p style={{ ...muted, gridColumn: '1 / -1', marginTop: 0 }}>
+                        <p style={{ ...muted, color: palette.slate500, gridColumn: '1 / -1', marginTop: 0 }}>
                           All units are currently checked out. Check back later.
                         </p>
                       )}
@@ -603,7 +605,7 @@ const backLink: React.CSSProperties = { background: 'none', border: 'none', colo
 // Frequently bought together section
 const relatedSection: React.CSSProperties = { marginTop: 32 };
 const relatedHeaderRow: React.CSSProperties = { display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 16 };
-const relatedHeaderIcon: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: palette.accentWash, color: palette.accent, flexShrink: 0 };
+const relatedHeaderIcon: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, background: `linear-gradient(135deg, ${palette.navy800}, ${palette.accent})`, color: '#fff', flexShrink: 0, boxShadow: '0 6px 14px -6px rgba(3,22,54,0.6)' };
 const relatedTitle: React.CSSProperties = { margin: '0 0 4px', fontSize: 17, fontWeight: 800, color: palette.white };
 const relatedSubtitle: React.CSSProperties = { margin: 0, fontSize: 13, color: palette.slate300 };
 const relatedGrid: React.CSSProperties = { display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 6 };
@@ -651,8 +653,12 @@ const s = {
   } as const,
   blobA: { position: 'absolute', width: 420, height: 420, borderRadius: '50%', background: `${palette.accent}1a`, top: -160, left: -140, filter: 'blur(30px)', pointerEvents: 'none' } as const,
   blobB: { position: 'absolute', width: 380, height: 380, borderRadius: '50%', background: `${palette.slate600}22`, bottom: -160, right: -120, filter: 'blur(30px)', pointerEvents: 'none' } as const,
+  blobC: { display: 'none' } as const,
 
-  topbar: { position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 32px', flexWrap: 'wrap', gap: 12 } as const,
+  topbar: {
+    position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '18px 32px', flexWrap: 'wrap', gap: 12,
+  } as const,
   brand: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' } as const,
   logoImg: { width: 40, height: 40, borderRadius: 10, objectFit: 'contain', background: palette.slate50, padding: 4, border: `1px solid ${palette.slate300}` } as const,
   wordmark: { fontSize: 16, fontWeight: 700, color: palette.white, lineHeight: 1.2 } as const,
@@ -664,7 +670,10 @@ const s = {
     cursor: 'pointer', fontFamily: 'inherit',
   } as const,
 
-  main: { position: 'relative', zIndex: 1, flex: 1, padding: '20px 24px 56px', width: '100%', maxWidth: 1160, margin: '0 auto', boxSizing: 'border-box' } as const,
+  main: { position: 'relative', zIndex: 1, flex: 1, padding: '28px 24px 56px', width: '100%', maxWidth: 1160, margin: '0 auto', boxSizing: 'border-box' } as const,
+  /* Frosted glassmorphism shell around everything below the header — same
+     treatment as Usage History, Accounts, Offline Fallback Entry, Conflict
+     Detection, Venue Calendar, and Kit Borrow. */
   glassPanel: {
     position: 'relative', background: 'rgba(255,255,255,0.07)',
     backdropFilter: 'blur(22px) saturate(160%)', WebkitBackdropFilter: 'blur(22px) saturate(160%)',
@@ -673,13 +682,14 @@ const s = {
     boxShadow: '0 24px 60px -32px rgba(3,22,54,0.75), inset 0 1px 0 rgba(255,255,255,0.10)',
   } as const,
 
-  headRow: { marginBottom: 18 } as const,
+  headRow: { marginBottom: 22 } as const,
+  accentBar: { display: 'none' } as const,
   eyebrow: {
     display: 'inline-block', fontSize: 11.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
     padding: '6px 14px', borderRadius: 999, marginBottom: 10,
     color: palette.slate100, background: `${palette.navy800}88`, border: `1px solid ${palette.slate400}55`,
   } as const,
-  title: { fontSize: 28, fontWeight: 800, color: palette.white, margin: 0, letterSpacing: '-0.5px' } as const,
+  title: { fontSize: 30, fontWeight: 800, color: palette.white, margin: 0, letterSpacing: '-0.5px' } as const,
   subtitle: { fontSize: 14, color: palette.slate300, margin: '6px 0 0' } as const,
 
   footer: { position: 'relative', zIndex: 1, textAlign: 'center', padding: '20px 24px', fontSize: 12.5, color: palette.slate400, borderTop: `1px solid ${palette.slate600}55` } as const,
