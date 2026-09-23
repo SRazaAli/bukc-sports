@@ -13,17 +13,24 @@
  * Step 4 — Decision: final send-back panel shows compiled summary (proposed
  *           schedule + equipment changes + rich-text note) before sending.
  *           Also: Forward or Reject.
+ *
+ * Re-themed to the site's navy + glassmorphism language (same header, page
+ * background, glow blobs, frosted glass shell, light soft-gradient cards and
+ * #1C398E accent as Accounts / Conflict Detection / Venue Approvals).
+ * "Initiate Event" opens a two-column layout — event form on the left,
+ * guidelines on the right, venue reference list below.
+ * Frontend only — no API/route/validation/logic changes.
  */
-import { useEffect, useState, useCallback } from 'react';
-import { Navigate } from 'react-router-dom';
+import { useEffect, useState, useCallback, type ReactNode } from 'react';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
-import { PortalShell } from '../auth/PortalShell.js';
 import {
   listQueue, forwardBooking, rejectBooking, getBookingFull, listVenues,
   initiateAcademicEvent, planAllocation, sendBackToRequester,
   checkEquipmentForSessions, queryConflicts, listCalendar, getArticleAvailability,
   type QueueBooking, type BookingDetailFull, type Venue, type CalendarSession,
   type ApprovedSession, type EquipmentAvailRow, type ArticleAvailGroup, type ArticleAvailEntry,
+  type VenueAvailabilityStatus,
 } from './api.js';
 import { useSessionRows, SessionRowsEditor, type SessionRow } from './SessionsBuilder.js';
 import { ApiRequestError } from '../../lib/api.js';
@@ -35,13 +42,44 @@ function fmtDT(iso: string) { return new Date(iso).toLocaleString('en-PK', { day
 
 type ProposedSession = { sessionNo: number; startAt: string; endAt: string };
 
+/* ---------- theme (same values as AdminAccountsScreen / ConflictDetectionScreen `palette`) ---------- */
+const palette = {
+  navy900: '#0F172B',
+  navy800: '#132357',
+  slate600: '#132357',
+  slate500: '#62748E',
+  slate400: '#90A1B9',
+  slate300: '#CAD5E2',
+  slate100: '#E2E8F0',
+  slate50: '#F8FAFC',
+  white: '#FFFFFF',
+  accent: '#1C398E',
+  accentSoft: '#DBEAFE',
+  accentWash: '#1C398E14',
+};
+
+const AVAIL_LABEL: Record<VenueAvailabilityStatus, string> = {
+  AVAILABLE: 'Available',
+  UNDER_MAINTENANCE: 'Under Maintenance',
+  CLOSED: 'Closed',
+};
+const AVAIL_STYLE: Record<VenueAvailabilityStatus, React.CSSProperties> = {
+  AVAILABLE: { background: '#E6F4EC', color: '#1F7A45' },
+  UNDER_MAINTENANCE: { background: '#FDF1E3', color: '#9A6412' },
+  CLOSED: { background: '#FDECEC', color: '#B3352B' },
+};
+
 // ── Root screen ──────────────────────────────────────────────────────────────
 export default function VenueQueueScreen() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
+  const navigate = useNavigate();
   const [queue, setQueue] = useState<QueueBooking[] | null>(null);
   const [selected, setSelected] = useState<QueueBooking | null>(null);
   const [showAcademic, setShowAcademic] = useState(false);
   const [venues, setVenues] = useState<Venue[]>([]);
+  const [venuesLoaded, setVenuesLoaded] = useState(false);
+  const [viewingVenue, setViewingVenue] = useState<Venue | null>(null);
+  const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -50,60 +88,341 @@ export default function VenueQueueScreen() {
       const [q, v] = await Promise.all([listQueue(), listVenues()]);
       setQueue(q.queue); setVenues(v.venues);
     } catch (e) { setError(errMsg(e)); }
+    finally { setVenuesLoaded(true); }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
 
-  if (loading) return <PortalShell title="Venue Queue"><p /></PortalShell>;
+  const header = (
+    <header style={s.topbar}>
+      <div style={s.brand}>
+        <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
+        <div>
+          <div style={s.wordmark}>Bahria University</div>
+          <div style={s.wordmarkSub}>Sports Management Portal</div>
+        </div>
+      </div>
+      <div style={s.topbarRight}>
+        <Link to="/home" className="vq-topbtn" style={s.topBtn}><BackIcon /> Back</Link>
+        <button type="button" className="vq-topbtn vq-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
+          <SignOutIcon /> Sign out
+        </button>
+      </div>
+    </header>
+  );
+
+  if (loading) {
+    return (
+      <div className="vq-ui" style={s.page}>
+        <VqStyles />
+        {header}
+        <main style={s.main}><div className="vq-glass" style={s.glassPanel}><SkeletonRows rows={4} /></div></main>
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/home" replace />;
   if (user.role !== 'COORDINATOR') return <Navigate to="/home" replace />;
 
+  // Presentation-only filter over the already-loaded queue.
+  const term = search.trim().toLowerCase();
+  const filteredQueue = queue && term
+    ? queue.filter((q) =>
+      (q.requester_name ?? 'BUKC Sports Dept.').toLowerCase().includes(term)
+      || q.venue_name.toLowerCase().includes(term)
+      || q.origin.toLowerCase().includes(term)
+      || q.purpose.toLowerCase().includes(term))
+    : queue;
+
+  const academicCount = queue?.filter((q) => q.origin === 'ACADEMIC').length ?? 0;
+  const sessionTotal = queue?.reduce((n, q) => n + q.sessionCount, 0) ?? 0;
+  const availableVenues = venues.filter((v) => v.availability_status === 'AVAILABLE').length;
+
+  const venuesPanel = (
+    <Panel title={showAcademic ? 'Venues' : 'Academic Calendar Events'} icon={<CalendarIcon />}
+      action={!showAcademic ? (
+        <button type="button" className="vq-btn" style={s.primarySmBtn}
+          onClick={() => { setShowAcademic(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+          <PlusIcon /> Initiate Event
+        </button>
+      ) : undefined}>
+      {!showAcademic && (
+        <p style={{ ...s.muted, margin: '0 0 16px' }}>
+          Recurring annual events — same review pipeline, no student requester. Venues available for events are listed below.
+        </p>
+      )}
+      {!venuesLoaded ? <SkeletonRows rows={3} /> : venues.length === 0 ? (
+        <EmptyState icon={<BuildingIcon />} text="No venues have been set up yet." />
+      ) : (
+        <>
+          <div className="vq-table-wrap" style={s.tableWrap}>
+            <table style={s.table}>
+              <thead>
+                <tr>
+                  <th style={s.th}>Name</th>
+                  <th style={s.th}>Sports</th>
+                  <th style={s.th}>Cap.</th>
+                  <th className="vq-hide-mobile" style={s.th}>Setting</th>
+                  <th style={s.th}>Status</th>
+                  <th className="vq-hide-mobile" style={s.th}>Note</th>
+                  <th style={{ ...s.th, textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {venues.map((v, i) => (
+                  <tr key={v.venue_id} className="vq-row vq-row-anim" style={{ animationDelay: `${i * 30}ms` }}>
+                    <td style={s.td}>
+                      <div style={s.nameText}>{v.name}</div>
+                      {v.location && <div style={s.subText}>{v.location}</div>}
+                    </td>
+                    <td style={s.td}>{v.sports.length === 0 ? <span style={{ color: palette.slate400 }}>—</span> : v.sports.map((sp) => sp.sport_name).join(', ')}</td>
+                    <td style={s.td}>{v.capacity}</td>
+                    <td className="vq-hide-mobile" style={s.td}>{v.is_indoor ? 'Indoor' : 'Outdoor'}</td>
+                    <td style={s.td}><span style={{ ...s.badge, ...AVAIL_STYLE[v.availability_status] }}>{AVAIL_LABEL[v.availability_status]}</span></td>
+                    <td className="vq-hide-mobile" style={{ ...s.td, maxWidth: 200 }}>
+                      {v.description ? <span style={s.noteText} title={v.description}>{v.description}</span> : <span style={{ color: palette.slate400 }}>—</span>}
+                    </td>
+                    <td style={{ ...s.td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button type="button" className="vq-btn vq-link" style={s.linkBtn} onClick={() => setViewingVenue(v)}><EyeIcon /> View</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={s.tableFoot}>Showing {venues.length} venue{venues.length !== 1 ? 's' : ''}</div>
+        </>
+      )}
+    </Panel>
+  );
+
   return (
-    <PortalShell title="Venue Queue" tint="slate">
-      <div style={wrap}>
-        {error && <div style={box.err}>{error}</div>}
-        {notice && <div style={box.ok}>{notice}</div>}
+    <div className="vq-ui" style={s.page}>
+      <VqStyles />
+      <div style={s.blobA} aria-hidden />
+      <div style={s.blobB} aria-hidden />
 
-        {selected ? (
-          <ReviewPanel item={selected}
-            onBack={() => setSelected(null)}
-            onDone={(m) => { setNotice(m); setError(null); setSelected(null); void load(); }}
-            onError={(m) => { setError(m); setNotice(null); }} />
-        ) : (
-          <>
-            <Panel title="Pending Booking Requests">
-              {queue === null ? <p style={muted}>Loading…</p>
-                : queue.length === 0 ? <p style={muted}>No pending venue requests.</p>
-                : (
-                  <table style={tbl}>
-                    <thead><tr><th style={th}>Requester</th><th style={th}>Venue</th><th style={th}>Sessions</th><th style={th}>Participants</th><th style={th} /></tr></thead>
-                    <tbody>
-                      {queue.map((q) => (
-                        <tr key={q.booking_id}>
-                          <td style={td}><div style={{ fontWeight: 600 }}>{q.requester_name ?? 'BUKC Sports Dept.'}</div><div style={{ color: '#8a949f', fontSize: 12 }}>{q.origin}</div></td>
-                          <td style={td}>{q.venue_name}</td>
-                          <td style={td}>{q.sessionCount}{q.firstStart ? ` · from ${new Date(q.firstStart).toLocaleDateString()}` : ''}</td>
-                          <td style={td}>{q.estimated_participants}</td>
-                          <td style={{ ...td, textAlign: 'right' }}><button style={reviewBtn} onClick={() => setSelected(q)}>Review</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-            </Panel>
+      {header}
 
-            <Panel title="Academic Calendar Events"
-              action={<button style={ghostBtn} onClick={() => setShowAcademic((v) => !v)}>{showAcademic ? 'Close' : 'Initiate Event'}</button>}>
+      <main style={s.main}>
+        <div className="vq-glass" style={s.glassPanel}>
+          <div style={s.hero}>
+            <span style={s.heroEyebrow}><CalendarIcon size={14} /> Coordinator</span>
+            <h1 style={s.heroTitle}>Venue Queue</h1>
+            <p style={s.heroSubtitle}>
               {showAcademic
-                ? <AcademicEventForm venues={venues}
-                    onDone={(m) => { setNotice(m); setNotice(m); setShowAcademic(false); void load(); }}
-                    onError={(m) => setError(m)} />
-                : <p style={muted}>Recurring annual events — same review pipeline, no student requester.</p>}
-            </Panel>
-          </>
-        )}
-      </div>
-    </PortalShell>
+                ? 'Put a recurring academic event on the calendar. It goes through the same review pipeline as student requests.'
+                : 'Track pending booking requests and upcoming academic calendar events.'}
+            </p>
+          </div>
+
+          {error && <div className="vq-toast" style={s.banner.error}><AlertIcon /> {error}</div>}
+          {notice && <div className="vq-toast" style={s.banner.ok}><CheckCircleIcon /> {notice}</div>}
+
+          {selected ? (
+            <ReviewPanel item={selected}
+              onBack={() => setSelected(null)}
+              onDone={(m) => { setNotice(m); setError(null); setSelected(null); void load(); }}
+              onError={(m) => { setError(m); setNotice(null); }} />
+          ) : showAcademic ? (
+            <>
+              {/* ── Initiate Event layout: form + guidelines, venues below ── */}
+              <div className="vq-add-grid" style={s.addGrid}>
+                <section className="vq-card" style={{ ...s.card, marginBottom: 0 }}>
+                  <div style={s.formHead}>
+                    <span style={s.formHeadIcon}><CalendarIcon size={20} /></span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={s.formHeadTitle}>Initiate Academic Event</div>
+                      <div style={s.formHeadSub}>Fill in the details below to reserve a venue for a university event.</div>
+                    </div>
+                    <button type="button" className="vq-btn vq-icon-btn" style={s.closeIconBtn}
+                      onClick={() => setShowAcademic(false)} aria-label="Close initiate event form" title="Close">
+                      <XIcon />
+                    </button>
+                  </div>
+                  <div style={{ padding: '0 24px 24px' }}>
+                    <AcademicEventForm venues={venues}
+                      onDone={(m) => { setNotice(m); setNotice(m); setShowAcademic(false); void load(); }}
+                      onError={(m) => setError(m)}
+                      onCancel={() => setShowAcademic(false)} />
+                  </div>
+                </section>
+
+                <aside className="vq-card" style={{ ...s.card, marginBottom: 0 }}>
+                  <div style={s.formHead}>
+                    <span style={s.formHeadIcon}><DocIcon /></span>
+                    <div style={s.formHeadTitle}>Event Guidelines</div>
+                  </div>
+                  <div style={{ padding: '0 24px 24px' }}>
+                    <ul style={s.guideList}>
+                      {[
+                        'Pick a venue that is Available and fits the expected turnout.',
+                        'Give the event a clear name, e.g. Annual Sports Day.',
+                        'Add one session per day the venue is needed.',
+                        'Check the times against existing bookings before creating.',
+                      ].map((g) => (
+                        <li key={g} style={s.guideItem}><span style={s.guideTick}><TickIcon /></span>{g}</li>
+                      ))}
+                    </ul>
+                    <div style={s.infoBox}>
+                      <span style={{ color: palette.accent, display: 'inline-flex', marginTop: 1 }}><ClockIcon /></span>
+                      <div>
+                        <div style={s.infoTitle}>Same review pipeline</div>
+                        <div style={s.infoText}>
+                          New events appear in Pending Booking Requests with origin Academic, and are reviewed like any other request.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+              <div style={{ height: 22 }} />
+              {venuesPanel}
+            </>
+          ) : (
+            <>
+              <div style={s.statRow}>
+                <StatCard label="Pending requests" value={queue?.length ?? 0} accent={palette.accent} icon={<InboxIcon />} />
+                <StatCard label="Academic events" value={academicCount} accent="#6B21A8" icon={<CalendarIcon />} />
+                <StatCard label="Sessions requested" value={sessionTotal} accent="#9A6412" icon={<ClockIcon size={17} />} />
+                <StatCard label="Venues available" value={availableVenues} accent="#1F7A45" icon={<CheckCircleIcon />} />
+              </div>
+
+              <Panel title="Pending Booking Requests" icon={<CalendarIcon />}
+                action={
+                  <div style={s.searchBox}>
+                    <span style={s.searchIcon}><SearchIcon /></span>
+                    <input type="search" className="vq-input" style={s.searchInput} value={search}
+                      onChange={(e) => setSearch(e.target.value)} placeholder="Search requests…" aria-label="Search requests" />
+                  </div>
+                }>
+                {filteredQueue === null ? <SkeletonRows rows={3} />
+                  : queue!.length === 0 ? <EmptyState icon={<CheckCircleIcon />} text="No pending venue requests. New requests will appear here." />
+                  : filteredQueue.length === 0 ? (
+                    <EmptyState icon={<SearchIcon />} text={`No requests match "${search.trim()}".`} action={{ label: 'Clear search', onClick: () => setSearch('') }} />
+                  ) : (
+                    <>
+                      <div className="vq-table-wrap" style={s.tableWrap}>
+                        <table style={s.table}>
+                          <thead><tr>
+                            <th style={s.th}>Requester</th><th style={s.th}>Venue</th><th style={s.th}>Sessions</th>
+                            <th className="vq-hide-mobile" style={s.th}>Participants</th><th style={{ ...s.th, textAlign: 'right' }}>Actions</th>
+                          </tr></thead>
+                          <tbody>
+                            {filteredQueue.map((q, i) => (
+                              <tr key={q.booking_id} className="vq-row vq-row-click vq-row-anim" style={{ animationDelay: `${i * 35}ms` }} onClick={() => setSelected(q)}>
+                                <td style={s.td}>
+                                  <div style={s.nameCell}>
+                                    <span style={s.reqIcon}><PeopleIcon /></span>
+                                    <div>
+                                      <div style={s.nameText}>{q.requester_name ?? 'BUKC Sports Dept.'}</div>
+                                      <div style={s.originText}>{q.origin}</div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td style={s.td}><span style={s.iconCell}><span style={s.cellIcon}><PinIcon /></span>{q.venue_name}</span></td>
+                                <td style={s.td}>
+                                  <span style={s.iconCell}><span style={s.cellIcon}><CalendarIcon size={16} /></span>
+                                    <span>{q.sessionCount}{q.firstStart ? <span style={{ color: palette.slate500 }}> · from {new Date(q.firstStart).toLocaleDateString()}</span> : ''}</span>
+                                  </span>
+                                </td>
+                                <td className="vq-hide-mobile" style={s.td}><span style={s.iconCell}><span style={s.cellIcon}><PeopleIcon /></span>{q.estimated_participants}</span></td>
+                                <td style={{ ...s.td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                  <button type="button" className="vq-btn" style={s.reviewBtn} onClick={(e) => { e.stopPropagation(); setSelected(q); }}>
+                                    <EyeIcon /> Review
+                                  </button>
+                                  <span className="vq-chev" style={s.rowChevron}><ChevronRightIcon /></span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={s.tableFoot}>Showing {filteredQueue.length}{term ? ` of ${queue!.length}` : ''} request{filteredQueue.length !== 1 ? 's' : ''}</div>
+                    </>
+                  )}
+              </Panel>
+
+              {venuesPanel}
+            </>
+          )}
+        </div>
+      </main>
+
+      <footer style={s.footer}>
+        2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
+      </footer>
+
+      {viewingVenue && <VenueDetailModal venue={viewingVenue} onClose={() => setViewingVenue(null)} />}
+    </div>
+  );
+}
+
+function VqStyles() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+      .vq-ui { font-family: 'Inter', system-ui, sans-serif; }
+      .vq-ui * { box-sizing: border-box; }
+      .vq-card { animation: vqFadeUp .45s ease both; }
+      @keyframes vqFadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+      .vq-row { transition: background-color .15s ease; }
+      .vq-row:hover { background: ${palette.slate50}; }
+      .vq-row-click { cursor: pointer; }
+      .vq-row-click .vq-chev { transition: transform .15s ease, color .15s ease; }
+      .vq-row-click:hover .vq-chev { transform: translateX(3px); color: ${palette.accent}; }
+      .vq-row-anim { opacity: 0; animation: vqRowIn .35s ease forwards; }
+      @keyframes vqRowIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+      .vq-btn { transition: transform .15s ease, box-shadow .15s ease, filter .15s ease, background-color .15s ease, border-color .15s ease, color .15s ease; }
+      .vq-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.04); }
+      .vq-btn:active:not(:disabled) { transform: translateY(0); }
+      .vq-btn:disabled { opacity: .55; cursor: not-allowed; }
+      .vq-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+      .vq-icon-btn:hover { background: ${palette.accentWash} !important; color: ${palette.accent} !important; }
+      .vq-input { transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
+      .vq-input::placeholder { color: ${palette.slate400}; opacity: 1; }
+      .vq-input:hover { border-color: ${palette.slate400} !important; }
+      .vq-input:focus { outline: none; border-color: ${palette.accent} !important; box-shadow: 0 0 0 4px ${palette.accentSoft}; background-color: #fff !important; }
+      .vq-field:focus-within .vq-field-icon { color: ${palette.accent}; }
+      .vq-ui textarea:focus, .vq-ui select:focus { outline: none; border-color: ${palette.accent} !important; box-shadow: 0 0 0 4px ${palette.accentSoft}; }
+      /* Shared SessionRowsEditor (used elsewhere too) — restyled only inside this screen. */
+      .vq-sessions input { font: 14px Inter, sans-serif !important; padding: 9px 11px !important; border: 1.5px solid ${palette.slate300} !important; border-radius: 10px !important; background: #fff !important; color: ${palette.navy900}; }
+      .vq-sessions input:focus { outline: none; border-color: ${palette.accent} !important; box-shadow: 0 0 0 4px ${palette.accentSoft}; }
+      .vq-sessions > div > div:last-child > div { border-radius: 12px !important; border-color: ${palette.slate300} !important; background: ${palette.slate50} !important; padding: 12px !important; }
+      .vq-sessions button { font-family: Inter, sans-serif !important; }
+      .vq-sessions > div > div:first-child span { font: 600 12.5px Inter, sans-serif !important; color: ${palette.slate600} !important; }
+      .vq-sessions > div > div:first-child button { color: ${palette.accent} !important; font-weight: 700 !important; }
+      .vq-modal-anim { animation: vqPop .2s ease both; }
+      @keyframes vqPop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+      .vq-toast { animation: vqToast .3s ease both; }
+      @keyframes vqToast { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+      .vq-stat { transition: transform .18s ease, box-shadow .18s ease; }
+      .vq-stat:hover { transform: translateY(-2px); box-shadow: 0 14px 26px -16px rgba(3,22,54,0.4); }
+      .vq-skel { position: relative; overflow: hidden; background: ${palette.slate300}; }
+      .vq-skel::after {
+        content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent);
+        animation: vqShimmer 1.3s ease-in-out infinite;
+      }
+      @keyframes vqShimmer { 100% { transform: translateX(100%); } }
+      .vq-topbtn { transition: background-color .18s ease, border-color .18s ease, color .18s ease; text-decoration: none; }
+      .vq-topbtn:hover { background-color: rgba(255,255,255,0.08); border-color: ${palette.slate100}; }
+      .vq-signout:hover { background-color: ${palette.accent} !important; border-color: ${palette.accent} !important; color: #fff !important; }
+      .vq-step-dot { transition: transform .15s ease; }
+      .vq-step-dot[data-done="1"]:hover { transform: scale(1.08); }
+      @media (max-width: 960px) {
+        .vq-add-grid { grid-template-columns: 1fr !important; }
+      }
+      @media (max-width: 720px) {
+        .vq-hide-mobile { display: none !important; }
+        .vq-form-grid { grid-template-columns: 1fr !important; }
+        .vq-glass { padding: 20px 14px 26px !important; border-radius: 18px !important; }
+        .vq-detail-grid { grid-template-columns: 1fr !important; }
+        .vq-stepper { overflow-x: auto; padding-bottom: 6px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .vq-card, .vq-row-anim, .vq-toast, .vq-modal-anim { animation: none !important; opacity: 1 !important; }
+      }
+    `}</style>
   );
 }
 
@@ -220,16 +539,16 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
   ];
 
   return (
-    <Panel title={`Review — ${requesterName}`}>
+    <Panel title={`Review — ${requesterName}`} icon={<EyeIcon />}>
       {/* Stepper */}
-      <div style={stepperWrap}>
+      <div className="vq-stepper" style={stepperWrap}>
         {STEPS.map((s, i) => (
           <div key={s.n} style={{ display: 'flex', alignItems: 'center', flex: i < STEPS.length - 1 ? 1 : 0 }}>
-            <div style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '700 13px var(--font-body)', flexShrink: 0, background: step > s.n ? '#1f8a4c' : step === s.n ? '#26485f' : '#e5e7eb', color: step >= s.n ? '#fff' : '#8a949f', cursor: step > s.n ? 'pointer' : 'default' }}
+            <div className="vq-step-dot" data-done={step > s.n ? '1' : '0'} style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '700 13px Inter, sans-serif', flexShrink: 0, background: step > s.n ? '#1F7A45' : step === s.n ? '#1C398E' : '#E2E8F0', boxShadow: step === s.n ? '0 0 0 4px #DBEAFE' : 'none', color: step >= s.n ? '#fff' : '#8a949f', cursor: step > s.n ? 'pointer' : 'default' }}
               onClick={() => { if (step > s.n) setStep(s.n as StepN); }}>
               {step > s.n ? '✓' : s.n}
             </div>
-            <span style={{ fontSize: 12, marginLeft: 6, color: step === s.n ? '#26485f' : '#8a949f', fontWeight: step === s.n ? 700 : 400, whiteSpace: 'nowrap', flexShrink: 0 }}>{s.label}</span>
+            <span style={{ fontSize: 12, marginLeft: 6, color: step === s.n ? '#1C398E' : '#8a949f', fontWeight: step === s.n ? 700 : 400, whiteSpace: 'nowrap', flexShrink: 0 }}>{s.label}</span>
             {i < STEPS.length - 1 && <div style={{ flex: 1, height: 2, background: step > s.n ? '#1f8a4c' : '#e5e7eb', margin: '0 8px' }} />}
           </div>
         ))}
@@ -289,7 +608,7 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
         />
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24, paddingTop: 16, borderTop: '1px solid #e5e7eb' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24, paddingTop: 16, borderTop: '1px solid #CAD5E2' }}>
         <button style={ghostBtn} onClick={step === 1 ? onBack : () => setStep((s) => (s - 1) as StepN)}>
           {step === 1 ? '← Back to queue' : '← Previous'}
         </button>
@@ -369,7 +688,7 @@ function Step1Details({ detail, meta }: { detail: BookingDetailFull; meta: Recor
       <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 20 }}>
         {rows.map(([label, value], i) => (
           <div key={label} style={{ display: 'grid', gridTemplateColumns: '200px 1fr', padding: '9px 16px', borderBottom: i < rows.length - 1 ? '1px solid #f0f0f0' : 'none', background: i % 2 === 0 ? '#fff' : '#fafbfc', fontSize: 14 }}>
-            <span style={{ font: '600 11px var(--font-body)', color: '#5c6773', textTransform: 'uppercase', letterSpacing: '0.04em', alignSelf: 'start', paddingTop: 2 }}>{label}</span>
+            <span style={{ font: '600 11px Inter, sans-serif', color: '#5c6773', textTransform: 'uppercase', letterSpacing: '0.04em', alignSelf: 'start', paddingTop: 2 }}>{label}</span>
             <span style={{ color: '#333', lineHeight: 1.6 }}>{value}</span>
           </div>
         ))}
@@ -479,7 +798,7 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
             return (
               <div key={s.request_session_id} style={{ marginTop: 12, border: `1px solid ${cs.length > 0 ? '#fca5a5' : '#86efac'}`, borderRadius: 8, overflow: 'hidden' }}>
                 <div style={{ padding: '8px 16px', background: cs.length > 0 ? '#fef2f2' : '#f0fdf4', display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ font: '600 13px var(--font-body)', color: cs.length > 0 ? '#991b1b' : '#166534' }}>
+                  <span style={{ font: '600 13px Inter, sans-serif', color: cs.length > 0 ? '#991b1b' : '#166534' }}>
                     {cs.length > 0 ? `Session ${s.session_no} — CONFLICT` : `Session ${s.session_no} — Clear`}
                   </span>
                   <span style={{ fontSize: 13, color: '#555' }}>{fmtDate(s.requested_start_at)} · {fmtTime(s.requested_start_at)}–{fmtTime(s.requested_end_at)}</span>
@@ -507,7 +826,7 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
             {showProposalEditor && (
               <div style={{ padding: 16, border: '1px solid #bfdbfe', borderRadius: 8, background: '#eff6ff' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <span style={{ font: '600 14px var(--font-body)', color: '#1e40af' }}>Proposed Alternative Schedule</span>
+                  <span style={{ font: '600 14px Inter, sans-serif', color: '#1e40af' }}>Proposed Alternative Schedule</span>
                   <button style={{ ...ghostBtn, fontSize: 12, padding: '4px 10px' }} onClick={() => { onShowProposalEditorChange(false); onProposedSessionsChange(null); }}>Clear</button>
                 </div>
                 <p style={{ margin: '0 0 12px', fontSize: 13, color: '#3730a3' }}>
@@ -678,7 +997,7 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
                 <div style={{ padding: '10px 14px', background: '#f7f9fb', borderBottom: isCollapsed ? 'none' : '1px solid #e5e7eb', cursor: 'pointer', display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: 12 }}
                   onClick={() => setCollapsed((c) => ({ ...c, [item.equipmentTypeId]: !isCollapsed }))}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ font: '600 14px var(--font-body)', color: '#26485f' }}>{item.name}</span>
+                    <span style={{ font: '600 14px Inter, sans-serif', color: '#1C398E' }}>{item.name}</span>
                     {group && <span style={{ fontSize: 12, color: '#5c6773' }}>({group.lending_unit.toLowerCase()})</span>}
                     <span style={{ fontSize: 12, fontWeight: 600, color: selMismatch ? '#c0392b' : selArts.length === coordQty && coordQty > 0 ? '#1f8a4c' : '#5c6773' }}>
                       {selArts.length}/{coordQty} selected{selMismatch ? ' — must match qty' : ''}
@@ -687,7 +1006,7 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={(e) => e.stopPropagation()}>
                     <span style={{ fontSize: 12, color: '#5c6773' }}>Qty (max {studentReq}):</span>
                     <button style={qtyBtn} onClick={() => setQty(item.equipmentTypeId, coordQty - 1)}>−</button>
-                    <span style={{ font: '600 15px var(--font-body)', minWidth: 24, textAlign: 'center' }}>{coordQty}</span>
+                    <span style={{ font: '600 15px Inter, sans-serif', minWidth: 24, textAlign: 'center' }}>{coordQty}</span>
                     <button style={qtyBtn} onClick={() => setQty(item.equipmentTypeId, coordQty + 1)}>+</button>
                   </div>
                   <span style={{ fontSize: 14, color: '#5c6773', userSelect: 'none' }}>{isCollapsed ? '▶' : '▼'}</span>
@@ -704,16 +1023,16 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
                     {selMismatch && <div style={{ padding: '6px 14px', background: '#fef2f2', borderBottom: '1px solid #fca5a5', fontSize: 13, color: '#991b1b' }}>Select exactly {coordQty} article{coordQty !== 1 ? 's' : ''} — {selArts.length} currently selected.</div>}
                     {group && (
                       <div style={{ padding: '10px 14px' }}>
-                        <div style={{ font: '500 12px var(--font-body)', color: '#26485f', marginBottom: 8 }}>Select articles to allocate ({selArts.length}/{coordQty}):</div>
+                        <div style={{ font: '500 12px Inter, sans-serif', color: '#1C398E', marginBottom: 8 }}>Select articles to allocate ({selArts.length}/{coordQty}):</div>
                         <div style={{ display: 'grid', gap: 6 }}>
                           {group.articles.map((art) => {
                             const isLocked = art.locked_elsewhere;
                             const isSelected = selArts.includes(art.article_id);
                             const canSelect = !isLocked && (isSelected || selArts.length < coordQty);
                             return (
-                              <label key={art.article_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 6, border: `1px solid ${isSelected ? '#26485f' : '#e5e7eb'}`, background: isLocked ? '#f9fafb' : isSelected ? '#f0f4f8' : '#fff', cursor: isLocked || (!canSelect && !isSelected) ? 'not-allowed' : 'pointer', opacity: isLocked ? 0.55 : 1 }}>
+                              <label key={art.article_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 6, border: `1px solid ${isSelected ? '#1C398E' : '#e5e7eb'}`, background: isLocked ? '#f9fafb' : isSelected ? '#f0f4f8' : '#fff', cursor: isLocked || (!canSelect && !isSelected) ? 'not-allowed' : 'pointer', opacity: isLocked ? 0.55 : 1 }}>
                                 <input type="checkbox" checked={isSelected} disabled={isLocked || (!canSelect && !isSelected)} onChange={() => toggleArticle(item.equipmentTypeId, art.article_id)} />
-                                <span style={{ font: '500 13px var(--font-mono)', color: '#26485f' }}>{art.barcode}</span>
+                                <span style={{ font: '500 13px var(--font-mono)', color: '#1C398E' }}>{art.barcode}</span>
                                 <span style={{ ...stateTag(art.state), fontSize: 11 }}>{art.state === 'ON_LOAN' ? 'On Loan' : 'Available'}</span>
                                 {art.state === 'ON_LOAN' && art.expected_return_at && <span style={{ fontSize: 12, color: '#9a6412' }}>returns {fmtDT(art.expected_return_at)}</span>}
                                 {isLocked && <span style={{ fontSize: 12, color: '#b3352b' }}>locked by another event</span>}
@@ -797,7 +1116,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
 
       {/* Review summary */}
       <div style={{ background: '#f7f9fb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 18px', marginBottom: 20 }}>
-        <div style={{ font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Review Summary</div>
+        <div style={{ font: '600 12px Inter, sans-serif', color: '#1C398E', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>Review Summary</div>
         <div style={{ display: 'grid', gap: 8, fontSize: 13.5 }}>
           <div>
             <strong>Sessions:</strong>{' '}
@@ -855,14 +1174,14 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
 
       {mode === 'sendback' && (
         <div style={{ border: '1px solid #fcd34d', borderRadius: 8, background: '#fffbeb', padding: 20 }}>
-          <div style={{ font: '600 15px var(--font-body)', color: '#92400e', marginBottom: 6 }}>Send Back to {requesterName}</div>
+          <div style={{ font: '600 15px Inter, sans-serif', color: '#92400e', marginBottom: 6 }}>Send Back to {requesterName}</div>
 
           {/* Compiled summary of what's changing */}
           <div style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: 6, padding: '12px 14px', marginBottom: 14 }}>
-            <div style={{ font: '600 12px var(--font-body)', color: '#78350f', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>Changes being communicated</div>
+            <div style={{ font: '600 12px Inter, sans-serif', color: '#78350f', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>Changes being communicated</div>
             {proposedSessions ? (
               <div style={{ marginBottom: 8 }}>
-                <span style={{ font: '600 13px var(--font-body)', color: '#333' }}>Proposed alternative schedule:</span>
+                <span style={{ font: '600 13px Inter, sans-serif', color: '#333' }}>Proposed alternative schedule:</span>
                 {proposedSessions.map((s) => (
                   <div key={s.sessionNo} style={{ fontSize: 13, color: '#555', marginLeft: 14, marginTop: 2 }}>
                     Session {s.sessionNo}: {fmtDate(s.startAt)} · {fmtTime(s.startAt)}–{fmtTime(s.endAt)}
@@ -874,7 +1193,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
             )}
             {hasEquipChanges ? (
               <div>
-                <span style={{ font: '600 13px var(--font-body)', color: '#333' }}>Equipment shortfall:</span>
+                <span style={{ font: '600 13px Inter, sans-serif', color: '#333' }}>Equipment shortfall:</span>
                 {equipChanges.filter((e) => e.below).map((e) => (
                   <div key={e.name} style={{ fontSize: 13, color: '#c0392b', marginLeft: 14, marginTop: 2 }}>
                     {e.name}: university can provide {e.allocated} (you requested {e.requested})
@@ -907,7 +1226,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
 }
 
 // ── Academic Event Form ───────────────────────────────────────────────────────
-function AcademicEventForm({ venues, onDone, onError }: { venues: Venue[]; onDone: (m: string) => void; onError: (m: string) => void }) {
+function AcademicEventForm({ venues, onDone, onError, onCancel }: { venues: Venue[]; onDone: (m: string) => void; onError: (m: string) => void; onCancel?: () => void }) {
   const [venueId, setVenue] = useState(0);
   const [purpose, setPurpose] = useState('');
   const [estimatedParticipants, setParticipants] = useState(50);
@@ -923,55 +1242,328 @@ function AcademicEventForm({ venues, onDone, onError }: { venues: Venue[]; onDon
   }
 
   return (
-    <form onSubmit={submit} style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12, maxWidth: 620 }}>
-      <L label="Venue"><select style={inp} value={venueId} onChange={(e) => setVenue(Number(e.target.value))} required><option value={0}>Select</option>{venues.map((v) => <option key={v.venue_id} value={v.venue_id}>{v.name}</option>)}</select></L>
-      <L label="Participants"><input type="number" min={1} style={inp} value={estimatedParticipants} onChange={(e) => setParticipants(Number(e.target.value))} required /></L>
-      <div style={{ gridColumn: '1/-1' }}><L label="Event name"><input style={inp} value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="e.g. Annual Sports Day" required /></L></div>
-      <SessionRowsEditor rows={rows} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} />
-      <div style={{ gridColumn: '1/-1' }}><button style={acceptBtn} disabled={busy}>{busy ? 'Creating…' : 'Create Event'}</button></div>
+    <form onSubmit={submit}>
+      <div className="vq-form-grid" style={s.formGrid}>
+        <Field label="Venue" required icon={<PinIcon />} select>
+          <select className="vq-input" style={s.select} value={venueId} onChange={(e) => setVenue(Number(e.target.value))} required>
+            <option value={0}>Select a venue</option>
+            {venues.map((v) => <option key={v.venue_id} value={v.venue_id}>{v.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Participants" required icon={<PeopleIcon />}>
+          <input type="number" min={1} className="vq-input" style={s.input} value={estimatedParticipants} onChange={(e) => setParticipants(Number(e.target.value))} required />
+        </Field>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <Field label="Event name" required icon={<FlagIcon />}>
+            <input className="vq-input" style={s.input} value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="e.g. Annual Sports Day" required />
+          </Field>
+        </div>
+        <div className="vq-sessions" style={{ gridColumn: '1 / -1' }}>
+          <SessionRowsEditor rows={rows} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} />
+        </div>
+        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
+          <button className="vq-btn" style={s.primaryBtn} disabled={busy}><SendIcon /> {busy ? 'Creating…' : 'Create Event'}</button>
+          {onCancel && <button type="button" className="vq-btn" style={s.ghostBtn} onClick={onCancel}>Cancel</button>}
+        </div>
+      </div>
     </form>
   );
 }
 
-// ── Shared components ─────────────────────────────────────────────────────────
-function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return <section style={panel}><div style={panelHead}><span>{title}</span>{action}</div><div style={panelBody}>{children}</div></section>;
+// ── Venue detail modal (read-only) ──
+function VenueDetailModal({ venue, onClose }: { venue: Venue; onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div style={s.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="vq-modal-anim vq-ui" style={s.modalBox} role="dialog" aria-modal="true" aria-label="Venue details">
+        <div style={s.modalHead}>
+          <span>Venue Details</span>
+          <button type="button" className="vq-btn vq-icon-btn" onClick={onClose} style={s.closeIconBtn} aria-label="Close"><XIcon /></button>
+        </div>
+        <div style={{ padding: 22 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 18 }}>
+            <span style={s.formHeadIcon}><BuildingIcon size={20} /></span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 19, fontWeight: 800, color: palette.navy900 }}>{venue.name}</div>
+              {venue.location && <div style={{ fontSize: 13, color: palette.slate500, marginTop: 3, display: 'flex', alignItems: 'center', gap: 5 }}><PinIcon />{venue.location}</div>}
+            </div>
+            <span style={{ ...s.badge, ...AVAIL_STYLE[venue.availability_status], fontSize: 12, padding: '5px 12px' }}>{AVAIL_LABEL[venue.availability_status]}</span>
+          </div>
+          <div className="vq-detail-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+            {([
+              ['Capacity', String(venue.capacity)],
+              ['Setting', venue.is_indoor ? 'Indoor' : 'Outdoor'],
+              ['Surface', venue.surface_type ?? '—'],
+              ['Sports', venue.sports.length > 0 ? venue.sports.map((sp) => sp.sport_name).join(', ') : '—'],
+            ] as Array<[string, string]>).map(([k, v]) => (
+              <div key={k} style={s.detailTile}>
+                <div style={{ font: '700 11px Inter, sans-serif', color: palette.slate500, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{k}</div>
+                <div style={{ fontSize: 14, color: palette.navy900, fontWeight: 600 }}>{v}</div>
+              </div>
+            ))}
+          </div>
+          {venue.description && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={sectionLabel}>Description</div>
+              <div style={{ fontSize: 14, color: palette.navy900, lineHeight: 1.55, marginTop: 6 }}>{venue.description}</div>
+            </div>
+          )}
+          {venue.photos.length > 0 && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {venue.photos.map((p, i) => (
+                <img key={i} src={p} alt={`${venue.name} ${i + 1}`} style={{ width: 150, height: 100, objectFit: 'cover', borderRadius: 10, border: `1px solid ${palette.slate300}` }} />
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop: 20, paddingTop: 14, borderTop: `1px solid ${palette.slate100}`, display: 'flex', justifyContent: 'flex-end' }}>
+            <button type="button" className="vq-btn" style={s.ghostBtn} onClick={onClose}>Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
-function L({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label style={{ display: 'block' }}><span style={lbl}>{label}</span>{children}</label>;
+
+// ── Shared components ─────────────────────────────────────────────────────────
+function Panel({ title, icon, action, children }: { title: string; icon?: ReactNode; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="vq-card" style={s.card}>
+      <div style={s.panelHead}>
+        <span style={s.panelHeadLeft}>
+          <span style={s.panelIcon}>{icon ?? <InboxIcon />}</span>
+          <span>{title}</span>
+        </span>
+        {action}
+      </div>
+      <div style={s.panelBody}>{children}</div>
+    </section>
+  );
+}
+function Field({ label, required, icon, select, children }: { label: string; required?: boolean; icon: ReactNode; select?: boolean; children: ReactNode }) {
+  return (
+    <label className="vq-field" style={{ display: 'block' }}>
+      <span style={s.lbl}>{label}{required && <span style={{ color: '#C0392B' }}> *</span>}</span>
+      <span style={{ position: 'relative', display: 'block' }}>
+        <span className="vq-field-icon" style={s.fieldIcon}>{icon}</span>
+        {children}
+        {select && <span style={s.selectChevron}><ChevronDownIcon /></span>}
+      </span>
+    </label>
+  );
+}
+function StatCard({ label, value, accent, icon }: { label: string; value: number; accent: string; icon: ReactNode }) {
+  return (
+    <div className="vq-stat" style={s.statCard}>
+      <span style={{ ...s.statIcon, color: accent, background: `${accent}1a` }}>{icon}</span>
+      <div>
+        <div style={{ ...s.statValue, color: accent }}>{value}</div>
+        <div style={s.statLabel}>{label}</div>
+      </div>
+    </div>
+  );
+}
+function EmptyState({ icon, text, action }: { icon: ReactNode; text: string; action?: { label: string; onClick: () => void } }) {
+  return (
+    <div style={s.emptyState}>
+      <span style={s.emptyIcon}>{icon}</span>
+      <p style={{ color: palette.slate500, fontSize: 14, margin: 0, maxWidth: 380 }}>{text}</p>
+      {action && <button type="button" className="vq-btn" style={ghostBtn} onClick={action.onClick}>{action.label}</button>}
+    </div>
+  );
+}
+function SkeletonRows({ rows = 3 }: { rows?: number }) {
+  return (
+    <div>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} style={s.skeletonRow}>
+          <span className="vq-skel" style={{ width: 36, height: 36, borderRadius: '50%', display: 'inline-block' }} />
+          <div style={{ flex: 1 }}>
+            <span className="vq-skel" style={{ ...s.skeletonLine, width: '38%' }} />
+            <span className="vq-skel" style={{ ...s.skeletonLine, width: '55%', marginTop: 8 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 function stateTag(state: string): React.CSSProperties {
   return state === 'AVAILABLE'
-    ? { background: '#e6f4ec', color: '#1f7a45', padding: '1px 7px', borderRadius: 4, fontWeight: 600 }
-    : { background: '#fdf1e3', color: '#9a6412', padding: '1px 7px', borderRadius: 4, fontWeight: 600 };
+    ? { background: '#E6F4EC', color: '#1F7A45', padding: '2px 8px', borderRadius: 999, fontWeight: 700 }
+    : { background: '#FDF1E3', color: '#9A6412', padding: '2px 8px', borderRadius: 999, fontWeight: 700 };
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-const wrap: React.CSSProperties = { maxWidth: 940, margin: '0 auto' };
-const panel: React.CSSProperties = { background: '#fff', border: '1px solid #ddd', borderRadius: 8, marginBottom: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.07)' };
-const panelHead: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid #e5e5e5', font: '600 16px var(--font-body)', color: '#26485f', background: 'linear-gradient(#fff,#f7f9fb)', borderRadius: '8px 8px 0 0' };
-const panelBody: React.CSSProperties = { padding: '20px 24px' };
-const stepperWrap: React.CSSProperties = { display: 'flex', alignItems: 'center', marginBottom: 28 };
-const stepTitle: React.CSSProperties = { margin: '0 0 18px', font: '700 18px var(--font-body)', color: '#26485f' };
-const sectionLabel: React.CSSProperties = { font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em' };
-const tbl: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 14 };
-const th: React.CSSProperties = { textAlign: 'left', font: '600 11px var(--font-body)', color: '#888', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '0 8px 8px', borderBottom: '1px solid #e5e5e5' };
-const td: React.CSSProperties = { padding: '10px 8px', borderBottom: '1px solid #eee', color: '#333', verticalAlign: 'top' };
-const muted: React.CSSProperties = { color: '#5c6773', fontSize: 14, margin: 0 };
-const lbl: React.CSSProperties = { display: 'block', font: '500 12px var(--font-body)', color: '#26485f', marginBottom: 5 };
-const inp: React.CSSProperties = { width: '100%', font: '14px var(--font-body)', padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6, boxSizing: 'border-box' as const };
-const textarea: React.CSSProperties = { font: '14px var(--font-body)', padding: '9px 11px', border: '1px solid #ccc', borderRadius: 6, resize: 'vertical' as const, boxSizing: 'border-box' as const };
-const infoBox: React.CSSProperties = { padding: '10px 14px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, fontSize: 13.5, color: '#1e40af', lineHeight: 1.6 };
-const reviewBtn: React.CSSProperties = { background: '#0a6ebd', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 14, cursor: 'pointer' };
-const primaryBtn: React.CSSProperties = { background: '#26485f', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer', fontWeight: 600 };
-const ghostBtn: React.CSSProperties = { background: '#fff', color: '#555', border: '1px solid #ccc', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
-const acceptBtn: React.CSSProperties = { background: '#1f8a4c', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 18px', fontSize: 14.5, cursor: 'pointer' };
-const rejectBtn: React.CSSProperties = { background: '#c0392b', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 18px', fontSize: 14.5, cursor: 'pointer' };
-const warnBtn: React.CSSProperties = { background: '#9a6412', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer', fontWeight: 600 };
-const actionRow: React.CSSProperties = { display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' };
-const qtyBtn: React.CSSProperties = { width: 26, height: 26, borderRadius: 5, border: '1px solid #ccc', background: '#fff', cursor: 'pointer', font: '600 14px var(--font-body)' };
-const bdanger: React.CSSProperties = { background: '#fef2f2', color: '#991b1b', font: '600 11px var(--font-mono)', padding: '2px 7px', borderRadius: 4, flexShrink: 0 };
+/* ---------- icons ---------- */
+const ico = (size: number, children: ReactNode) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{children}</svg>
+);
+function BackIcon() { return <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M9.5 3 4 8l5.5 5M4.5 8H14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
+function SignOutIcon() { return <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M6.5 2H3.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /><path d="M10.5 5 14 8l-3.5 3M14 8H6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
+function SearchIcon() { return ico(16, <><circle cx="11" cy="11" r="6.5" /><path d="m20 20-3.6-3.6" /></>); }
+function AlertIcon() { return ico(16, <><path d="M12 3.5 21.5 20h-19L12 3.5z" /><path d="M12 10v4.2" /><circle cx="12" cy="17" r="0.6" fill="currentColor" /></>); }
+function CheckCircleIcon() { return ico(16, <><circle cx="12" cy="12" r="9.2" /><path d="m8 12.3 2.6 2.6L16.3 9" /></>); }
+function TickIcon() { return ico(16, <path d="m5 12.5 4.5 4.5L19 7.5" />); }
+function InboxIcon() { return ico(17, <><path d="M3.5 13.5 6 5h12l2.5 8.5V19a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-5.5z" /><path d="M3.5 13.5H9l1 2h4l1-2h5.5" /></>); }
+function CalendarIcon({ size = 17 }: { size?: number }) { return ico(size, <><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M3.5 10h17M8 3v4M16 3v4" /><path d="M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01" /></>); }
+function BuildingIcon({ size = 16 }: { size?: number }) { return ico(size, <><path d="M4 20V9l8-5 8 5v11" /><path d="M9 20v-6h6v6" /><path d="M3 20h18" /></>); }
+function PinIcon() { return ico(16, <><path d="M12 21s-6.5-5.6-6.5-11A6.5 6.5 0 0 1 18.5 10c0 5.4-6.5 11-6.5 11z" /><circle cx="12" cy="10" r="2.3" /></>); }
+function PeopleIcon() { return ico(16, <><circle cx="9" cy="8" r="3" /><path d="M3 20c.8-3.2 3-5 6-5s5.2 1.8 6 5" /><circle cx="17" cy="8.5" r="2.3" /><path d="M16 13.2c2.2.4 3.6 1.9 4.2 4.3" /></>); }
+function EyeIcon() { return ico(15, <><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="2.6" /></>); }
+function ChevronRightIcon() { return ico(16, <path d="m9 6 6 6-6 6" />); }
+function ChevronDownIcon() { return ico(15, <path d="m6 9 6 6 6-6" />); }
+function DocIcon() { return ico(20, <><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v4h4" /><path d="M10 12h5M10 16h5" /></>); }
+function FlagIcon() { return ico(16, <><path d="M5 21V4" /><path d="M5 4h11l-2 4 2 4H5" /></>); }
+function SendIcon() { return ico(16, <><path d="M21 3 10 14" /><path d="m21 3-7 18-4-7-7-4 18-7z" /></>); }
+function PlusIcon() { return ico(15, <path d="M12 5v14M5 12h14" />); }
+function XIcon() { return ico(16, <path d="M6 6l12 12M18 6 6 18" />); }
+function ClockIcon({ size = 22 }: { size?: number }) { return ico(size, <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>); }
+
+/* ---------- style tokens (same card system as Accounts / Conflict Detection / Venue Approvals) ---------- */
+const CARD_BG = 'linear-gradient(145deg, #F8FAFF 0%, #EAF0FC 100%)';
+const CARD_SHADOW = '0 12px 30px -22px rgba(3,22,54,.85)';
+const INPUT_BG = palette.slate50;
+const INPUT_BORDER = `1.5px solid ${palette.slate300}`;
+
+const s = {
+  page: {
+    minHeight: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden',
+    background: `radial-gradient(1100px 700px at 15% 0%, ${palette.navy800}aa 0%, transparent 60%),
+                 radial-gradient(900px 600px at 100% 100%, ${palette.accent}22 0%, transparent 55%),
+                 ${palette.navy900}`,
+  } as const,
+  blobA: { position: 'absolute', width: 420, height: 420, borderRadius: '50%', background: `${palette.accent}1a`, top: -160, left: -140, filter: 'blur(30px)', pointerEvents: 'none' } as const,
+  blobB: { position: 'absolute', width: 380, height: 380, borderRadius: '50%', background: `${palette.slate600}22`, bottom: -160, right: -120, filter: 'blur(30px)', pointerEvents: 'none' } as const,
+
+  // Header — identical to AdminAccountsScreen.
+  topbar: { position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 32px', flexWrap: 'wrap', gap: 12 } as const,
+  brand: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' } as const,
+  logoImg: { width: 40, height: 40, borderRadius: 10, objectFit: 'contain', background: palette.slate50, padding: 4, border: `1px solid ${palette.slate300}` } as const,
+  wordmark: { fontSize: 16, fontWeight: 700, color: palette.white, lineHeight: 1.2 } as const,
+  wordmarkSub: { fontSize: 12, color: palette.slate400, marginTop: 1 } as const,
+  topbarRight: { display: 'flex', gap: 10 } as const,
+  topBtn: { display: 'inline-flex', alignItems: 'center', gap: 7, background: 'transparent', color: palette.slate100, border: `1.5px solid ${palette.slate400}`, borderRadius: 999, padding: '9px 16px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'none' } as const,
+
+  main: { flex: 1, position: 'relative', zIndex: 1, padding: '20px 24px 48px', width: '100%', maxWidth: 1240, margin: '0 auto', boxSizing: 'border-box' } as const,
+  glassPanel: {
+    position: 'relative', background: 'rgba(255,255,255,0.07)',
+    backdropFilter: 'blur(22px) saturate(160%)', WebkitBackdropFilter: 'blur(22px) saturate(160%)',
+    border: '1px solid rgba(255,255,255,0.16)', borderRadius: 24,
+    padding: '28px 28px 34px',
+    boxShadow: '0 24px 60px -32px rgba(3,22,54,0.75), inset 0 1px 0 rgba(255,255,255,0.10)',
+  } as const,
+
+  hero: { position: 'relative', textAlign: 'center', maxWidth: 600, margin: '0 auto 24px' } as const,
+  heroEyebrow: {
+    display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
+    padding: '6px 14px', borderRadius: 999, marginBottom: 14,
+    color: palette.slate100, background: `${palette.navy800}88`, border: `1px solid ${palette.slate400}55`,
+  } as const,
+  heroTitle: { fontSize: 32, fontWeight: 800, color: palette.white, margin: '0 0 8px', letterSpacing: '-0.5px' } as const,
+  heroSubtitle: { fontSize: 14.5, lineHeight: 1.55, color: palette.slate300, margin: 0 } as const,
+
+  banner: {
+    error: { display: 'flex', alignItems: 'center', gap: 8, background: '#FDECEC', color: '#8F2323', border: '1px solid #F3CACA', borderRadius: 12, padding: '11px 16px', fontSize: 14, marginBottom: 16 } as const,
+    ok: { display: 'flex', alignItems: 'center', gap: 8, background: '#E6F4EC', color: '#1F7A45', border: '1px solid #1F7A4555', borderRadius: 12, padding: '11px 16px', fontSize: 14, marginBottom: 16 } as const,
+  },
+
+  card: { background: CARD_BG, border: `1px solid ${palette.slate300}e6`, borderRadius: 18, boxShadow: CARD_SHADOW, marginBottom: 22, overflow: 'hidden' } as const,
+  panelHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '14px 22px', borderBottom: `1px solid ${palette.slate300}`, background: palette.white, flexWrap: 'wrap' } as const,
+  panelHeadLeft: { display: 'flex', alignItems: 'center', gap: 10, font: '700 15.5px Inter, sans-serif', color: palette.navy900 } as const,
+  panelIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 9, background: palette.accentWash, color: palette.accent } as const,
+  panelBody: { padding: 22 } as const,
+  muted: { color: palette.slate500, fontSize: 14 } as const,
+
+  addGrid: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.75fr) minmax(0, 1fr)', gap: 22, alignItems: 'start' } as const,
+  formHead: { display: 'flex', alignItems: 'center', gap: 14, padding: '18px 24px', background: palette.white, borderBottom: `1px solid ${palette.slate300}`, marginBottom: 18 } as const,
+  formHeadIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44, minWidth: 44, borderRadius: '50%', background: palette.accentWash, color: palette.accent } as const,
+  formHeadTitle: { fontSize: 16.5, fontWeight: 800, color: palette.navy900 } as const,
+  formHeadSub: { fontSize: 12.5, color: palette.slate500, marginTop: 3 } as const,
+  closeIconBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 10, border: `1px solid ${palette.slate300}`, background: palette.white, color: palette.slate500, cursor: 'pointer', padding: 0 } as const,
+
+  guideList: { listStyle: 'none', margin: '0 0 22px', padding: 0, display: 'grid', gap: 14 } as const,
+  guideItem: { display: 'flex', alignItems: 'flex-start', gap: 12, fontSize: 14, color: palette.slate600, lineHeight: 1.45 } as const,
+  guideTick: { display: 'inline-flex', color: palette.accent, marginTop: 1 } as const,
+  infoBox: { display: 'flex', gap: 12, padding: '16px 18px', borderRadius: 14, background: palette.accentWash, border: `1px solid ${palette.accentSoft}` } as const,
+  infoTitle: { fontSize: 14, fontWeight: 700, color: palette.accent, marginBottom: 4 } as const,
+  infoText: { fontSize: 13, color: palette.slate500, lineHeight: 1.55 } as const,
+
+  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '18px 20px' } as const,
+  lbl: { display: 'flex', alignItems: 'center', gap: 4, font: '600 12.5px Inter, sans-serif', color: palette.slate600, marginBottom: 7 } as const,
+  fieldIcon: { position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', display: 'flex', color: palette.slate500, pointerEvents: 'none', transition: 'color .15s ease' } as const,
+  input: { width: '100%', font: '14px Inter, sans-serif', padding: '10px 14px 10px 40px', background: INPUT_BG, border: INPUT_BORDER, borderRadius: 10, color: palette.navy900, boxSizing: 'border-box' } as const,
+  select: { width: '100%', font: '14px Inter, sans-serif', padding: '10px 38px 10px 40px', background: INPUT_BG, border: INPUT_BORDER, borderRadius: 10, color: palette.navy900, boxSizing: 'border-box', appearance: 'none', WebkitAppearance: 'none', cursor: 'pointer' } as const,
+  selectChevron: { position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)', display: 'flex', color: palette.slate500, pointerEvents: 'none' } as const,
+
+  primaryBtn: { display: 'inline-flex', alignItems: 'center', gap: 8, background: palette.accent, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 8px 16px -8px rgba(3,22,54,0.6)' } as const,
+  primarySmBtn: { display: 'inline-flex', alignItems: 'center', gap: 6, background: palette.accent, color: '#fff', border: 'none', borderRadius: 9, padding: '8px 16px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' } as const,
+  ghostBtn: { background: palette.white, color: palette.slate500, border: `1.5px solid ${palette.slate300}`, borderRadius: 10, padding: '11px 22px', fontSize: 14.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' } as const,
+  reviewBtn: { display: 'inline-flex', alignItems: 'center', gap: 7, background: palette.accentWash, color: palette.accent, border: `1px solid ${palette.accentSoft}`, borderRadius: 9, padding: '7px 16px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' } as const,
+  linkBtn: { display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', font: '700 13px Inter, sans-serif', color: palette.accent, cursor: 'pointer', padding: '4px 8px' } as const,
+  rowChevron: { display: 'inline-flex', verticalAlign: 'middle', color: palette.slate400, marginLeft: 12 } as const,
+
+  statRow: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 22 } as const,
+  statCard: { display: 'flex', alignItems: 'center', gap: 12, background: palette.slate50, border: `1px solid ${palette.slate300}`, borderRadius: 14, padding: '12px 14px' } as const,
+  statIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, borderRadius: 10 } as const,
+  statValue: { fontSize: 20, fontWeight: 800, lineHeight: 1.1 } as const,
+  statLabel: { fontSize: 11.5, color: palette.slate500, fontWeight: 600, marginTop: 2 } as const,
+
+  searchBox: { position: 'relative', width: 280, maxWidth: '100%' } as const,
+  searchIcon: { position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: palette.slate500, display: 'flex', pointerEvents: 'none' } as const,
+  searchInput: { width: '100%', font: '13.5px Inter, sans-serif', padding: '9px 12px 9px 36px', background: INPUT_BG, border: INPUT_BORDER, borderRadius: 10, color: palette.navy900, boxSizing: 'border-box' } as const,
+
+  tableWrap: { overflowX: 'auto' } as const,
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: 600 } as const,
+  th: { textAlign: 'left', font: '700 11.5px Inter, sans-serif', color: palette.slate500, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '0 12px 12px' } as const,
+  td: { padding: '13px 12px', borderTop: `1px solid ${palette.slate100}`, color: palette.navy900, verticalAlign: 'middle' } as const,
+  tableFoot: { fontSize: 12.5, color: palette.slate500, marginTop: 14 } as const,
+  nameCell: { display: 'flex', alignItems: 'center', gap: 12 } as const,
+  nameText: { fontWeight: 700, color: palette.navy900, fontSize: 14.5 } as const,
+  subText: { fontSize: 12.5, color: palette.slate500, marginTop: 2 } as const,
+  originText: { fontSize: 11.5, color: palette.slate500, marginTop: 2, fontWeight: 600, letterSpacing: '0.04em' } as const,
+  reqIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, minWidth: 38, borderRadius: '50%', background: palette.accentWash, color: palette.accent } as const,
+  iconCell: { display: 'inline-flex', alignItems: 'center', gap: 9 } as const,
+  cellIcon: { display: 'inline-flex', color: palette.accent, opacity: 0.8 } as const,
+  noteText: { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: palette.slate500 } as const,
+  badge: { display: 'inline-block', font: '700 11px Inter, sans-serif', padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' } as const,
+
+  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '34px 16px', textAlign: 'center' } as const,
+  emptyIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 46, height: 46, borderRadius: '50%', background: palette.accentWash, color: palette.accent } as const,
+  skeletonRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderTop: `1px solid ${palette.slate100}` } as const,
+  skeletonLine: { display: 'inline-block', height: 10, borderRadius: 5 } as const,
+  detailTile: { background: palette.slate50, border: `1px solid ${palette.slate300}`, borderRadius: 12, padding: '11px 14px' } as const,
+
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(3,22,54,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 } as const,
+  modalBox: { background: palette.white, borderRadius: 16, boxShadow: '0 24px 60px -20px rgba(3,22,54,0.6)', width: 580, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto' } as const,
+  modalHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: `1px solid ${palette.slate300}`, font: '700 15.5px Inter, sans-serif', color: palette.navy900, background: palette.slate50 } as const,
+
+  footer: { textAlign: 'center', padding: '20px 24px', fontSize: 12.5, color: palette.slate400, borderTop: `1px solid ${palette.slate600}55`, position: 'relative', zIndex: 1 } as const,
+  footerLink: { color: palette.accentSoft, textDecoration: 'none', fontWeight: 600 } as const,
+} satisfies Record<string, React.CSSProperties | Record<string, React.CSSProperties>>;
+
+// ── Review-stepper styles (names unchanged; values re-themed) ──
+const stepperWrap: React.CSSProperties = { display: 'flex', alignItems: 'center', marginBottom: 28, padding: '14px 16px', background: palette.white, border: `1px solid ${palette.slate300}`, borderRadius: 14 };
+const stepTitle: React.CSSProperties = { margin: '0 0 18px', font: '800 18px Inter, sans-serif', color: palette.navy900 };
+const sectionLabel: React.CSSProperties = { font: '700 12px Inter, sans-serif', color: palette.slate500, textTransform: 'uppercase', letterSpacing: '0.05em' };
+const tbl: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 14, background: palette.white, borderRadius: 12, overflow: 'hidden' };
+const th: React.CSSProperties = { textAlign: 'left', font: '700 11.5px Inter, sans-serif', color: palette.slate500, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '10px 12px', borderBottom: `1px solid ${palette.slate300}`, background: palette.slate50 };
+const td: React.CSSProperties = { padding: '11px 12px', borderBottom: `1px solid ${palette.slate100}`, color: palette.navy900, verticalAlign: 'top' };
+const muted: React.CSSProperties = { color: palette.slate500, fontSize: 14, margin: 0 };
+const lbl: React.CSSProperties = { display: 'block', font: '600 12.5px Inter, sans-serif', color: palette.slate600, marginBottom: 6 };
+const inp: React.CSSProperties = { width: '100%', font: '14px Inter, sans-serif', padding: '10px 12px', border: INPUT_BORDER, borderRadius: 10, background: INPUT_BG, color: palette.navy900, boxSizing: 'border-box' as const };
+const textarea: React.CSSProperties = { font: '14px Inter, sans-serif', padding: '11px 13px', border: INPUT_BORDER, borderRadius: 10, background: palette.white, color: palette.navy900, resize: 'vertical' as const, boxSizing: 'border-box' as const };
+const infoBox: React.CSSProperties = { padding: '12px 16px', background: palette.accentWash, border: `1px solid ${palette.accentSoft}`, borderRadius: 12, fontSize: 13.5, color: palette.accent, lineHeight: 1.6 };
+const primaryBtn: React.CSSProperties = { background: palette.accent, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', fontSize: 14, cursor: 'pointer', fontWeight: 700, fontFamily: 'Inter, sans-serif', boxShadow: '0 8px 16px -8px rgba(3,22,54,0.6)' };
+const ghostBtn: React.CSSProperties = { background: palette.white, color: palette.navy900, border: `1.5px solid ${palette.slate300}`, borderRadius: 10, padding: '10px 18px', fontSize: 14, cursor: 'pointer', fontWeight: 600, fontFamily: 'Inter, sans-serif' };
+const acceptBtn: React.CSSProperties = { background: palette.accent, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontSize: 14.5, cursor: 'pointer', fontWeight: 700, fontFamily: 'Inter, sans-serif' };
+const rejectBtn: React.CSSProperties = { background: '#B3352B', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontSize: 14.5, cursor: 'pointer', fontWeight: 700, fontFamily: 'Inter, sans-serif' };
+const warnBtn: React.CSSProperties = { background: '#9A6412', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontSize: 14, cursor: 'pointer', fontWeight: 700, fontFamily: 'Inter, sans-serif' };
+const actionRow: React.CSSProperties = { display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' };
+const qtyBtn: React.CSSProperties = { width: 28, height: 28, borderRadius: 8, border: `1.5px solid ${palette.slate300}`, background: palette.white, color: palette.accent, cursor: 'pointer', font: '700 14px Inter, sans-serif' };
+const bdanger: React.CSSProperties = { background: '#FDECEC', color: '#B3352B', font: '700 11px Inter, sans-serif', padding: '3px 9px', borderRadius: 999, flexShrink: 0 };
 const box = {
-  err: { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 6, padding: '10px 14px', marginBottom: 12, fontSize: 14 } as React.CSSProperties,
-  ok: { background: '#eaf6ee', color: '#1e6b3a', border: '1px solid #c2e6cd', borderRadius: 6, padding: '10px 14px', marginBottom: 12, fontSize: 14 } as React.CSSProperties,
+  err: { background: '#FDECEC', color: '#8F2323', border: '1px solid #F3CACA', borderRadius: 12, padding: '11px 16px', marginBottom: 12, fontSize: 14 } as React.CSSProperties,
+  ok: { background: '#E6F4EC', color: '#1F7A45', border: '1px solid #1F7A4555', borderRadius: 12, padding: '11px 16px', marginBottom: 12, fontSize: 14 } as React.CSSProperties,
 };
