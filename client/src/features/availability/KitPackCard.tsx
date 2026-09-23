@@ -21,10 +21,10 @@ export function KitPackCard({ pack, isStudent }: Props) {
 
   const kitBadgeStyle: React.CSSProperties =
     pack.kitStatusBadge === 'AVAILABLE'
-      ? { ...badgeBase, backgroundColor: '#d1fae5', color: '#065f46' }
+      ? { ...badgeBase, backgroundColor: '#E6F4EC', color: '#1F7A45' }
       : pack.kitStatusBadge === 'PARTIAL'
-      ? { ...badgeBase, backgroundColor: '#fef3c7', color: '#92400e' }
-      : { ...badgeBase, backgroundColor: '#fee2e2', color: '#991b1b' };
+      ? { ...badgeBase, backgroundColor: '#FDF1E3', color: '#9A6412' }
+      : { ...badgeBase, backgroundColor: '#FDECEC', color: '#8F2323' };
 
   const kitBadgeText =
     pack.kitStatusBadge === 'AVAILABLE'
@@ -52,10 +52,10 @@ export function KitPackCard({ pack, isStudent }: Props) {
         {pack.items.map((item) => {
           const itemBadge: React.CSSProperties =
             item.statusBadge === 'AVAILABLE'
-              ? { ...itemBadgeBase, backgroundColor: '#d1fae5', color: '#065f46' }
+              ? { ...itemBadgeBase, backgroundColor: '#E6F4EC', color: '#1F7A45' }
               : item.statusBadge === 'LOW_STOCK'
-              ? { ...itemBadgeBase, backgroundColor: '#fef3c7', color: '#92400e' }
-              : { ...itemBadgeBase, backgroundColor: '#fee2e2', color: '#991b1b' };
+              ? { ...itemBadgeBase, backgroundColor: '#FDF1E3', color: '#9A6412' }
+              : { ...itemBadgeBase, backgroundColor: '#FDECEC', color: '#8F2323' };
           const itemBadgeText =
             item.statusBadge === 'AVAILABLE' ? 'Available' : item.statusBadge === 'LOW_STOCK' ? 'Low Stock' : 'Checked Out';
 
@@ -121,12 +121,12 @@ export function KitPackCard({ pack, isStudent }: Props) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const card: React.CSSProperties = {
-  background: 'var(--color-surface, #fff)',
-  border: '1px solid var(--color-border, #e5e7eb)',
-  borderRadius: 12,
+  background: 'linear-gradient(145deg, #F8FAFF 0%, #EAF0FC 100%)',
+  border: '1px solid #CAD5E2e6',
+  borderRadius: 16,
   padding: '20px 24px',
   marginBottom: 24,
-  boxShadow: '0 2px 12px rgba(37,99,235,0.08)',
+  boxShadow: '0 12px 30px -22px rgba(3,22,54,.85)',
 };
 
 const header: React.CSSProperties = {
@@ -152,14 +152,14 @@ const kitIcon: React.CSSProperties = {
 const title: React.CSSProperties = {
   margin: 0,
   fontSize: 18,
-  fontWeight: 700,
-  color: 'var(--color-text, #111)',
+  fontWeight: 800,
+  color: '#0F172B',
 };
 
 const subtitle: React.CSSProperties = {
   margin: '2px 0 0',
   fontSize: 13,
-  color: 'var(--color-muted, #6b7280)',
+  color: '#62748E',
 };
 
 const badgeBase: React.CSSProperties = {
@@ -183,8 +183,9 @@ const itemRow: React.CSSProperties = {
   alignItems: 'center',
   gap: 12,
   padding: '8px 12px',
-  background: 'var(--color-surface-alt, #f9fafb)',
-  borderRadius: 8,
+  background: '#F8FAFC',
+  borderRadius: 10,
+  border: '1px solid #E2E8F0',
 };
 
 const thumb: React.CSSProperties = {
@@ -205,7 +206,7 @@ const thumbPlaceholder: React.CSSProperties = {
   width: 36,
   height: 36,
   borderRadius: 6,
-  background: 'var(--color-accent, #2563eb)',
+  background: 'linear-gradient(135deg, #132357, #1C398E)',
   color: '#fff',
   display: 'flex',
   alignItems: 'center',
@@ -223,13 +224,13 @@ const itemBody: React.CSSProperties = {
 
 const itemName: React.CSSProperties = {
   fontSize: 14,
-  fontWeight: 600,
-  color: 'var(--color-text, #111)',
+  fontWeight: 700,
+  color: '#0F172B',
 };
 
 const itemMeta: React.CSSProperties = {
   fontSize: 12,
-  color: 'var(--color-muted, #6b7280)',
+  color: '#62748E',
 };
 
 const itemBadgeBase: React.CSSProperties = {
@@ -242,7 +243,7 @@ const itemBadgeBase: React.CSSProperties = {
 };
 
 const footer: React.CSSProperties = {
-  borderTop: '1px solid var(--color-border, #e5e7eb)',
+  borderTop: '1px solid #E2E8F0',
   paddingTop: 14,
   display: 'flex',
   alignItems: 'center',
@@ -254,24 +255,27 @@ const footer: React.CSSProperties = {
 const ctaNote: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
-  color: 'var(--color-muted, #6b7280)',
+  color: '#62748E',
   flex: 1,
 };
 
 const ctaBtn: React.CSSProperties = {
   padding: '9px 18px',
-  borderRadius: 8,
+  borderRadius: 9,
   border: 'none',
-  background: 'var(--color-accent, #2563eb)',
+  background: '#1C398E',
   color: '#fff',
   fontSize: 14,
-  fontWeight: 600,
+  fontWeight: 700,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
+  boxShadow: '0 10px 22px -12px rgba(28,57,142,.75)',
 };
 
 const ctaBtnDisabled: React.CSSProperties = {
   ...ctaBtn,
-  background: 'var(--color-muted, #6b7280)',
+  background: '#CAD5E2',
+  color: '#62748E',
+  boxShadow: 'none',
   cursor: 'default',
 };

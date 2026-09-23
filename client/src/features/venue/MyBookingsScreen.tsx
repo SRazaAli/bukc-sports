@@ -1,5 +1,5 @@
 /**
- * Student — Book a Venue (VENUE-01..14, VENUE-05/06/35/36).
+ * Student/External — Book a Venue (VENUE-01..14, VENUE-05/06/35/36).
  *
  * Five-step wizard:
  *   Step 1 — Booking type, venue, sport, participant counts, event/match format
@@ -14,11 +14,21 @@
  *   VENUE-06: single or multi-session
  *   VENUE-07: one active request at a time (backend also enforces)
  *   VENUE-24/25: session conflict pre-check against approved calendar
+ *
+ * Re-themed to match the site's actual current visual language (Landing /
+ * Home / Register / Profile / Usage History / Accounts / Offline Fallback /
+ * Conflict Detection / Venue Calendar / Equipment Availability / Kit
+ * Borrow): dark navy page with two soft glow blobs, the same header (logo,
+ * wordmark, ghost Back/Sign out) as Accounts, everything wrapped in one
+ * frosted glass panel, white/soft-gradient cards, and a single accent blue
+ * for interactive elements. Every color in the five-step wizard, the
+ * booking table, and the Sent-back review modal was mapped from the old
+ * ad-hoc palette onto these same tokens — no JSX structure, validation, or
+ * API calls were touched, only color/style values.
  */
 import { useEffect, useState, useCallback, Fragment } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
-import { PortalShell } from '../auth/PortalShell.js';
 import {
   listVenues, submitBooking, listMyBookings, confirmShortfall, listCalendar,
   acceptSentBack, declineSentBack, getBookingFull,
@@ -27,6 +37,23 @@ import {
 import { listTypes, type EquipmentType } from '../inventory/api.js';
 import { useSessionRows, SessionRowsEditor } from './SessionsBuilder.js';
 import { ApiRequestError } from '../../lib/api.js';
+
+/* ---------- theme (identical values used across the app) ---------- */
+const palette = {
+  navy900: '#0F172B',
+  navy800: '#132357',
+  navyDeep: '#031636',
+  slate600: '#132357',
+  slate500: '#62748E',
+  slate400: '#90A1B9',
+  slate300: '#CAD5E2',
+  slate100: '#E2E8F0',
+  slate50: '#F8FAFC',
+  white: '#FFFFFF',
+  accent: '#1C398E',
+  accentSoft: '#DBEAFE',
+  accentWash: '#1C398E14',
+};
 
 function errMsg(e: unknown) {
   return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.';
@@ -44,7 +71,8 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 
 // ── Root screen ──
 export default function MyBookingsScreen() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
+  const navigate = useNavigate();
   const [venues, setVenues] = useState<Venue[]>([]);
   const [bookings, setBookings] = useState<MyBooking[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +93,7 @@ export default function MyBookingsScreen() {
     void load();
   }, [loading, user, load]);
 
-  if (loading) return <PortalShell title="Book a Venue"><p /></PortalShell>;
+  if (loading) return <div className="mbk-ui" style={{ minHeight: '100%', background: palette.navy900 }} />;
   if (!user) return <Navigate to="/" replace />;
   if (user.role !== 'STUDENT' && user.role !== 'EXTERNAL') return <Navigate to="/home" replace />;
 
@@ -74,10 +102,38 @@ export default function MyBookingsScreen() {
   );
 
   return (
-    <PortalShell title="Book a Venue" tint="sage">
-      <div style={wrap}>
-        {error && <div style={box.err}>{error}</div>}
-        {notice && <div style={box.ok}>{notice}</div>}
+    <div className="mbk-ui" style={s.page}>
+      <MbkStyles />
+      <div style={s.blobA} aria-hidden />
+      <div style={s.blobB} aria-hidden />
+
+      <header style={s.topbar}>
+        <div style={s.brand}>
+          <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
+          <div>
+            <div style={s.wordmark}>Bahria University</div>
+            <div style={s.wordmarkSub}>Sports Management Portal</div>
+          </div>
+        </div>
+        <div style={s.topbarRight}>
+          <button type="button" className="hist-topbtn" style={s.topBtn} onClick={() => navigate('/home')}><BackIcon /> Back</button>
+          <button type="button" className="hist-topbtn hist-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
+            <SignOutIcon /> Sign out
+          </button>
+        </div>
+      </header>
+
+      <main style={s.main}>
+        <div className="mbk-glass" style={s.glassPanel}>
+          <div style={s.headRow}>
+            <span style={s.eyebrow}>{user.role === 'EXTERNAL' ? 'External Portal' : 'Student Portal'}</span>
+            <h1 style={s.title}>Book a Venue</h1>
+            <p style={s.subtitle}>Submit a booking request for a match, tournament, or event — a Coordinator will review it.</p>
+          </div>
+
+          <div style={wrap}>
+            {error && <div style={box.err}>{error}</div>}
+            {notice && <div style={box.ok}>{notice}</div>}
 
         <Panel title="My Booking Requests" action={
           !hasActive && !showForm
@@ -88,8 +144,8 @@ export default function MyBookingsScreen() {
           {bookings.length === 0 && !showForm && (
             <div style={emptyState}>
               <div style={{ fontSize: 44, marginBottom: 12 }}>🏟</div>
-              <p style={{ margin: '0 0 6px', font: '600 16px var(--font-body)', color: '#333' }}>No booking requests yet.</p>
-              <p style={{ margin: '0 0 20px', font: '14px var(--font-body)', color: '#5c6773' }}>Submit a request to book a venue for your match or tournament.</p>
+              <p style={{ margin: '0 0 6px', font: '600 16px Inter, sans-serif', color: '#0F172B' }}>No booking requests yet.</p>
+              <p style={{ margin: '0 0 20px', font: '14px Inter, sans-serif', color: '#62748E' }}>Submit a request to book a venue for your match or tournament.</p>
               <button style={primaryBtn} onClick={() => setShowForm(true)}>New Booking Request</button>
             </div>
           )}
@@ -105,10 +161,10 @@ export default function MyBookingsScreen() {
                 {bookings.map((b) => (
                   <Fragment key={b.booking_id}>
                   <tr>
-                    <td style={td}><div style={{ fontWeight: 600 }}>{b.venue_name}</div><div style={{ fontSize: 12, color: '#5c6773' }}>{b.purpose}</div></td>
+                    <td style={td}><div style={{ fontWeight: 600 }}>{b.venue_name}</div><div style={{ fontSize: 12, color: '#62748E' }}>{b.purpose}</div></td>
                     <td style={td}>{b.sessionCount > 1 ? `${b.sessionCount} sessions · ` : ''}{b.firstStart ? new Date(b.firstStart).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</td>
                     <td style={td}><StatusBadge status={b.status} /></td>
-                    <td style={{ ...td, color: '#8f2323', fontSize: 13 }}>{b.rejection_reason ?? ''}</td>
+                    <td style={{ ...td, color: '#8F2323', fontSize: 13 }}>{b.rejection_reason ?? ''}</td>
                     <td style={{ ...td, textAlign: 'right' }}>
                       {b.status === 'SHORTFALL_PENDING' && (
                         <ShortfallActions bookingId={b.booking_id}
@@ -147,8 +203,33 @@ export default function MyBookingsScreen() {
             onError={(m) => { setError(m); setNotice(null); }}
             onClose={() => setReviewingBooking(null)} />
         )}
-      </div>
-    </PortalShell>
+          </div>
+        </div>
+      </main>
+
+      <footer style={s.footer}>
+        2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
+      </footer>
+    </div>
+  );
+}
+
+function BackIcon() { return <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M9.5 3 4 8l5.5 5M4.5 8H14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+function SignOutIcon() { return <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M6.5 2H3.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M10.5 5 14 8l-3.5 3M14 8H6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+
+function MbkStyles() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+      .mbk-ui { font-family: 'Inter', system-ui, sans-serif; }
+      .mbk-ui * { box-sizing: border-box; }
+      .hist-topbtn { transition: background-color .18s ease, border-color .18s ease, color .18s ease; text-decoration: none; }
+      .hist-topbtn:hover { background-color: rgba(255,255,255,0.08); border-color: ${palette.slate100}; }
+      .hist-signout:hover { background-color: ${palette.accent} !important; border-color: ${palette.accent} !important; color: #fff !important; }
+      @media (max-width: 620px) {
+        .mbk-glass { padding: 20px 14px 26px !important; border-radius: 18px !important; }
+      }
+    `}</style>
   );
 }
 
@@ -406,7 +487,7 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
   }
 
   const fi = (hasErr: boolean): React.CSSProperties => ({
-    ...inp, ...(hasErr ? { borderColor: '#c0392b', background: '#fff8f8' } : {}),
+    ...inp, ...(hasErr ? { borderColor: '#B3352B', background: '#FDECEC' } : {}),
   });
 
   const STEP_LABELS = ['Basics', 'Teams & Rosters', 'Equipment', 'Sessions', 'Review'];
@@ -419,14 +500,14 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, flex: i < TOTAL - 1 ? 1 : 0 }}>
             <div style={{
               width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              font: '600 12px var(--font-body)', flexShrink: 0,
-              background: step > i + 1 ? '#1f8a4c' : step === i + 1 ? '#26485f' : '#e5e5e5',
-              color: step >= i + 1 ? '#fff' : '#888',
+              font: '600 12px Inter, sans-serif', flexShrink: 0,
+              background: step > i + 1 ? '#1F7A45' : step === i + 1 ? '#1C398E' : '#CAD5E2',
+              color: step >= i + 1 ? '#fff' : '#62748E',
             }}>
               {step > i + 1 ? '✓' : i + 1}
             </div>
-            <span style={{ fontSize: 11, color: step === i + 1 ? '#26485f' : '#888', fontWeight: step === i + 1 ? 600 : 400, whiteSpace: 'nowrap' }}>{label}</span>
-            {i < TOTAL - 1 && <div style={{ flex: 1, height: 2, background: step > i + 1 ? '#1f8a4c' : '#e5e5e5', margin: '0 3px' }} />}
+            <span style={{ fontSize: 11, color: step === i + 1 ? '#1C398E' : '#62748E', fontWeight: step === i + 1 ? 600 : 400, whiteSpace: 'nowrap' }}>{label}</span>
+            {i < TOTAL - 1 && <div style={{ flex: 1, height: 2, background: step > i + 1 ? '#1F7A45' : '#CAD5E2', margin: '0 3px' }} />}
           </div>
         ))}
       </div>
@@ -436,18 +517,18 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
         <div style={stepBody}>
           <h3 style={stepTitle}>Step 1 — Booking Basics</h3>
           <div style={{ marginBottom: 18 }}>
-            <span style={{ ...lbl, ...(s1Err.bookingType ? { color: '#c0392b' } : {}) }}>Booking type *</span>
+            <span style={{ ...lbl, ...(s1Err.bookingType ? { color: '#B3352B' } : {}) }}>Booking type *</span>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
               {[
                 { type: 'INTER_UNIVERSITY' as BookingType, icon: '🏆', title: 'Inter-University Competition', desc: 'BUKC hosts a visiting university team for an official match or tournament.' },
                 { type: 'INTERNAL' as BookingType, icon: '🎯', title: 'Internal Competition', desc: 'Intra-campus or inter-department competition between two BUKC teams.' },
               ].map(({ type, icon, title, desc }) => (
                 <button key={type} type="button"
-                  style={{ ...typeCard, ...(bookingType === type ? typeCardActive : {}), ...(s1Err.bookingType ? { borderColor: '#c0392b' } : {}) }}
+                  style={{ ...typeCard, ...(bookingType === type ? typeCardActive : {}), ...(s1Err.bookingType ? { borderColor: '#B3352B' } : {}) }}
                   onClick={() => { setBookingType(type); setS1Err((p) => ({ ...p, bookingType: '' })); }}>
                   <div style={{ fontSize: 26, marginBottom: 6 }}>{icon}</div>
-                  <div style={{ font: '600 14px var(--font-body)', color: '#26485f', marginBottom: 4 }}>{title}</div>
-                  <div style={{ fontSize: 12, color: '#5c6773', lineHeight: 1.4 }}>{desc}</div>
+                  <div style={{ font: '600 14px Inter, sans-serif', color: '#1C398E', marginBottom: 4 }}>{title}</div>
+                  <div style={{ fontSize: 12, color: '#62748E', lineHeight: 1.4 }}>{desc}</div>
                 </button>
               ))}
             </div>
@@ -478,7 +559,7 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
             <L label="BUKC team — participants *">
               <input type="number" min={1} style={fi(!!s1Err.bukcCount)} value={bukcCount} onChange={(e) => { setBukcCount(e.target.value); setS1Err((p) => ({ ...p, bukcCount: '' })); }} placeholder="e.g. 11" />
               {s1Err.bukcCount && <span style={ferr}>{s1Err.bukcCount}</span>}
-              {bukcCountNum > 0 && <span style={{ fontSize: 11, color: '#5c6773' }}>Roster in Step 2 will have {bukcCountNum} entries</span>}
+              {bukcCountNum > 0 && <span style={{ fontSize: 11, color: '#62748E' }}>Roster in Step 2 will have {bukcCountNum} entries</span>}
             </L>
             <L label={bookingType === 'INTER_UNIVERSITY' ? 'Visiting team — participants *' : 'Team B — participants *'}>
               <input type="number" min={1} style={fi(!!s1Err.opponentCount)} value={opponentCount} onChange={(e) => { setOpponentCount(e.target.value); setS1Err((p) => ({ ...p, opponentCount: '' })); }} placeholder="e.g. 11" />
@@ -538,7 +619,7 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
               </L>
             )}
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: '10px 0 6px', font: '14px var(--font-body)' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: '10px 0 6px', font: '14px Inter, sans-serif' }}>
             <input type="checkbox" checked={bukcHasCaptain} onChange={(e) => setBHC(e.target.checked)} />
             This team has a designated captain
           </label>
@@ -571,7 +652,7 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
               <L label="City *"><input style={fi(!!s2Err.opponentCity)} value={opponentCity} onChange={(e) => { setOC(e.target.value); setS2Err((p) => ({ ...p, opponentCity: '' })); }} placeholder="e.g. Karachi" />{s2Err.opponentCity && <span style={ferr}>{s2Err.opponentCity}</span>}</L>
             </>}
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: '10px 0 6px', font: '14px var(--font-body)' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: '10px 0 6px', font: '14px Inter, sans-serif' }}>
             <input type="checkbox" checked={opponentHasCaptain} onChange={(e) => setOHC(e.target.checked)} />
             This team has a designated captain
           </label>
@@ -604,11 +685,11 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
               { value: 'SELF' as EquipmentSupport, title: 'Both teams supply own equipment', desc: 'Each team brings the equipment needed. No university support required.' },
               { value: 'UNIVERSITY' as EquipmentSupport, title: 'University support required', desc: 'The university will provide equipment. Specify what is needed below. The Coordinator will verify availability and plan allocation.' },
             ].map(({ value, title, desc }) => (
-              <label key={value} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', padding: '10px 14px', border: `2px solid ${equipmentSupport === value ? '#26485f' : '#e5e5e5'}`, borderRadius: 8, background: equipmentSupport === value ? '#f0f4f8' : '#fafafa' }}>
+              <label key={value} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', padding: '10px 14px', border: `2px solid ${equipmentSupport === value ? '#1C398E' : '#CAD5E2'}`, borderRadius: 8, background: equipmentSupport === value ? '#1C398E14' : '#F8FAFC' }}>
                 <input type="radio" name="eqSupport" value={value} checked={equipmentSupport === value} onChange={() => setEquipmentSupport(value)} style={{ marginTop: 3 }} />
                 <div>
-                  <div style={{ font: '600 14px var(--font-body)', color: '#26485f' }}>{title}</div>
-                  <div style={{ font: '12px var(--font-body)', color: '#5c6773', marginTop: 2 }}>{desc}</div>
+                  <div style={{ font: '600 14px Inter, sans-serif', color: '#1C398E' }}>{title}</div>
+                  <div style={{ font: '12px Inter, sans-serif', color: '#62748E', marginTop: 2 }}>{desc}</div>
                 </div>
               </label>
             ))}
@@ -626,13 +707,13 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
               ) : (
                 <div style={{ display: 'grid', gap: 10 }}>
                   {equipmentItems.map((item, i) => (
-                    <div key={item.equipmentTypeId} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 14px', border: `1px solid ${item.quantity > 0 ? '#26485f' : '#e5e5e5'}`, borderRadius: 8, background: item.quantity > 0 ? '#f0f4f8' : '#fafafa' }}>
-                      <div style={{ flex: 1, font: '500 14px var(--font-body)', color: '#333' }}>
-                        {item.name}{item.lendingUnit === 'PAIR' ? <span style={{ fontSize: 12, color: '#5c6773', marginLeft: 6 }}>(pair)</span> : null}
+                    <div key={item.equipmentTypeId} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 14px', border: `1px solid ${item.quantity > 0 ? '#1C398E' : '#CAD5E2'}`, borderRadius: 8, background: item.quantity > 0 ? '#1C398E14' : '#F8FAFC' }}>
+                      <div style={{ flex: 1, font: '500 14px Inter, sans-serif', color: '#0F172B' }}>
+                        {item.name}{item.lendingUnit === 'PAIR' ? <span style={{ fontSize: 12, color: '#62748E', marginLeft: 6 }}>(pair)</span> : null}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <button type="button" style={qtyBtn} onClick={() => setEquipmentItems((prev) => prev.map((e, j) => j === i ? { ...e, quantity: Math.max(0, e.quantity - 1) } : e))}>−</button>
-                        <span style={{ font: '600 16px var(--font-body)', minWidth: 28, textAlign: 'center', color: item.quantity > 0 ? '#26485f' : '#aaa' }}>{item.quantity}</span>
+                        <span style={{ font: '600 16px Inter, sans-serif', minWidth: 28, textAlign: 'center', color: item.quantity > 0 ? '#1C398E' : '#90A1B9' }}>{item.quantity}</span>
                         <button type="button" style={qtyBtn} onClick={() => setEquipmentItems((prev) => prev.map((e, j) => j === i ? { ...e, quantity: e.quantity + 1 } : e))}>+</button>
                       </div>
                     </div>
@@ -652,12 +733,12 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
           <div style={{ ...venueInfo, marginBottom: 14 }}>
             <strong>Date rules:</strong> Weekdays only (Mon–Fri) · Future dates only · No overlap with existing approved sessions at this venue
           </div>
-          {eventFormat === 'TOURNAMENT' && <p style={{ margin: '-4px 0 14px', fontSize: 13.5, color: '#5c6773' }}>Add one session per match day. Same-date sessions are not allowed.</p>}
+          {eventFormat === 'TOURNAMENT' && <p style={{ margin: '-4px 0 14px', fontSize: 13.5, color: '#62748E' }}>Add one session per match day. Same-date sessions are not allowed.</p>}
           <SessionRowsEditor rows={sessions} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} errors={sessionErrors} allowMultiple={eventFormat === 'TOURNAMENT'} />
           <div style={{ marginTop: 20 }}>
             <L label="Special requirements / notes (optional)">
               <textarea style={{ ...inp, minHeight: 72, resize: 'vertical', width: '100%', boxSizing: 'border-box' }} value={specialRequirements} onChange={(e) => setSpecialReq(e.target.value)} placeholder="e.g. Scoreboard access, spectator seating for 50, referee required…" maxLength={500} />
-              <span style={{ fontSize: 11, color: '#8a949f' }}>{specialRequirements.length}/500</span>
+              <span style={{ fontSize: 11, color: '#62748E' }}>{specialRequirements.length}/500</span>
             </L>
           </div>
         </div>
@@ -667,7 +748,7 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
       {step === 5 && (
         <div style={stepBody}>
           <h3 style={stepTitle}>Step 5 — Review Your Request</h3>
-          <p style={{ margin: '-8px 0 18px', fontSize: 13.5, color: '#5c6773' }}>Verify everything below before submitting. You cannot edit after submission.</p>
+          <p style={{ margin: '-8px 0 18px', fontSize: 13.5, color: '#62748E' }}>Verify everything below before submitting. You cannot edit after submission.</p>
 
           <RevSec title="Event Details">
             <RevRow label="Type" value={bookingType === 'INTER_UNIVERSITY' ? 'Inter-University Competition' : 'Internal Competition'} />
@@ -727,11 +808,11 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
 
           {specialRequirements && (
             <RevSec title="Special Requirements">
-              <div style={{ padding: '6px 14px', fontSize: 13.5, color: '#444', lineHeight: 1.5 }}>{specialRequirements}</div>
+              <div style={{ padding: '6px 14px', fontSize: 13.5, color: '#0F172B', lineHeight: 1.5 }}>{specialRequirements}</div>
             </RevSec>
           )}
 
-          <div style={{ marginTop: 16, padding: '12px 14px', background: '#f0f4f8', borderRadius: 6, fontSize: 13, color: '#5c6773', lineHeight: 1.6 }}>
+          <div style={{ marginTop: 16, padding: '12px 14px', background: '#1C398E14', borderRadius: 6, fontSize: 13, color: '#62748E', lineHeight: 1.6 }}>
             By submitting, you confirm all information is accurate and this event complies with BUKC Sports Department policies.
           </div>
         </div>
@@ -744,7 +825,7 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
           {step < TOTAL && <button type="button" style={primaryBtn} onClick={nextStep}>Continue →</button>}
           {step === TOTAL && <button type="button" style={submitBtn} disabled={busy} onClick={submit}>{busy ? 'Submitting…' : 'Submit Booking Request'}</button>}
         </div>
-        <button type="button" style={{ ...ghostBtn, color: '#c0392b', borderColor: '#c0392b' }} onClick={onCancel}>Cancel</button>
+        <button type="button" style={{ ...ghostBtn, color: '#B3352B', borderColor: '#B3352B' }} onClick={onCancel}>Cancel</button>
       </div>
     </Panel>
   );
@@ -763,8 +844,8 @@ function RosterTable({ players, onChange, withEnrollment, label }: {
       <span style={{ ...lbl, marginBottom: 8 }}>{label}</span>
       <div style={{ display: 'grid', gap: 6 }}>
         {players.map((player, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8f9fa', padding: '7px 10px', borderRadius: 6, border: '1px solid #e5e5e5' }}>
-            <span style={{ fontSize: 12, color: '#8a949f', width: 22, flexShrink: 0 }}>#{i + 1}</span>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#F8FAFC', padding: '7px 10px', borderRadius: 6, border: '1px solid #CAD5E2' }}>
+            <span style={{ fontSize: 12, color: '#62748E', width: 22, flexShrink: 0 }}>#{i + 1}</span>
             {withEnrollment && (
               <input style={{ ...inp, flex: 1 }} placeholder="Enrollment no." value={player.enrollmentNo}
                 onChange={(e) => onChange((prev) => prev.map((p, j) => j === i ? { ...p, enrollmentNo: e.target.value } : p))} />
@@ -774,40 +855,40 @@ function RosterTable({ players, onChange, withEnrollment, label }: {
           </div>
         ))}
       </div>
-      <p style={{ margin: '6px 0 0', fontSize: 12, color: '#5c6773' }}>To change roster size, go back to Step 1 and update the participant count.</p>
+      <p style={{ margin: '6px 0 0', fontSize: 12, color: '#62748E' }}>To change roster size, go back to Step 1 and update the participant count.</p>
     </div>
   );
 }
 
 // ── Small reusable components ──
 function SecHead({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return <div style={{ font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '18px 0 10px', paddingBottom: 6, borderBottom: '2px solid #e7edf4', ...style }}>{children}</div>;
+  return <div style={{ font: '600 12px Inter, sans-serif', color: '#1C398E', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '18px 0 10px', paddingBottom: 6, borderBottom: '2px solid #E2E8F0', ...style }}>{children}</div>;
 }
 function RevSec({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 12, border: '1px solid #e5e5e5', borderRadius: 6, overflow: 'hidden' }}>
-      <div style={{ padding: '7px 14px', background: '#f7f9fb', borderBottom: '1px solid #e5e5e5', font: '600 11px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</div>
+    <div style={{ marginBottom: 12, border: '1px solid #CAD5E2', borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ padding: '7px 14px', background: '#F8FAFC', borderBottom: '1px solid #CAD5E2', font: '600 11px Inter, sans-serif', color: '#1C398E', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</div>
       <div style={{ padding: '2px 0' }}>{children}</div>
     </div>
   );
 }
 function RevRow({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', padding: '5px 14px', borderBottom: '1px solid #f4f4f4', fontSize: 13.5 }}>
-      <span style={{ color: '#8a949f', fontWeight: 600 }}>{label}</span>
-      <span style={{ color: '#333' }}>{value}</span>
+    <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', padding: '5px 14px', borderBottom: '1px solid #F8FAFC', fontSize: 13.5 }}>
+      <span style={{ color: '#62748E', fontWeight: 600 }}>{label}</span>
+      <span style={{ color: '#0F172B' }}>{value}</span>
     </div>
   );
 }
 function StatusBadge({ status }: { status: string }) {
-  const s = ['APPROVED', 'COMPLETED'].includes(status) ? { background: '#e6f4ec', color: '#1f7a45' }
-    : ['REJECTED', 'CANCELLED'].includes(status) ? { background: '#fbe9e7', color: '#b3352b' }
-    : status === 'SENT_BACK' ? { background: '#fdf1e3', color: '#9a6412' }
-    : { background: '#f0f4f8', color: '#26485f' };
+  const s = ['APPROVED', 'COMPLETED'].includes(status) ? { background: '#E6F4EC', color: '#1F7A45' }
+    : ['REJECTED', 'CANCELLED'].includes(status) ? { background: '#FDECEC', color: '#B3352B' }
+    : status === 'SENT_BACK' ? { background: '#FDF1E3', color: '#9A6412' }
+    : { background: '#1C398E14', color: '#1C398E' };
   const label = status === 'SHORTFALL_PENDING' ? 'Awaiting your response'
     : status === 'SENT_BACK' ? 'Returned'
     : status;
-  return <span style={{ font: '600 11px var(--font-mono)', padding: '2px 8px', borderRadius: 4, ...s }}>{label}</span>;
+  return <span style={{ font: '600 11px "JetBrains Mono", ui-monospace, monospace', padding: '2px 8px', borderRadius: 4, ...s }}>{label}</span>;
 }
 function SentBackReviewModal({ booking, onDone, onError, onClose }: {
   booking: MyBooking;
@@ -846,46 +927,46 @@ function SentBackReviewModal({ booking, onDone, onError, onClose }: {
   });
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(3,22,54,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
       onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: 10, padding: '28px 32px', maxWidth: 560, width: '94%', boxShadow: '0 8px 32px rgba(0,0,0,0.18)', maxHeight: '90vh', overflowY: 'auto' }}
+      <div style={{ background: '#fff', borderRadius: 16, padding: '28px 32px', maxWidth: 560, width: '94%', boxShadow: '0 24px 60px -20px rgba(3,22,54,0.6)', maxHeight: '90vh', overflowY: 'auto' }}
         onClick={(e) => e.stopPropagation()}>
 
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 19, color: '#26485f' }}>Coordinator's Response</h2>
-            <div style={{ fontSize: 13, color: '#5c6773', marginTop: 3 }}>
+            <h2 style={{ margin: 0, fontSize: 19, color: '#1C398E' }}>Coordinator's Response</h2>
+            <div style={{ fontSize: 13, color: '#62748E', marginTop: 3 }}>
               {booking.venue_name} · {booking.purpose}
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#8a949f', lineHeight: 1 }}>×</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#62748E', lineHeight: 1 }}>×</button>
         </div>
 
         {!detail ? (
-          <p style={{ color: '#8a949f', fontSize: 14 }}>Loading…</p>
+          <p style={{ color: '#62748E', fontSize: 14 }}>Loading…</p>
         ) : (
           <>
             {/* Coordinator's note */}
             {note && (
-              <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
-                <div style={{ font: '600 12px var(--font-body)', color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+              <div style={{ background: '#FDF1E3', border: '1px solid #F0C060', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+                <div style={{ font: '600 12px Inter, sans-serif', color: '#9A6412', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
                   Coordinator's Note
                 </div>
-                <p style={{ margin: 0, fontSize: 14.5, color: '#78350f', lineHeight: 1.6 }}>{note}</p>
+                <p style={{ margin: 0, fontSize: 14.5, color: '#9A6412', lineHeight: 1.6 }}>{note}</p>
               </div>
             )}
 
             {/* Proposed schedule */}
             {proposed && proposed.length > 0 && (
-              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
-                <div style={{ font: '600 12px var(--font-body)', color: '#1e40af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
+              <div style={{ background: '#E3F2FF', border: '1px solid #90CAF9', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+                <div style={{ font: '600 12px Inter, sans-serif', color: '#1565C0', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
                   📅 Proposed Alternative Schedule
                 </div>
                 {proposed.map((s) => (
                   <div key={s.sessionNo} style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: 8, marginBottom: 6, fontSize: 14 }}>
-                    <span style={{ font: '600 12px var(--font-mono)', color: '#3730a3' }}>Session {s.sessionNo}</span>
-                    <span style={{ color: '#1e3a8a' }}>
+                    <span style={{ font: '600 12px "JetBrains Mono", ui-monospace, monospace', color: '#1565C0' }}>Session {s.sessionNo}</span>
+                    <span style={{ color: '#1565C0' }}>
                       {new Date(s.startAt).toLocaleDateString('en-PK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                       {' · '}
                       {new Date(s.startAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
@@ -894,7 +975,7 @@ function SentBackReviewModal({ booking, onDone, onError, onClose }: {
                     </span>
                   </div>
                 ))}
-                <p style={{ margin: '10px 0 0', fontSize: 13, color: '#3730a3' }}>
+                <p style={{ margin: '10px 0 0', fontSize: 13, color: '#1565C0' }}>
                   If you accept, your booking will be resubmitted with this schedule.
                 </p>
               </div>
@@ -902,12 +983,12 @@ function SentBackReviewModal({ booking, onDone, onError, onClose }: {
 
             {/* Original sessions if no proposed */}
             {(!proposed || proposed.length === 0) && detail.sessions.length > 0 && (
-              <div style={{ background: '#f7f9fb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
-                <div style={{ font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+              <div style={{ background: '#F8FAFC', border: '1px solid #CAD5E2', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+                <div style={{ font: '600 12px Inter, sans-serif', color: '#1C398E', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
                   Original Sessions (unchanged)
                 </div>
                 {detail.sessions.map((s) => (
-                  <div key={s.request_session_id} style={{ fontSize: 14, color: '#333', marginBottom: 4 }}>
+                  <div key={s.request_session_id} style={{ fontSize: 14, color: '#0F172B', marginBottom: 4 }}>
                     Session {s.session_no}: {new Date(s.requested_start_at).toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short' })}
                     {' · '}{new Date(s.requested_start_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
                     {' – '}{new Date(s.requested_end_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
@@ -918,25 +999,25 @@ function SentBackReviewModal({ booking, onDone, onError, onClose }: {
 
             {/* Equipment allocation info */}
             {hasEquipInfo && (
-              <div style={{ background: '#f7f9fb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
-                <div style={{ font: '600 12px var(--font-body)', color: '#26485f', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
+              <div style={{ background: '#F8FAFC', border: '1px solid #CAD5E2', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+                <div style={{ font: '600 12px Inter, sans-serif', color: '#1C398E', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
                   📦 Equipment Allocation
                 </div>
                 {coordEquip.map((ce) => {
                   const se = studentEquip.find((e) => e.equipmentTypeId === ce.equipment_type_id);
                   const short = se && ce.quantity < se.quantity;
                   return (
-                    <div key={ce.equipment_type_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #f0f0f0', fontSize: 14 }}>
-                      <span style={{ color: '#333' }}>{ce.name}</span>
+                    <div key={ce.equipment_type_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #E2E8F0', fontSize: 14 }}>
+                      <span style={{ color: '#0F172B' }}>{ce.name}</span>
                       <span>
-                        <span style={{ fontWeight: 600, color: short ? '#c0392b' : '#1f8a4c' }}>×{ce.quantity}</span>
-                        {short && se && <span style={{ fontSize: 12, color: '#c0392b', marginLeft: 6 }}>(you requested {se.quantity})</span>}
+                        <span style={{ fontWeight: 600, color: short ? '#B3352B' : '#1F7A45' }}>×{ce.quantity}</span>
+                        {short && se && <span style={{ fontSize: 12, color: '#B3352B', marginLeft: 6 }}>(you requested {se.quantity})</span>}
                       </span>
                     </div>
                   );
                 })}
                 {equipShortfalls.length > 0 && (
-                  <div style={{ marginTop: 10, padding: '8px 10px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 6, fontSize: 13, color: '#991b1b' }}>
+                  <div style={{ marginTop: 10, padding: '8px 10px', background: '#FDECEC', border: '1px solid #F3CACA', borderRadius: 6, fontSize: 13, color: '#8F2323' }}>
                     ⚠ The university can provide less equipment than requested for {equipShortfalls.length} item{equipShortfalls.length > 1 ? 's' : ''}.
                     Review the coordinator's note for details and decide whether to accept or decline.
                   </div>
@@ -945,8 +1026,8 @@ function SentBackReviewModal({ booking, onDone, onError, onClose }: {
             )}
 
             {/* Decision */}
-            <div style={{ paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
-              <p style={{ margin: '0 0 14px', fontSize: 14, color: '#5c6773' }}>
+            <div style={{ paddingTop: 16, borderTop: '1px solid #E2E8F0' }}>
+              <p style={{ margin: '0 0 14px', fontSize: 14, color: '#62748E' }}>
                 {proposed && proposed.length > 0
                   ? 'Accept the proposed schedule and resubmit, or decline to cancel this booking.'
                   : 'Accept and resubmit your booking, or decline to cancel it.'}
@@ -961,7 +1042,7 @@ function SentBackReviewModal({ booking, onDone, onError, onClose }: {
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <span style={{ fontSize: 14, color: '#991b1b', fontWeight: 600 }}>Cancel this booking permanently?</span>
+                  <span style={{ fontSize: 14, color: '#8F2323', fontWeight: 600 }}>Cancel this booking permanently?</span>
                   <button style={smdanger2} disabled={busy} onClick={decline}>{busy ? '…' : 'Yes, cancel'}</button>
                   <button style={smghost2} onClick={() => setDeclining(false)}>No, go back</button>
                 </div>
@@ -988,7 +1069,7 @@ function SentBackActions({ booking, onDone, onError }: { booking: MyBooking; onD
   }
   if (showDecline) return (
     <span style={{ display: 'inline-flex', gap: 6 }}>
-      <span style={{ fontSize: 12.5, color: '#5c6773' }}>Confirm decline?</span>
+      <span style={{ fontSize: 12.5, color: '#62748E' }}>Confirm decline?</span>
       <button style={smdanger} disabled={busy} onClick={decline}>Yes, decline</button>
       <button style={smghost} onClick={() => setShowDecline(false)}>Cancel</button>
     </span>
@@ -1016,38 +1097,86 @@ function L({ label, children }: { label: string; children: React.ReactNode }) {
 
 // ── Styles ──
 const wrap: React.CSSProperties = { maxWidth: 880, margin: '0 auto' };
-const panel: React.CSSProperties = { background: '#fff', border: '1px solid #ddd', borderRadius: 8, marginBottom: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.07)' };
-const panelHead: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid #e5e5e5', font: '600 16px var(--font-body)', color: '#26485f', background: 'linear-gradient(#fff,#f7f9fb)', borderRadius: '8px 8px 0 0' };
+
+// Shell-level styles (page/header/glass/footer — same tokens as Accounts,
+// Usage History, Offline Fallback, Conflict Detection, Venue Calendar, and
+// Kit Borrow). This is the one piece that was missing from the re-theme —
+// every other style in this file already uses these exact palette values.
+const s = {
+  page: {
+    minHeight: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden',
+    background: `radial-gradient(1100px 700px at 15% 0%, ${palette.navy800}aa 0%, transparent 60%),
+                 radial-gradient(900px 600px at 100% 100%, ${palette.accent}22 0%, transparent 55%),
+                 ${palette.navy900}`,
+  } as const,
+  blobA: { position: 'absolute', width: 420, height: 420, borderRadius: '50%', background: `${palette.accent}1a`, top: -160, left: -140, filter: 'blur(30px)', pointerEvents: 'none' } as const,
+  blobB: { position: 'absolute', width: 380, height: 380, borderRadius: '50%', background: `${palette.slate600}22`, bottom: -160, right: -120, filter: 'blur(30px)', pointerEvents: 'none' } as const,
+
+  topbar: { position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 32px', flexWrap: 'wrap', gap: 12 } as const,
+  brand: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' } as const,
+  logoImg: { width: 40, height: 40, borderRadius: 10, objectFit: 'contain', background: palette.slate50, padding: 4, border: `1px solid ${palette.slate300}` } as const,
+  wordmark: { fontSize: 16, fontWeight: 700, color: palette.white, lineHeight: 1.2 } as const,
+  wordmarkSub: { fontSize: 12, color: palette.slate400, marginTop: 1 } as const,
+  topbarRight: { display: 'flex', gap: 10 } as const,
+  topBtn: {
+    display: 'inline-flex', alignItems: 'center', gap: 7, background: 'transparent', color: palette.slate100,
+    border: `1.5px solid ${palette.slate400}`, borderRadius: 999, padding: '9px 16px', fontSize: 13.5, fontWeight: 700,
+    cursor: 'pointer', fontFamily: 'inherit',
+  } as const,
+
+  main: { position: 'relative', zIndex: 1, flex: 1, padding: '20px 24px 56px', width: '100%', maxWidth: 1040, margin: '0 auto', boxSizing: 'border-box' } as const,
+  glassPanel: {
+    position: 'relative', background: 'rgba(255,255,255,0.07)',
+    backdropFilter: 'blur(22px) saturate(160%)', WebkitBackdropFilter: 'blur(22px) saturate(160%)',
+    border: '1px solid rgba(255,255,255,0.16)', borderRadius: 24,
+    padding: '28px 24px 32px',
+    boxShadow: '0 24px 60px -32px rgba(3,22,54,0.75), inset 0 1px 0 rgba(255,255,255,0.10)',
+  } as const,
+
+  headRow: { marginBottom: 20 } as const,
+  eyebrow: {
+    display: 'inline-block', fontSize: 11.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
+    padding: '6px 14px', borderRadius: 999, marginBottom: 10,
+    color: palette.slate100, background: `${palette.navy800}88`, border: `1px solid ${palette.slate400}55`,
+  } as const,
+  title: { fontSize: 28, fontWeight: 800, color: palette.white, margin: 0, letterSpacing: '-0.5px' } as const,
+  subtitle: { fontSize: 14, color: palette.slate300, margin: '6px 0 0', maxWidth: 560, lineHeight: 1.5 } as const,
+
+  footer: { position: 'relative', zIndex: 1, textAlign: 'center', padding: '20px 24px', fontSize: 12.5, color: palette.slate400, borderTop: `1px solid ${palette.slate600}55` } as const,
+  footerLink: { color: palette.accentSoft, textDecoration: 'none', fontWeight: 600 } as const,
+};
+const panel: React.CSSProperties = { background: '#fff', border: '1px solid #CAD5E2', borderRadius: 8, marginBottom: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.07)' };
+const panelHead: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid #CAD5E2', font: '600 16px Inter, sans-serif', color: '#1C398E', background: 'linear-gradient(#fff,#F8FAFC)', borderRadius: '8px 8px 0 0' };
 const panelBody: React.CSSProperties = { padding: '20px 24px' };
 const tbl: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 14 };
-const th: React.CSSProperties = { textAlign: 'left', font: '600 11px var(--font-body)', color: '#888', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '0 8px 10px', borderBottom: '1px solid #e5e5e5' };
-const td: React.CSSProperties = { padding: '11px 8px', borderBottom: '1px solid #eee', color: '#333', verticalAlign: 'top' };
-const lbl: React.CSSProperties = { display: 'block', font: '500 12px var(--font-body)', color: '#26485f', marginBottom: 5, marginTop: 2 };
-const inp: React.CSSProperties = { width: '100%', font: '14px var(--font-body)', padding: '9px 11px', border: '1px solid #ccc', borderRadius: 6, boxSizing: 'border-box' };
+const th: React.CSSProperties = { textAlign: 'left', font: '600 11px Inter, sans-serif', color: '#62748E', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '0 8px 10px', borderBottom: '1px solid #CAD5E2' };
+const td: React.CSSProperties = { padding: '11px 8px', borderBottom: '1px solid #E2E8F0', color: '#0F172B', verticalAlign: 'top' };
+const lbl: React.CSSProperties = { display: 'block', font: '500 12px Inter, sans-serif', color: '#1C398E', marginBottom: 5, marginTop: 2 };
+const inp: React.CSSProperties = { width: '100%', font: '14px Inter, sans-serif', padding: '9px 11px', border: '1px solid #CAD5E2', borderRadius: 6, boxSizing: 'border-box' };
 const fgrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 };
-const ferr: React.CSSProperties = { display: 'block', fontSize: 12, color: '#c0392b', marginTop: 4 };
-const warnBox: React.CSSProperties = { padding: '8px 12px', background: '#fdf1e3', border: '1px solid #f0c060', borderRadius: 6, fontSize: 12.5, color: '#9a6412', lineHeight: 1.5 };
-const infoBox: React.CSSProperties = { padding: '10px 14px', background: '#e3f2ff', border: '1px solid #90caf9', borderRadius: 6, fontSize: 13.5, color: '#1565c0', marginBottom: 18 };
-const venueInfo: React.CSSProperties = { padding: '10px 14px', background: '#f0f4f8', borderRadius: 6, fontSize: 13, color: '#26485f' };
-const muted: React.CSSProperties = { color: '#8a949f', fontSize: 14, margin: '8px 0' };
-const primaryBtn: React.CSSProperties = { background: '#26485f', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 20px', fontSize: 14, cursor: 'pointer', fontWeight: 600 };
-const submitBtn: React.CSSProperties = { background: '#1f8a4c', color: '#fff', border: 'none', borderRadius: 6, padding: '10px 24px', fontSize: 15, cursor: 'pointer', fontWeight: 700 };
-const ghostBtn: React.CSSProperties = { background: '#fff', color: '#555', border: '1px solid #ccc', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
-const smaccept: React.CSSProperties = { background: '#1f8a4c', color: '#fff', border: 'none', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
-const smdanger: React.CSSProperties = { background: '#c0392b', color: '#fff', border: 'none', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
-const smghost: React.CSSProperties = { background: '#fff', color: '#555', border: '1px solid #ccc', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
+const ferr: React.CSSProperties = { display: 'block', fontSize: 12, color: '#B3352B', marginTop: 4 };
+const warnBox: React.CSSProperties = { padding: '8px 12px', background: '#FDF1E3', border: '1px solid #F0C060', borderRadius: 6, fontSize: 12.5, color: '#9A6412', lineHeight: 1.5 };
+const infoBox: React.CSSProperties = { padding: '10px 14px', background: '#E3F2FF', border: '1px solid #90CAF9', borderRadius: 6, fontSize: 13.5, color: '#1565C0', marginBottom: 18 };
+const venueInfo: React.CSSProperties = { padding: '10px 14px', background: '#1C398E14', borderRadius: 6, fontSize: 13, color: '#1C398E' };
+const muted: React.CSSProperties = { color: '#62748E', fontSize: 14, margin: '8px 0' };
+const primaryBtn: React.CSSProperties = { background: '#1C398E', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 20px', fontSize: 14, cursor: 'pointer', fontWeight: 600 };
+const submitBtn: React.CSSProperties = { background: '#1F7A45', color: '#fff', border: 'none', borderRadius: 6, padding: '10px 24px', fontSize: 15, cursor: 'pointer', fontWeight: 700 };
+const ghostBtn: React.CSSProperties = { background: '#fff', color: '#62748E', border: '1px solid #CAD5E2', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
+const smaccept: React.CSSProperties = { background: '#1F7A45', color: '#fff', border: 'none', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
+const smdanger: React.CSSProperties = { background: '#B3352B', color: '#fff', border: 'none', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
+const smghost: React.CSSProperties = { background: '#fff', color: '#62748E', border: '1px solid #CAD5E2', borderRadius: 4, padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' };
 const progressBar: React.CSSProperties = { display: 'flex', alignItems: 'center', marginBottom: 28 };
 const stepBody: React.CSSProperties = { paddingBottom: 8 };
-const stepTitle: React.CSSProperties = { margin: '0 0 18px', font: '700 18px var(--font-body)', color: '#26485f' };
-const footer: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 20, marginTop: 20, borderTop: '1px solid #e5e5e5' };
-const typeCard: React.CSSProperties = { background: '#f8f9fa', border: '2px solid #e5e5e5', borderRadius: 10, padding: '16px 18px', cursor: 'pointer', textAlign: 'center' };
-const typeCardActive: React.CSSProperties = { borderColor: '#26485f', background: '#f0f4f8' };
+const stepTitle: React.CSSProperties = { margin: '0 0 18px', font: '700 18px Inter, sans-serif', color: '#1C398E' };
+const footer: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 20, marginTop: 20, borderTop: '1px solid #CAD5E2' };
+const typeCard: React.CSSProperties = { background: '#F8FAFC', border: '2px solid #CAD5E2', borderRadius: 10, padding: '16px 18px', cursor: 'pointer', textAlign: 'center' };
+const typeCardActive: React.CSSProperties = { borderColor: '#1C398E', background: '#1C398E14' };
 const emptyState: React.CSSProperties = { textAlign: 'center', padding: '40px 24px' };
-const qtyBtn: React.CSSProperties = { width: 30, height: 30, borderRadius: 6, border: '1px solid #ccc', background: '#fff', cursor: 'pointer', font: '600 16px var(--font-body)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#26485f' };
+const qtyBtn: React.CSSProperties = { width: 30, height: 30, borderRadius: 6, border: '1px solid #CAD5E2', background: '#fff', cursor: 'pointer', font: '600 16px Inter, sans-serif', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1C398E' };
 const box = {
-  err: { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
-  ok: { background: '#eaf6ee', color: '#1e6b3a', border: '1px solid #c2e6cd', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
+  err: { background: '#FDECEC', color: '#8F2323', border: '1px solid #F3CACA', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
+  ok: { background: '#E6F4EC', color: '#1F7A45', border: '1px solid #1F7A4555', borderRadius: 6, padding: '10px 14px', marginBottom: 16, fontSize: 14 } as React.CSSProperties,
 };
-const smaccept2: React.CSSProperties = { background: '#1f8a4c', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer', fontWeight: 600 };
-const smdanger2: React.CSSProperties = { background: '#c0392b', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
-const smghost2: React.CSSProperties = { background: '#fff', color: '#555', border: '1px solid #ccc', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
+const smaccept2: React.CSSProperties = { background: '#1F7A45', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer', fontWeight: 600 };
+const smdanger2: React.CSSProperties = { background: '#B3352B', color: '#fff', border: 'none', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
+const smghost2: React.CSSProperties = { background: '#fff', color: '#62748E', border: '1px solid #CAD5E2', borderRadius: 6, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
