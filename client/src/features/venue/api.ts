@@ -50,6 +50,8 @@ export interface QueueBooking {
   submitted_at: string; venue_id: number; venue_name: string;
   requester_id?: string; requester_name: string | null; requester_email: string | null;
   sessionCount: number; firstStart: string | null; lastEnd: string | null;
+  /** Coordinator queue only: 'PENDING', or 'EXPIRED' (first session passed before a decision). */
+  status?: string; expired_at?: string | null;
 }
 export interface AdminQueueBooking extends QueueBooking { feasibility_note: string | null; forwarded_at: string }
 export interface BookingDetail {

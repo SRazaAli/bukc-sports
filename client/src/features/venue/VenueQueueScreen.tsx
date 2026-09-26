@@ -38,9 +38,11 @@ import { ApiRequestError } from '../../lib/api.js';
 function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
 function fmtDate(iso: string) { return new Date(iso).toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); }
 function fmtTime(iso: string) { return new Date(iso).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }); }
+function fmtShortDate(iso: string) { return new Date(iso).toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); }
 function fmtDT(iso: string) { return new Date(iso).toLocaleString('en-PK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
 
 type ProposedSession = { sessionNo: number; startAt: string; endAt: string };
+const EXPIRED_PAGE_SIZE = 10;
 
 /* ---------- theme (same values as AdminAccountsScreen / ConflictDetectionScreen `palette`) ---------- */
 const palette = {
@@ -80,6 +82,9 @@ export default function VenueQueueScreen() {
   const [venuesLoaded, setVenuesLoaded] = useState(false);
   const [viewingVenue, setViewingVenue] = useState<Venue | null>(null);
   const [search, setSearch] = useState('');
+  // Expired Requests is a collapsed dropdown (closed by default) with 10 rows per page.
+  const [expiredOpen, setExpiredOpen] = useState(false);
+  const [expiredPage, setExpiredPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -123,18 +128,26 @@ export default function VenueQueueScreen() {
   if (!user) return <Navigate to="/home" replace />;
   if (user.role !== 'COORDINATOR') return <Navigate to="/home" replace />;
 
+  // Split the queue: live requests vs. ones whose first session has already
+  // passed. The server marks those EXPIRED; the date check also catches any
+  // that passed while this page has been open (until the next reload).
+  const nowMs = Date.now();
+  const isExpired = (q: QueueBooking) =>
+    q.status === 'EXPIRED' || (q.firstStart != null && new Date(q.firstStart).getTime() <= nowMs);
+  const pendingQueue = queue ? queue.filter((q) => !isExpired(q)) : null;
+  const expiredQueue = queue ? queue.filter(isExpired) : [];
+
   // Presentation-only filter over the already-loaded queue.
   const term = search.trim().toLowerCase();
-  const filteredQueue = queue && term
-    ? queue.filter((q) =>
+  const filteredQueue = pendingQueue && term
+    ? pendingQueue.filter((q) =>
       (q.requester_name ?? 'BUKC Sports Dept.').toLowerCase().includes(term)
       || q.venue_name.toLowerCase().includes(term)
       || q.origin.toLowerCase().includes(term)
       || q.purpose.toLowerCase().includes(term))
-    : queue;
+    : pendingQueue;
 
-  const academicCount = queue?.filter((q) => q.origin === 'ACADEMIC').length ?? 0;
-  const sessionTotal = queue?.reduce((n, q) => n + q.sessionCount, 0) ?? 0;
+  const academicCount = pendingQueue?.filter((q) => q.origin === 'ACADEMIC').length ?? 0;
   const availableVenues = venues.filter((v) => v.availability_status === 'AVAILABLE').length;
 
   const venuesPanel = (
@@ -257,7 +270,7 @@ export default function VenueQueueScreen() {
                       {[
                         'Pick a venue that is Available and fits the expected turnout.',
                         'Give the event a clear name, e.g. Annual Sports Day.',
-                        'Add one session per day the venue is needed.',
+                        'Add one session per day the venue is needed, between 9:00 am and 6:00 pm.',
                         'Check the times against existing bookings before creating.',
                       ].map((g) => (
                         <li key={g} style={s.guideItem}><span style={s.guideTick}><TickIcon /></span>{g}</li>
@@ -281,9 +294,9 @@ export default function VenueQueueScreen() {
           ) : (
             <>
               <div style={s.statRow}>
-                <StatCard label="Pending requests" value={queue?.length ?? 0} accent={palette.accent} icon={<InboxIcon />} />
+                <StatCard label="Pending requests" value={pendingQueue?.length ?? 0} accent={palette.accent} icon={<InboxIcon />} />
                 <StatCard label="Academic events" value={academicCount} accent="#6B21A8" icon={<CalendarIcon />} />
-                <StatCard label="Sessions requested" value={sessionTotal} accent="#9A6412" icon={<ClockIcon size={17} />} />
+                <StatCard label="Expired (last 30 days)" value={expiredQueue.length} accent="#B3352B" icon={<ClockIcon size={17} />} />
                 <StatCard label="Venues available" value={availableVenues} accent="#1F7A45" icon={<CheckCircleIcon />} />
               </div>
 
@@ -296,7 +309,7 @@ export default function VenueQueueScreen() {
                   </div>
                 }>
                 {filteredQueue === null ? <SkeletonRows rows={3} />
-                  : queue!.length === 0 ? <EmptyState icon={<CheckCircleIcon />} text="No pending venue requests. New requests will appear here." />
+                  : pendingQueue!.length === 0 ? <EmptyState icon={<CheckCircleIcon />} text="No pending venue requests. New requests will appear here." />
                   : filteredQueue.length === 0 ? (
                     <EmptyState icon={<SearchIcon />} text={`No requests match "${search.trim()}".`} action={{ label: 'Clear search', onClick: () => setSearch('') }} />
                   ) : (
@@ -322,7 +335,21 @@ export default function VenueQueueScreen() {
                                 <td style={s.td}><span style={s.iconCell}><span style={s.cellIcon}><PinIcon /></span>{q.venue_name}</span></td>
                                 <td style={s.td}>
                                   <span style={s.iconCell}><span style={s.cellIcon}><CalendarIcon size={16} /></span>
-                                    <span>{q.sessionCount}{q.firstStart ? <span style={{ color: palette.slate500 }}> · from {new Date(q.firstStart).toLocaleDateString()}</span> : ''}</span>
+                                    <span>
+                                      {q.firstStart ? (
+                                        q.sessionCount <= 1 && q.lastEnd ? (
+                                          <>
+                                            <span style={{ display: 'block' }}>{fmtShortDate(q.firstStart)}</span>
+                                            <span style={{ display: 'block', color: palette.slate500, fontSize: 12.5 }}>{fmtTime(q.firstStart)} – {fmtTime(q.lastEnd)}</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <span style={{ display: 'block' }}>{q.sessionCount} sessions</span>
+                                            <span style={{ display: 'block', color: palette.slate500, fontSize: 12.5 }}>from {fmtShortDate(q.firstStart)}, {fmtTime(q.firstStart)}</span>
+                                          </>
+                                        )
+                                      ) : `${q.sessionCount} session${q.sessionCount !== 1 ? 's' : ''}`}
+                                    </span>
                                   </span>
                                 </td>
                                 <td className="vq-hide-mobile" style={s.td}><span style={s.iconCell}><span style={s.cellIcon}><PeopleIcon /></span>{q.estimated_participants}</span></td>
@@ -337,10 +364,87 @@ export default function VenueQueueScreen() {
                           </tbody>
                         </table>
                       </div>
-                      <div style={s.tableFoot}>Showing {filteredQueue.length}{term ? ` of ${queue!.length}` : ''} request{filteredQueue.length !== 1 ? 's' : ''}</div>
+                      <div style={s.tableFoot}>Showing {filteredQueue.length}{term ? ` of ${pendingQueue!.length}` : ''} request{filteredQueue.length !== 1 ? 's' : ''}</div>
                     </>
                   )}
               </Panel>
+
+              {expiredQueue.length > 0 && (() => {
+                const pages = Math.max(1, Math.ceil(expiredQueue.length / EXPIRED_PAGE_SIZE));
+                const page = Math.min(expiredPage, pages);
+                const from = (page - 1) * EXPIRED_PAGE_SIZE;
+                const pageRows = expiredQueue.slice(from, from + EXPIRED_PAGE_SIZE);
+                return (
+                  <section className="vq-card" style={s.card}>
+                    <button type="button" className="vq-dropdown-head" style={{ ...s.dropdownHead, ...(expiredOpen ? { borderBottom: `1px solid ${palette.slate300}` } : null) }}
+                      onClick={() => setExpiredOpen((o) => !o)} aria-expanded={expiredOpen} aria-controls="vq-expired-list">
+                      <span style={s.panelHeadLeft}>
+                        <span style={{ ...s.panelIcon, background: '#FDECEC', color: '#B3352B' }}><ClockIcon size={17} /></span>
+                        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+                          <span>Expired Requests</span>
+                          <span style={s.dropdownSub}>First session passed before a decision · kept for 30 days</span>
+                        </span>
+                      </span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={s.expiredCountPill}>{expiredQueue.length} expired</span>
+                        <span style={s.dropdownToggleText}>{expiredOpen ? 'Hide' : 'Show'}</span>
+                        <span className="vq-dropdown-chevron" style={{ ...s.dropdownChevron, transform: expiredOpen ? 'rotate(180deg)' : 'none' }}><ChevronDownIcon /></span>
+                      </span>
+                    </button>
+
+                    {expiredOpen && (
+                      <div id="vq-expired-list" className="vq-dropdown-body" style={s.panelBody}>
+                        <p style={{ ...s.muted, margin: '0 0 14px' }}>
+                          These requests' first session date passed before a decision was made, so they can no longer be
+                          forwarded, sent back or approved. They're shown here for 30 days for reference.
+                        </p>
+                        <div className="vq-table-wrap" style={s.tableWrap}>
+                          <table style={s.table}>
+                            <thead><tr>
+                              <th style={s.th}>Requester</th><th style={s.th}>Venue</th><th style={s.th}>First session</th>
+                              <th className="vq-hide-mobile" style={s.th}>Expired on</th><th style={{ ...s.th, textAlign: 'right' }}>Status</th>
+                            </tr></thead>
+                            <tbody>
+                              {pageRows.map((q) => (
+                                <tr key={q.booking_id} style={s.expiredRow}>
+                                  <td style={s.td}>
+                                    <div style={s.nameCell}>
+                                      <span style={{ ...s.reqIcon, background: '#E2E8F0', color: palette.slate500 }}><PeopleIcon /></span>
+                                      <div>
+                                        <div style={{ ...s.nameText, color: palette.slate500 }}>{q.requester_name ?? 'BUKC Sports Dept.'}</div>
+                                        <div style={s.originText}>{q.origin} · {q.purpose}</div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td style={{ ...s.td, color: palette.slate500 }}>{q.venue_name}</td>
+                                  <td style={{ ...s.td, color: palette.slate500 }}>
+                                    {q.firstStart ? `${fmtDate(q.firstStart)} · ${fmtTime(q.firstStart)}` : '—'}
+                                    {q.sessionCount > 1 ? ` (+${q.sessionCount - 1} more)` : ''}
+                                  </td>
+                                  <td className="vq-hide-mobile" style={{ ...s.td, color: palette.slate500 }}>
+                                    {q.expired_at ? fmtDate(q.expired_at) : 'Just now'}
+                                  </td>
+                                  <td style={{ ...s.td, textAlign: 'right' }}><span style={s.expiredBadge}>Expired</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div style={s.pagerRow}>
+                          <span style={{ ...s.tableFoot, marginTop: 0 }}>Showing {from + 1}–{from + pageRows.length} of {expiredQueue.length} expired request{expiredQueue.length !== 1 ? 's' : ''}</span>
+                          {pages > 1 && (
+                            <nav style={{ display: 'flex', alignItems: 'center', gap: 6 }} aria-label="Expired requests pages">
+                              <button type="button" className="vq-btn" style={s.pagerBtn} disabled={page === 1} onClick={() => setExpiredPage(page - 1)} aria-label="Previous page"><ChevronLeftIcon /></button>
+                              <span style={s.pagerLabel}>Page {page} of {pages}</span>
+                              <button type="button" className="vq-btn" style={s.pagerBtn} disabled={page === pages} onClick={() => setExpiredPage(page + 1)} aria-label="Next page"><ChevronRightIcon /></button>
+                            </nav>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                );
+              })()}
 
               {venuesPanel}
             </>
@@ -371,6 +475,11 @@ function VqStyles() {
       .vq-row-click .vq-chev { transition: transform .15s ease, color .15s ease; }
       .vq-row-click:hover .vq-chev { transform: translateX(3px); color: ${palette.accent}; }
       .vq-row-anim { opacity: 0; animation: vqRowIn .35s ease forwards; }
+      .vq-dropdown-head { transition: background-color .15s ease; }
+      .vq-dropdown-head:hover { background: ${palette.slate50} !important; }
+      .vq-dropdown-head:focus-visible { outline: 2px solid ${palette.accent}; outline-offset: -2px; }
+      .vq-dropdown-chevron { transition: transform .2s ease; }
+      .vq-dropdown-body { animation: vqFadeUp .25s ease both; }
       @keyframes vqRowIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
       .vq-btn { transition: transform .15s ease, box-shadow .15s ease, filter .15s ease, background-color .15s ease, border-color .15s ease, color .15s ease; }
       .vq-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.04); }
@@ -1226,41 +1335,118 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
 }
 
 // ── Academic Event Form ───────────────────────────────────────────────────────
-function AcademicEventForm({ venues, onDone, onError, onCancel }: { venues: Venue[]; onDone: (m: string) => void; onError: (m: string) => void; onCancel?: () => void }) {
+// University match hours — every session must fall between these (server enforces the same).
+const MATCH_START = '09:00';
+const MATCH_END = '18:00';
+
+// Local calendar date (YYYY-MM-DD) — lower bound for the date pickers.
+function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Client-side checks mirroring the server rules, so mistakes are flagged on the
+// exact session row before anything is sent. The server re-checks everything
+// (and also catches duplicates of requests already in the pipeline).
+function checkSessionRows(rows: SessionRow[]): Record<number, string> {
+  const errs: Record<number, string> = {};
+  const now = Date.now();
+  const windows: Array<{ no: number; start: number; end: number }> = [];
+  for (const r of rows) {
+    if (!r.date) { errs[r.sessionNo] = 'Pick a date for this session.'; continue; }
+    if (!r.startTime || !r.endTime) { errs[r.sessionNo] = 'Pick a start and an end time.'; continue; }
+    const start = new Date(`${r.date}T${r.startTime}:00`).getTime();
+    const end = new Date(`${r.date}T${r.endTime}:00`).getTime();
+    if (Number.isNaN(start) || Number.isNaN(end)) { errs[r.sessionNo] = 'Enter a valid date and time.'; continue; }
+    if (end <= start) { errs[r.sessionNo] = 'End time must be after the start time.'; continue; }
+    if (r.startTime < MATCH_START || r.endTime > MATCH_END) { errs[r.sessionNo] = 'Outside match hours — sessions must be between 9:00 am and 6:00 pm.'; continue; }
+    if (start <= now) { errs[r.sessionNo] = 'This date and time has already passed — events can only be created for future slots.'; continue; }
+    windows.push({ no: r.sessionNo, start, end });
+  }
+  for (let i = 0; i < windows.length; i++) {
+    for (let j = i + 1; j < windows.length; j++) {
+      const a = windows[i]!; const b = windows[j]!;
+      if (a.start < b.end && b.start < a.end && !errs[b.no]) {
+        errs[b.no] = `Overlaps session ${a.no} — each session needs its own time slot.`;
+      }
+    }
+  }
+  return errs;
+}
+
+function AcademicEventForm({ venues, onDone, onError: _onError, onCancel }: { venues: Venue[]; onDone: (m: string) => void; onError: (m: string) => void; onCancel?: () => void }) {
   const [venueId, setVenue] = useState(0);
   const [purpose, setPurpose] = useState('');
   const [estimatedParticipants, setParticipants] = useState(50);
   const [busy, setBusy] = useState(false);
+  const [tried, setTried] = useState(false);            // show field errors after the first submit attempt
+  const [formError, setFormError] = useState<string | null>(null);
   const { rows, addRow, removeRow, updateRow, toSessionInputs } = useSessionRows();
+
+  const sessionErrors = tried ? checkSessionRows(rows) : {};
+  const fieldErrors = {
+    venue: tried && !venueId ? 'Choose the venue for this event.' : '',
+    purpose: tried && purpose.trim().length < 2 ? 'Give the event a name (at least 2 characters).' : '',
+    participants: tried && (!Number.isInteger(estimatedParticipants) || estimatedParticipants < 1) ? 'Enter the expected number of participants (1 or more).' : '',
+  };
+
+  // Any edit clears a server error — it may no longer apply.
+  useEffect(() => { setFormError(null); }, [venueId, purpose, estimatedParticipants, rows]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!venueId) { onError('Choose a venue.'); return; }
+    setTried(true);
+    const sErrs = checkSessionRows(rows);
+    const nSessionErrs = Object.keys(sErrs).length;
+    if (!venueId || purpose.trim().length < 2 || !Number.isInteger(estimatedParticipants) || estimatedParticipants < 1 || nSessionErrs > 0) {
+      setFormError(nSessionErrs > 0
+        ? `Please fix ${nSessionErrs === 1 ? 'the highlighted session' : `the ${nSessionErrs} highlighted sessions`} before creating the event.`
+        : 'Please fill in the highlighted fields.');
+      return;
+    }
     setBusy(true);
-    try { await initiateAcademicEvent({ venueId, purpose, estimatedParticipants, sessions: toSessionInputs() }); onDone('Academic event created.'); }
-    catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
+    try {
+      await initiateAcademicEvent({ venueId, purpose: purpose.trim(), estimatedParticipants, sessions: toSessionInputs() });
+      onDone('Academic event created — it now appears in Pending Booking Requests.');
+    } catch (err) {
+      setFormError(errMsg(err));
+    } finally { setBusy(false); }
   }
 
   return (
-    <form onSubmit={submit}>
+    <form onSubmit={submit} noValidate>
       <div className="vq-form-grid" style={s.formGrid}>
-        <Field label="Venue" required icon={<PinIcon />} select>
-          <select className="vq-input" style={s.select} value={venueId} onChange={(e) => setVenue(Number(e.target.value))} required>
-            <option value={0}>Select a venue</option>
-            {venues.map((v) => <option key={v.venue_id} value={v.venue_id}>{v.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Participants" required icon={<PeopleIcon />}>
-          <input type="number" min={1} className="vq-input" style={s.input} value={estimatedParticipants} onChange={(e) => setParticipants(Number(e.target.value))} required />
-        </Field>
+        <div>
+          <Field label="Venue" required icon={<PinIcon />} select>
+            <select className="vq-input" style={{ ...s.select, ...(fieldErrors.venue ? s.inputErr : null) }} value={venueId} onChange={(e) => setVenue(Number(e.target.value))}>
+              <option value={0}>Select a venue</option>
+              {venues.map((v) => <option key={v.venue_id} value={v.venue_id}>{v.name}</option>)}
+            </select>
+          </Field>
+          {fieldErrors.venue && <div style={s.fieldErr}>{fieldErrors.venue}</div>}
+        </div>
+        <div>
+          <Field label="Participants" required icon={<PeopleIcon />}>
+            <input type="number" min={1} className="vq-input" style={{ ...s.input, ...(fieldErrors.participants ? s.inputErr : null) }} value={estimatedParticipants} onChange={(e) => setParticipants(Number(e.target.value))} />
+          </Field>
+          {fieldErrors.participants && <div style={s.fieldErr}>{fieldErrors.participants}</div>}
+        </div>
         <div style={{ gridColumn: '1 / -1' }}>
           <Field label="Event name" required icon={<FlagIcon />}>
-            <input className="vq-input" style={s.input} value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="e.g. Annual Sports Day" required />
+            <input className="vq-input" style={{ ...s.input, ...(fieldErrors.purpose ? s.inputErr : null) }} value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="e.g. Annual Sports Day" />
           </Field>
+          {fieldErrors.purpose && <div style={s.fieldErr}>{fieldErrors.purpose}</div>}
         </div>
         <div className="vq-sessions" style={{ gridColumn: '1 / -1' }}>
-          <SessionRowsEditor rows={rows} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} />
+          <SessionRowsEditor rows={rows} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} errors={sessionErrors} minDate={localToday()} minTime={MATCH_START} maxTime={MATCH_END} />
+          <p style={{ margin: '8px 0 0', fontSize: 12.5, color: palette.slate500 }}>Match hours: 9:00 am – 6:00 pm. A venue can't be requested for a time that's already in a pending request.</p>
         </div>
+        {formError && (
+          <div className="vq-toast" role="alert" style={{ ...s.banner.error, gridColumn: '1 / -1', marginBottom: 0, alignItems: 'flex-start' }}>
+            <span style={{ display: 'inline-flex', marginTop: 1 }}><AlertIcon /></span>
+            <span>{formError}</span>
+          </div>
+        )}
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
           <button className="vq-btn" style={s.primaryBtn} disabled={busy}><SendIcon /> {busy ? 'Creating…' : 'Create Event'}</button>
           {onCancel && <button type="button" className="vq-btn" style={s.ghostBtn} onClick={onCancel}>Cancel</button>}
@@ -1413,6 +1599,7 @@ function PinIcon() { return ico(16, <><path d="M12 21s-6.5-5.6-6.5-11A6.5 6.5 0 
 function PeopleIcon() { return ico(16, <><circle cx="9" cy="8" r="3" /><path d="M3 20c.8-3.2 3-5 6-5s5.2 1.8 6 5" /><circle cx="17" cy="8.5" r="2.3" /><path d="M16 13.2c2.2.4 3.6 1.9 4.2 4.3" /></>); }
 function EyeIcon() { return ico(15, <><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="2.6" /></>); }
 function ChevronRightIcon() { return ico(16, <path d="m9 6 6 6-6 6" />); }
+function ChevronLeftIcon() { return ico(16, <path d="m15 6-6 6 6 6" />); }
 function ChevronDownIcon() { return ico(15, <path d="m6 9 6 6 6-6" />); }
 function DocIcon() { return ico(20, <><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v4h4" /><path d="M10 12h5M10 16h5" /></>); }
 function FlagIcon() { return ico(16, <><path d="M5 21V4" /><path d="M5 4h11l-2 4 2 4H5" /></>); }
@@ -1495,6 +1682,8 @@ const s = {
   fieldIcon: { position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', display: 'flex', color: palette.slate500, pointerEvents: 'none', transition: 'color .15s ease' } as const,
   input: { width: '100%', font: '14px Inter, sans-serif', padding: '10px 14px 10px 40px', background: INPUT_BG, border: INPUT_BORDER, borderRadius: 10, color: palette.navy900, boxSizing: 'border-box' } as const,
   select: { width: '100%', font: '14px Inter, sans-serif', padding: '10px 38px 10px 40px', background: INPUT_BG, border: INPUT_BORDER, borderRadius: 10, color: palette.navy900, boxSizing: 'border-box', appearance: 'none', WebkitAppearance: 'none', cursor: 'pointer' } as const,
+  inputErr: { borderColor: '#C0392B', background: '#FFF8F8' } as const,
+  fieldErr: { fontSize: 12, color: '#C0392B', marginTop: 5, fontWeight: 500 } as const,
   selectChevron: { position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)', display: 'flex', color: palette.slate500, pointerEvents: 'none' } as const,
 
   primaryBtn: { display: 'inline-flex', alignItems: 'center', gap: 8, background: palette.accent, color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 8px 16px -8px rgba(3,22,54,0.6)' } as const,
@@ -1528,6 +1717,16 @@ const s = {
   cellIcon: { display: 'inline-flex', color: palette.accent, opacity: 0.8 } as const,
   noteText: { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: palette.slate500 } as const,
   badge: { display: 'inline-block', font: '700 11px Inter, sans-serif', padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' } as const,
+  expiredBadge: { display: 'inline-block', font: '700 11px Inter, sans-serif', padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap', background: '#FDECEC', color: '#B3352B' } as const,
+  expiredCountPill: { font: '700 12px Inter, sans-serif', padding: '5px 12px', borderRadius: 999, background: '#FDECEC', color: '#B3352B' } as const,
+  expiredRow: { background: 'rgba(226,232,240,0.35)' } as const,
+  dropdownHead: { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: '14px 22px', border: 'none', background: palette.white, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' } as const,
+  dropdownSub: { font: '500 12px Inter, sans-serif', color: palette.slate500 } as const,
+  dropdownToggleText: { font: '700 13px Inter, sans-serif', color: palette.accent } as const,
+  dropdownChevron: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 9, background: palette.accentWash, color: palette.accent } as const,
+  pagerRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginTop: 14 } as const,
+  pagerBtn: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: 9, border: `1.5px solid ${palette.slate300}`, background: palette.white, color: palette.navy900, cursor: 'pointer' } as const,
+  pagerLabel: { font: '600 13px Inter, sans-serif', color: palette.slate500, padding: '0 6px' } as const,
 
   emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '34px 16px', textAlign: 'center' } as const,
   emptyIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 46, height: 46, borderRadius: '50%', background: palette.accentWash, color: palette.accent } as const,

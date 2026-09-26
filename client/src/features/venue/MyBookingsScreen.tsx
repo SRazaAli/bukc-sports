@@ -405,6 +405,8 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
       const dow = new Date(row.date + 'T12:00:00').getDay();
       if (dow === 0 || dow === 6) { errs[row.sessionNo] = `${DAYS[dow]}s are not permitted. Matches must be on weekdays (Mon–Fri).`; continue; }
       if (row.endTime <= row.startTime) { errs[row.sessionNo] = 'End time must be after start time.'; continue; }
+      if (row.startTime < '09:00' || row.endTime > '18:00') { errs[row.sessionNo] = 'Outside match hours — sessions must be between 9:00 am and 6:00 pm.'; continue; }
+      if (new Date(`${row.date}T${row.startTime}:00`).getTime() <= Date.now()) { errs[row.sessionNo] = 'This start time has already passed. Choose a later time or date.'; continue; }
       const dup = sessions.filter((s) => s.date === row.date && s.sessionNo !== row.sessionNo).length > 0;
       if (dup) { errs[row.sessionNo] = `Duplicate date — another session in this request is already on ${row.date}.`; continue; }
       const reqStart = new Date(`${row.date}T${row.startTime}:00`);
@@ -731,10 +733,10 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
           <h3 style={stepTitle}>Step 4 — {eventFormat === 'SINGLE_MATCH' ? 'Match Date & Time' : 'Tournament Schedule'}</h3>
           {calendarLoading && <div style={{ ...infoBox, marginBottom: 14 }}>Checking venue availability…</div>}
           <div style={{ ...venueInfo, marginBottom: 14 }}>
-            <strong>Date rules:</strong> Weekdays only (Mon–Fri) · Future dates only · No overlap with existing approved sessions at this venue
+            <strong>Date rules:</strong> Weekdays only (Mon–Fri) · Match hours 9:00 am – 6:00 pm · Future dates only · No overlap with approved bookings or with a time already in a pending request at this venue
           </div>
           {eventFormat === 'TOURNAMENT' && <p style={{ margin: '-4px 0 14px', fontSize: 13.5, color: '#62748E' }}>Add one session per match day. Same-date sessions are not allowed.</p>}
-          <SessionRowsEditor rows={sessions} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} errors={sessionErrors} allowMultiple={eventFormat === 'TOURNAMENT'} />
+          <SessionRowsEditor rows={sessions} onAdd={addRow} onRemove={removeRow} onUpdate={updateRow} errors={sessionErrors} allowMultiple={eventFormat === 'TOURNAMENT'} minTime="09:00" maxTime="18:00" />
           <div style={{ marginTop: 20 }}>
             <L label="Special requirements / notes (optional)">
               <textarea style={{ ...inp, minHeight: 72, resize: 'vertical', width: '100%', boxSizing: 'border-box' }} value={specialRequirements} onChange={(e) => setSpecialReq(e.target.value)} placeholder="e.g. Scoreboard access, spectator seating for 50, referee required…" maxLength={500} />
@@ -884,9 +886,11 @@ function StatusBadge({ status }: { status: string }) {
   const s = ['APPROVED', 'COMPLETED'].includes(status) ? { background: '#E6F4EC', color: '#1F7A45' }
     : ['REJECTED', 'CANCELLED'].includes(status) ? { background: '#FDECEC', color: '#B3352B' }
     : status === 'SENT_BACK' ? { background: '#FDF1E3', color: '#9A6412' }
+    : status === 'EXPIRED' ? { background: '#E2E8F0', color: '#62748E' }
     : { background: '#1C398E14', color: '#1C398E' };
   const label = status === 'SHORTFALL_PENDING' ? 'Awaiting your response'
     : status === 'SENT_BACK' ? 'Returned'
+    : status === 'EXPIRED' ? 'Expired'
     : status;
   return <span style={{ font: '600 11px "JetBrains Mono", ui-monospace, monospace', padding: '2px 8px', borderRadius: 4, ...s }}>{label}</span>;
 }
