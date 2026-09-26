@@ -332,7 +332,7 @@ export interface UsageHistoryTable {
 
 // ── Venue booking domain (Feature 5) ──
 export type BookingOrigin = 'CLIENT' | 'EXTERNAL' | 'ACADEMIC';
-export type BookingStatus = 'PENDING' | 'FORWARDED' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'COMPLETED' | 'SHORTFALL_PENDING' | 'SENT_BACK';
+export type BookingStatus = 'PENDING' | 'FORWARDED' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'COMPLETED' | 'SHORTFALL_PENDING' | 'SENT_BACK' | 'EXPIRED';
 export type SessionStatus = 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'NEEDS_RESCHEDULING' | 'CANCELLED';
 export type ApprovalSubject = 'VENUE_BOOKING' | 'BORROW_REQUEST' | 'ACCOUNT_VERIFICATION' | 'EQUIPMENT_EXCEPTION';
 export type ApprovalVerb = 'SUBMIT' | 'FORWARD' | 'APPROVE' | 'REJECT' | 'RETURN_FOR_REEVALUATION' | 'CANCEL' | 'SEND_BACK' | 'ACCEPT_SENT_BACK' | 'DECLINE_SENT_BACK';
@@ -387,6 +387,8 @@ export interface BookingTable {
   coordinator_proposed_sessions: ColumnType<Array<{ sessionNo: number; startAt: string; endAt: string }> | null, string | null, string | null>;
   // Migration 026: coordinator article selections persist across send-back round-trips
   coordinator_selected_articles: ColumnType<Array<{ equipmentTypeId: number; articleIds: string[] }> | null, string | null, string | null>;
+  // Migration 028: set when a still-undecided booking's first session start passes
+  expired_at: Timestamp | null;
 }
 
 export interface BookingSessionRequestTable {

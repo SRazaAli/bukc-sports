@@ -68,7 +68,7 @@ export function useSessionRows() {
 }
 
 export function SessionRowsEditor({
-  rows, onAdd, onRemove, onUpdate, errors, allowMultiple = true,
+  rows, onAdd, onRemove, onUpdate, errors, allowMultiple = true, minDate, minTime, maxTime,
 }: {
   rows: SessionRow[];
   onAdd: () => void;
@@ -76,6 +76,11 @@ export function SessionRowsEditor({
   onUpdate: (sessionNo: number, patch: Partial<SessionRow>) => void;
   errors?: Record<number, string>;
   allowMultiple?: boolean;
+  /** Optional YYYY-MM-DD lower bound for the date pickers (e.g. today). */
+  minDate?: string;
+  /** Optional HH:MM bounds for the time pickers (e.g. match hours 09:00–18:00). */
+  minTime?: string;
+  maxTime?: string;
 }) {
   return (
     <div>
@@ -100,10 +105,10 @@ export function SessionRowsEditor({
               </div>
               <div style={sessionGrid}>
                 <input type="date" style={{ ...inp, ...(err ? { borderColor: '#c0392b' } : {}) }}
-                  value={row.date} onChange={(e) => onUpdate(row.sessionNo, { date: e.target.value })} />
-                <input type="time" style={inp} value={row.startTime}
+                  min={minDate} value={row.date} onChange={(e) => onUpdate(row.sessionNo, { date: e.target.value })} />
+                <input type="time" style={inp} min={minTime} max={maxTime} value={row.startTime}
                   onChange={(e) => onUpdate(row.sessionNo, { startTime: e.target.value })} />
-                <input type="time" style={inp} value={row.endTime}
+                <input type="time" style={inp} min={minTime} max={maxTime} value={row.endTime}
                   onChange={(e) => onUpdate(row.sessionNo, { endTime: e.target.value })} />
               </div>
               {err && <div style={errStyle}>{err}</div>}

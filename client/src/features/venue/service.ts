@@ -210,15 +210,12 @@ export async function deleteVenue(venueId: number) {
 }
 
 
-// Anything that can run a query — the shared db handle or an open transaction.
-type Exec = Pick<typeof db, 'selectFrom'>;
-
 // Per-session overlap check (CONF-09/12). Returns the session numbers (from
 // the caller's proposed list) that collide with an existing SCHEDULED session.
-async function findConflictingSessions(venueId: number, sessions: SessionInput[], exec: Exec = db): Promise<number[]> {
+async function findConflictingSessions(venueId: number, sessions: SessionInput[]): Promise<number[]> {
   const conflicting: number[] = [];
   for (const s of sessions) {
-    const row = await exec.selectFrom('booking_session')
+    const row = await db.selectFrom('booking_session')
       .select('session_id')
       .where('venue_id', '=', venueId)
       .where('status', 'in', ['SCHEDULED', 'IN_PROGRESS', 'COMPLETED'])
@@ -239,18 +236,6 @@ function fmtWindow(start: Date | string, end: Date | string): string {
   return `${day}, ${time(s)}–${time(e)}`;
 }
 
-// University match hours: every session must start at or after 9:00 am and
-// end by 6:00 pm (campus time), on a single day.
-export const MATCH_HOURS = { openMinutes: 9 * 60, closeMinutes: 18 * 60, label: '9:00 am and 6:00 pm' } as const;
-function campusDayAndMinutes(d: Date): { day: string; minutes: number } {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-GB', {
-      timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    }).formatToParts(d).map((p) => [p.type, p.value]),
-  ) as Record<string, string>;
-  return { day: `${parts.year}-${parts.month}-${parts.day}`, minutes: Number(parts.hour) * 60 + Number(parts.minute) };
-}
-
 function validateSessions(sessions: SessionInput[]) {
   if (sessions.length === 0) throw badRequest('At least one session is required.');
   if (sessions.length > 30) throw badRequest('VENUE-35: a booking cannot exceed 30 sessions.'); // belt-and-suspenders; DB also enforces this
@@ -267,15 +252,6 @@ function validateSessions(sessions: SessionInput[]) {
       throw badRequest(
         `Session ${s.sessionNo} (${fmtWindow(s.requestedStartAt, s.requestedEndAt)}) is in the past. Choose a date and start time that hasn't passed yet.`,
         'PAST_SESSION',
-      );
-    }
-    // Match hours only.
-    const st = campusDayAndMinutes(new Date(s.requestedStartAt));
-    const en = campusDayAndMinutes(new Date(s.requestedEndAt));
-    if (st.day !== en.day || st.minutes < MATCH_HOURS.openMinutes || en.minutes > MATCH_HOURS.closeMinutes) {
-      throw badRequest(
-        `Session ${s.sessionNo} (${fmtWindow(s.requestedStartAt, s.requestedEndAt)}) is outside university match hours. Venue bookings must be between ${MATCH_HOURS.label}.`,
-        'OUTSIDE_MATCH_HOURS',
       );
     }
   }
@@ -339,9 +315,9 @@ const OPEN_STATUS_WORDS: Record<string, string> = {
   SHORTFALL_PENDING: "awaiting the requester's response",
 };
 
-async function findOverlappingOpenRequest(venueId: number, sessions: SessionInput[], exec: Exec = db) {
+async function findOverlappingOpenRequest(venueId: number, sessions: SessionInput[]) {
   for (const s of sessions) {
-    const hit = await exec.selectFrom('booking_session_request as r')
+    const hit = await db.selectFrom('booking_session_request as r')
       .innerJoin('booking as b', 'b.booking_id', 'r.booking_id')
       .leftJoin('app_user as u', 'u.user_id', 'b.requested_by')
       .select(['r.session_no', 'r.requested_start_at', 'r.requested_end_at', 'b.origin', 'b.purpose', 'b.status', 'u.full_name'])
@@ -355,57 +331,12 @@ async function findOverlappingOpenRequest(venueId: number, sessions: SessionInpu
   return null;
 }
 
-// One lock per venue, held until the surrounding transaction ends. Two
-// submissions for the same venue (a double-click, two tabs, two people at the
-// same moment) are processed one after the other, so the second one always
-// sees the first and can't slip past the duplicate check.
-const VENUE_LOCK_NAMESPACE = 5105;
-async function lockVenue(trx: Parameters<Parameters<ReturnType<typeof db.transaction>['execute']>[0]>[0], venueId: number) {
-  await sql`SELECT pg_advisory_xact_lock(${VENUE_LOCK_NAMESPACE}::int, ${venueId}::int)`.execute(trx);
-}
-
-// Throws a clear error if any session clashes with an approved booking or
-// with a request that is still open for that venue. Coordinators see full
-// details of the other request; students/externals don't see who holds it.
-async function assertSlotsFree(exec: Exec, venueId: number, vName: string, sessions: SessionInput[], audience: 'coordinator' | 'requester') {
-  const conflicts = await findConflictingSessions(venueId, sessions, exec);
-  if (conflicts.length > 0) throw conflict(conflictMessage(vName, sessions, conflicts), 'PRELIMINARY_CONFLICT');
-
-  const open = await findOverlappingOpenRequest(venueId, sessions, exec);
-  if (!open) return;
-  const { session: s, hit } = open;
-  const hitWindow = fmtWindow(hit.requested_start_at, hit.requested_end_at);
-  const mine = fmtWindow(s.requestedStartAt, s.requestedEndAt);
-
-  if (audience === 'requester') {
-    throw conflict(
-      `${vName} is already in a pending request for this time period (${hitWindow}). That slot is on hold until the request is decided — please choose a different time${sessions.length > 1 ? ` for session ${s.sessionNo}` : ''}.`,
-      'SLOT_ALREADY_REQUESTED',
-    );
-  }
-  const where = OPEN_STATUS_WORDS[hit.status] ?? 'still open';
-  const sameSlot = new Date(hit.requested_start_at).getTime() === new Date(s.requestedStartAt).getTime()
-    && new Date(hit.requested_end_at).getTime() === new Date(s.requestedEndAt).getTime();
-  if (hit.origin === 'ACADEMIC' && sameSlot) {
-    throw conflict(
-      `An academic event request for ${vName} on ${hitWindow} already exists ("${hit.purpose}") and is ${where}. You can't create the same request twice.`,
-      'DUPLICATE_REQUEST',
-    );
-  }
-  const who = hit.origin === 'ACADEMIC' ? 'an academic event' : `a request from ${hit.full_name ?? 'a requester'}`;
-  throw conflict(
-    `${vName} is already in a pending request for this time period: session ${s.sessionNo} (${mine}) overlaps ${who} ("${hit.purpose}", ${hitWindow}), which is ${where}. Choose a different time, or deal with that request in the queue first.`,
-    'SLOT_ALREADY_REQUESTED',
-  );
-}
-
 // ── submission (VENUE-04..14, VENUE-06/35/36 multi-session) ──
 export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXTERNAL', input: {
   venueId: number; estimatedParticipants: number; sessions: SessionInput[];
   metadata: import('./validators.js').BookingMetadata;
 }) {
-  validateSessions(input.sessions); // incl. no past dates, match hours only, no overlapping sessions
-  const vName = await venueName(input.venueId);
+  validateSessions(input.sessions);
 
   // Derive a human-readable purpose string from metadata for coordinator display
   const meta = input.metadata;
@@ -420,20 +351,20 @@ export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXT
   // already passed doesn't count as this requester's "active" booking.
   await expireStaleBookings();
 
+  // VENUE-07: one active booking (PENDING/FORWARDED) at a time.
+  const active = await db.selectFrom('booking').select('booking_id')
+    .where('requested_by', '=', requesterId)
+    .where('status', 'in', ['PENDING', 'FORWARDED'])
+    .executeTakeFirst();
+  if (active) throw conflict('You already have an active booking request.', 'ACTIVE_REQUEST');
+
+  const conflicts = await findConflictingSessions(input.venueId, input.sessions);
+  if (conflicts.length > 0) {
+    throw conflict(conflictMessage(await venueName(input.venueId), input.sessions, conflicts), 'PRELIMINARY_CONFLICT');
+  }
+
   try {
     const bookingId = await db.transaction().execute(async (trx) => {
-      await lockVenue(trx, input.venueId);
-
-      // VENUE-07: one active booking (PENDING/FORWARDED) at a time.
-      const active = await trx.selectFrom('booking').select('booking_id')
-        .where('requested_by', '=', requesterId)
-        .where('status', 'in', ['PENDING', 'FORWARDED'])
-        .executeTakeFirst();
-      if (active) throw conflict('You already have an active booking request.', 'ACTIVE_REQUEST');
-
-      // Approved bookings AND requests still waiting for a decision.
-      await assertSlotsFree(trx, input.venueId, vName, input.sessions, 'requester');
-
       const row = await trx.insertInto('booking').values({
         venue_id: input.venueId, origin, requested_by: requesterId,
         purpose: purposeSummary.slice(0, 300),
@@ -476,18 +407,40 @@ export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXT
 export async function initiateAcademicEvent(coordinatorId: string, input: {
   venueId: number; purpose: string; estimatedParticipants: number; sessions: SessionInput[];
 }) {
-  validateSessions(input.sessions); // incl. no past dates, match hours only, no overlapping sessions
+  validateSessions(input.sessions); // incl. no past dates, no overlapping sessions within the event
   const vName = await venueName(input.venueId);
   await expireStaleBookings(); // stale requests shouldn't block a new event
 
+  // Already-approved bookings (VENUE-27: academic events are not exempt).
+  const conflicts = await findConflictingSessions(input.venueId, input.sessions);
+  if (conflicts.length > 0) {
+    throw conflict(conflictMessage(vName, input.sessions, conflicts), 'PRELIMINARY_CONFLICT');
+  }
+
+  // No duplicate or overlapping request while another one for the same venue
+  // and time is still open in the pipeline (pending, forwarded, sent back).
+  const open = await findOverlappingOpenRequest(input.venueId, input.sessions);
+  if (open) {
+    const { session: s, hit } = open;
+    const hitWindow = fmtWindow(hit.requested_start_at, hit.requested_end_at);
+    const where = OPEN_STATUS_WORDS[hit.status] ?? 'still open';
+    const sameSlot = new Date(hit.requested_start_at).getTime() === new Date(s.requestedStartAt).getTime()
+      && new Date(hit.requested_end_at).getTime() === new Date(s.requestedEndAt).getTime();
+    if (hit.origin === 'ACADEMIC' && sameSlot) {
+      throw conflict(
+        `An academic event request for ${vName} on ${hitWindow} already exists ("${hit.purpose}") and is ${where}. You can't create the same request twice.`,
+        'DUPLICATE_REQUEST',
+      );
+    }
+    const who = hit.origin === 'ACADEMIC' ? 'an academic event' : `a request from ${hit.full_name ?? 'a requester'}`;
+    throw conflict(
+      `Session ${s.sessionNo} (${fmtWindow(s.requestedStartAt, s.requestedEndAt)}) overlaps ${who} for ${vName} ("${hit.purpose}", ${hitWindow}), which is ${where}. Choose a different time, or deal with that request in the queue first.`,
+      'SLOT_ALREADY_REQUESTED',
+    );
+  }
+
   try {
     const bookingId = await db.transaction().execute(async (trx) => {
-      await lockVenue(trx, input.venueId);
-
-      // Approved bookings (VENUE-27: academic events are not exempt) and any
-      // request still open for the same venue/time — no duplicates.
-      await assertSlotsFree(trx, input.venueId, vName, input.sessions, 'coordinator');
-
       const row = await trx.insertInto('booking').values({
         venue_id: input.venueId, origin: 'ACADEMIC', requested_by: null,
         internal_client_ref: 'BUKC SPORTS DEPARTMENT',
