@@ -20,6 +20,8 @@ import { ApiRequestError } from '../../lib/api.js';
 import * as inv from './api.js';
 import { STATE_LABEL } from './api.js';
 import { Modal, ConfirmModal, PhotoUploadScan, BarcodeScannerModal } from './shared.js';
+import { HideInAppShell } from '../../components/AppShellContext.js';
+import { useBackStep } from '../../components/backStack.js';
 
 type Tab = 'equipment' | 'articles';
 
@@ -31,21 +33,23 @@ export default function InventoryScreen() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const header = (
-    <header style={s.topbar}>
-      <div style={s.brand}>
-        <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
-        <div>
-          <div style={s.wordmark}>Bahria University</div>
-          <div style={s.wordmarkSub}>Sports Management Portal</div>
+    <HideInAppShell>
+      <header style={s.topbar}>
+        <div style={s.brand}>
+          <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
+          <div>
+            <div style={s.wordmark}>Bahria University</div>
+            <div style={s.wordmarkSub}>Sports Management Portal</div>
+          </div>
         </div>
-      </div>
-      <div style={s.topbarRight}>
-        <Link to="/home" className="inv-topbtn" style={s.topBtn}><BackIcon /> Back</Link>
-        <button type="button" className="inv-topbtn inv-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
-          <SignOutIcon /> Sign out
-        </button>
-      </div>
-    </header>
+        <div style={s.topbarRight}>
+          <Link to="/home" className="inv-topbtn" style={s.topBtn}><BackIcon /> Back</Link>
+          <button type="button" className="inv-topbtn inv-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
+            <SignOutIcon /> Sign out
+          </button>
+        </div>
+      </header>
+    </HideInAppShell>
   );
 
   if (loading) {
@@ -98,9 +102,11 @@ export default function InventoryScreen() {
         </div>
       </main>
 
-      <footer style={s.footer}>
-        2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
-      </footer>
+      <HideInAppShell>
+        <footer style={s.footer}>
+          2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
+        </footer>
+      </HideInAppShell>
     </div>
   );
 }
@@ -168,6 +174,9 @@ function EquipmentTab({ flash }: { flash: Flash }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Go back (top right) closes the Add Type / Edit form opened on this tab.
+  useBackStep(showForm, () => setShowForm(false));
+  useBackStep(editingId !== null, () => setEditingId(null));
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounced(search);
 

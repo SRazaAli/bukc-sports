@@ -9,6 +9,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
+import { useBackStep } from '../../components/backStack.js';
 import { listAllocationAlerts, performSwap, type AllocationAlert } from './api.js';
 import { listArticles, type Article } from '../inventory/api.js';
 import { ApiRequestError } from '../../lib/api.js';
@@ -26,6 +27,8 @@ export default function EquipmentAlertsScreen() {
     try { const r = await listAllocationAlerts(); setAlerts(r.alerts); } catch (e) { setError(errMsg(e)); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // Go back (top right) closes the Resolve panel.
+  useBackStep(!!selected, () => setSelected(null));
 
   if (loading) return <PortalShell title="Equipment Alerts"><p /></PortalShell>;
   if (!user) return <Navigate to="/" replace />;

@@ -37,6 +37,8 @@ import {
 import { listTypes, type EquipmentType } from '../inventory/api.js';
 import { useSessionRows, SessionRowsEditor } from './SessionsBuilder.js';
 import { ApiRequestError } from '../../lib/api.js';
+import { HideInAppShell } from '../../components/AppShellContext.js';
+import { useBackStep } from '../../components/backStack.js';
 
 /* ---------- theme (identical values used across the app) ---------- */
 const palette = {
@@ -93,6 +95,9 @@ export default function MyBookingsScreen() {
     void load();
   }, [loading, user, load]);
 
+  // Go back (top right) closes the booking form opened with "New Booking Request".
+  useBackStep(showForm, () => setShowForm(false));
+
   if (loading) return <div className="mbk-ui" style={{ minHeight: '100%', background: palette.navy900 }} />;
   if (!user) return <Navigate to="/" replace />;
   if (user.role !== 'STUDENT' && user.role !== 'EXTERNAL') return <Navigate to="/home" replace />;
@@ -107,21 +112,23 @@ export default function MyBookingsScreen() {
       <div style={s.blobA} aria-hidden />
       <div style={s.blobB} aria-hidden />
 
-      <header style={s.topbar}>
-        <div style={s.brand}>
-          <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
-          <div>
-            <div style={s.wordmark}>Bahria University</div>
-            <div style={s.wordmarkSub}>Sports Management Portal</div>
+      <HideInAppShell>
+        <header style={s.topbar}>
+          <div style={s.brand}>
+            <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
+            <div>
+              <div style={s.wordmark}>Bahria University</div>
+              <div style={s.wordmarkSub}>Sports Management Portal</div>
+            </div>
           </div>
-        </div>
-        <div style={s.topbarRight}>
-          <button type="button" className="hist-topbtn" style={s.topBtn} onClick={() => navigate('/home')}><BackIcon /> Back</button>
-          <button type="button" className="hist-topbtn hist-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
-            <SignOutIcon /> Sign out
-          </button>
-        </div>
-      </header>
+          <div style={s.topbarRight}>
+            <button type="button" className="hist-topbtn" style={s.topBtn} onClick={() => navigate('/home')}><BackIcon /> Back</button>
+            <button type="button" className="hist-topbtn hist-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
+              <SignOutIcon /> Sign out
+            </button>
+          </div>
+        </header>
+      </HideInAppShell>
 
       <main style={s.main}>
         <div className="mbk-glass" style={s.glassPanel}>
@@ -207,9 +214,11 @@ export default function MyBookingsScreen() {
         </div>
       </main>
 
-      <footer style={s.footer}>
-        2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
-      </footer>
+      <HideInAppShell>
+        <footer style={s.footer}>
+          2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
+        </footer>
+      </HideInAppShell>
     </div>
   );
 }
@@ -242,6 +251,8 @@ function BookingWizard({ venues, onDone, onError, onCancel }: {
 }) {
   const TOTAL = 5;
   const [step, setStep] = useState(1);
+  // Go back from step 2+ returns to the previous step (step 1 → closes the form).
+  useBackStep(step > 1, () => setStep((n) => Math.max(1, n - 1)), 1);
 
   // Step 1
   const [bookingType, setBookingType] = useState<BookingType | ''>('');
@@ -1061,6 +1072,7 @@ function SentBackReviewModal({ booking, onDone, onError, onClose }: {
 function SentBackActions({ booking, onDone, onError }: { booking: MyBooking; onDone: (m: string) => void; onError: (m: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [showDecline, setShowDecline] = useState(false);
+  useBackStep(showDecline, () => setShowDecline(false));
   async function accept() {
     setBusy(true);
     try { await acceptSentBack(booking.booking_id); onDone('Booking resubmitted — back in the Coordinator\'s queue.'); }

@@ -36,6 +36,7 @@ import { useAuth } from '../../lib/auth.js';
 import { listHistory, type HistoryRow, type HistoryFilter } from './api.js';
 import { listArticles, getArticleLifecycle, type Article, type ArticleLifecycle } from '../inventory/api.js';
 import { ApiRequestError } from '../../lib/api.js';
+import { HideInAppShell } from '../../components/AppShellContext.js';
 
 /* ---------- theme (identical values to LandingScreen/HomeScreen/ProfileUI `palette`) ---------- */
 const palette = {
@@ -89,21 +90,23 @@ export default function UsageHistoryScreen() {
       <div style={s.glowA} aria-hidden />
       <div style={s.glowB} aria-hidden />
 
-      <header style={s.topbar}>
-        <div style={s.brand}>
-          <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
-          <div>
-            <div style={s.wordmark}>Bahria University</div>
-            <div style={s.wordmarkSub}>Sports Management Portal</div>
+      <HideInAppShell>
+        <header style={s.topbar}>
+          <div style={s.brand}>
+            <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
+            <div>
+              <div style={s.wordmark}>Bahria University</div>
+              <div style={s.wordmarkSub}>Sports Management Portal</div>
+            </div>
           </div>
-        </div>
-        <div style={s.topbarRight}>
-          <Link to="/home" className="hist-topbtn" style={s.topBtn}><BackIcon /> Back</Link>
-          <button type="button" className="hist-topbtn hist-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
-            <SignOutIcon /> Sign out
-          </button>
-        </div>
-      </header>
+          <div style={s.topbarRight}>
+            <Link to="/home" className="hist-topbtn" style={s.topBtn}><BackIcon /> Back</Link>
+            <button type="button" className="hist-topbtn hist-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
+              <SignOutIcon /> Sign out
+            </button>
+          </div>
+        </header>
+      </HideInAppShell>
 
       <main style={s.main}>
         <div className="hist-glass" style={s.glassPanel}>
@@ -138,9 +141,11 @@ export default function UsageHistoryScreen() {
         </div>
       </main>
 
-      <footer style={s.footer}>
-        2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
-      </footer>
+      <HideInAppShell>
+        <footer style={s.footer}>
+          2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
+        </footer>
+      </HideInAppShell>
     </div>
   );
 }

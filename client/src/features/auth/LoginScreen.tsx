@@ -77,7 +77,7 @@ export default function LoginScreen({ role }: { role: LoginRole }) {
         return;
       }
       setUser(user);
-      navigate('/home');
+      navigate('/profile'); // first page after login: profile + sidebar
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.body.error : 'Could not sign in. Try again.');
       setLoading(false);

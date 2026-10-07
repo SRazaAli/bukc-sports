@@ -32,6 +32,7 @@ import {
   type ApprovedSession,
 } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
+import { HideInAppShell } from '../../components/AppShellContext.js';
 
 /* ---------- theme (identical values to LandingScreen/HomeScreen/ProfileUI/
    UsageHistoryScreen/AdminAccountsScreen/OfflineFallbackScreen `palette`) ---------- */
@@ -310,23 +311,25 @@ function Shell({ onBack, onSignOut, children }: { onBack: () => void; onSignOut:
       <div className="cdr-blob cdr-blob-a" aria-hidden />
       <div className="cdr-blob cdr-blob-b" aria-hidden />
 
-      <header style={topbar}>
-        <div style={brandRow}>
-          <img src="/landing/bu_logo.png" alt="Bahria University" style={crest} />
-          <div>
-            <div style={wordmark}>Bahria University</div>
-            <div style={wordmarkSub}>Sports Management Portal</div>
+      <HideInAppShell>
+        <header style={topbar}>
+          <div style={brandRow}>
+            <img src="/landing/bu_logo.png" alt="Bahria University" style={crest} />
+            <div>
+              <div style={wordmark}>Bahria University</div>
+              <div style={wordmarkSub}>Sports Management Portal</div>
+            </div>
           </div>
-        </div>
-        <div style={headerActions}>
-          <button type="button" className="hist-topbtn" style={backBtn} onClick={onBack}>
-            <BackGlyph /> Back
-          </button>
-          <button type="button" className="hist-topbtn hist-signout" style={signOutBtn} onClick={onSignOut}>
-            <SignOutGlyph /> Sign out
-          </button>
-        </div>
-      </header>
+          <div style={headerActions}>
+            <button type="button" className="hist-topbtn" style={backBtn} onClick={onBack}>
+              <BackGlyph /> Back
+            </button>
+            <button type="button" className="hist-topbtn hist-signout" style={signOutBtn} onClick={onSignOut}>
+              <SignOutGlyph /> Sign out
+            </button>
+          </div>
+        </header>
+      </HideInAppShell>
 
       <main style={main}>
         {/* Frosted glassmorphism shell around everything below the header —
@@ -342,9 +345,11 @@ function Shell({ onBack, onSignOut, children }: { onBack: () => void; onSignOut:
         </div>
       </main>
 
-      <footer style={footer}>
-        2026 © <a href="/" style={footerLink}>Bahria University</a>
-      </footer>
+      <HideInAppShell>
+        <footer style={footer}>
+          2026 © <a href="/" style={footerLink}>Bahria University</a>
+        </footer>
+      </HideInAppShell>
     </div>
   );
 }

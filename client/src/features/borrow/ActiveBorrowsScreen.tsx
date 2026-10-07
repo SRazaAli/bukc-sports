@@ -17,6 +17,8 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { listActive, getTransaction, returnArticles, type ActiveBorrow, type TxnDetail } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
+import { HideInAppShell } from '../../components/AppShellContext.js';
+import { useBackStep } from '../../components/backStack.js';
 
 /* ---------- theme (identical values used across the app) ---------- */
 const palette = {
@@ -49,6 +51,8 @@ export default function ActiveBorrowsScreen() {
     try { const r = await listActive(); setRows(r.transactions); } catch (e) { setError(errMsg(e)); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // Go back (top right) closes the return panel opened from the list.
+  useBackStep(!!detail, () => setDetail(null));
 
   async function open(txnId: string) {
     try { setDetail(await getTransaction(txnId)); setError(null); } catch (e) { setError(errMsg(e)); }
@@ -66,21 +70,23 @@ export default function ActiveBorrowsScreen() {
       <div style={s.blobA} aria-hidden />
       <div style={s.blobB} aria-hidden />
 
-      <header style={s.topbar}>
-        <div style={s.brand}>
-          <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
-          <div>
-            <div style={s.wordmark}>Bahria University</div>
-            <div style={s.wordmarkSub}>Sports Management Portal</div>
+      <HideInAppShell>
+        <header style={s.topbar}>
+          <div style={s.brand}>
+            <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
+            <div>
+              <div style={s.wordmark}>Bahria University</div>
+              <div style={s.wordmarkSub}>Sports Management Portal</div>
+            </div>
           </div>
-        </div>
-        <div style={s.topbarRight}>
-          <button type="button" className="hist-topbtn" style={s.topBtn} onClick={() => navigate('/home')}><BackIcon /> Back</button>
-          <button type="button" className="hist-topbtn hist-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
-            <SignOutIcon /> Sign out
-          </button>
-        </div>
-      </header>
+          <div style={s.topbarRight}>
+            <button type="button" className="hist-topbtn" style={s.topBtn} onClick={() => navigate('/home')}><BackIcon /> Back</button>
+            <button type="button" className="hist-topbtn hist-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
+              <SignOutIcon /> Sign out
+            </button>
+          </div>
+        </header>
+      </HideInAppShell>
 
       <main style={s.main}>
         {/* Frosted glassmorphism shell around everything below the header —
@@ -129,9 +135,11 @@ export default function ActiveBorrowsScreen() {
         </div>
       </main>
 
-      <footer style={s.footer}>
-        2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
-      </footer>
+      <HideInAppShell>
+        <footer style={s.footer}>
+          2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
+        </footer>
+      </HideInAppShell>
     </div>
   );
 }

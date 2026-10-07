@@ -34,6 +34,8 @@ import {
 } from './api.js';
 import { useSessionRows, SessionRowsEditor, type SessionRow } from './SessionsBuilder.js';
 import { ApiRequestError } from '../../lib/api.js';
+import { HideInAppShell } from '../../components/AppShellContext.js';
+import { useBackStep } from '../../components/backStack.js';
 
 function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
 function fmtDate(iso: string) { return new Date(iso).toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); }
@@ -98,22 +100,28 @@ export default function VenueQueueScreen() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // Go back (top right) closes whichever view a button on this page opened.
+  useBackStep(!!selected, () => setSelected(null));
+  useBackStep(showAcademic, () => setShowAcademic(false));
+
   const header = (
-    <header style={s.topbar}>
-      <div style={s.brand}>
-        <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
-        <div>
-          <div style={s.wordmark}>Bahria University</div>
-          <div style={s.wordmarkSub}>Sports Management Portal</div>
+    <HideInAppShell>
+      <header style={s.topbar}>
+        <div style={s.brand}>
+          <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
+          <div>
+            <div style={s.wordmark}>Bahria University</div>
+            <div style={s.wordmarkSub}>Sports Management Portal</div>
+          </div>
         </div>
-      </div>
-      <div style={s.topbarRight}>
-        <Link to="/home" className="vq-topbtn" style={s.topBtn}><BackIcon /> Back</Link>
-        <button type="button" className="vq-topbtn vq-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
-          <SignOutIcon /> Sign out
-        </button>
-      </div>
-    </header>
+        <div style={s.topbarRight}>
+          <Link to="/home" className="vq-topbtn" style={s.topBtn}><BackIcon /> Back</Link>
+          <button type="button" className="vq-topbtn vq-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
+            <SignOutIcon /> Sign out
+          </button>
+        </div>
+      </header>
+    </HideInAppShell>
   );
 
   if (loading) {
@@ -452,9 +460,11 @@ export default function VenueQueueScreen() {
         </div>
       </main>
 
-      <footer style={s.footer}>
-        2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
-      </footer>
+      <HideInAppShell>
+        <footer style={s.footer}>
+          2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
+        </footer>
+      </HideInAppShell>
 
       {viewingVenue && <VenueDetailModal venue={viewingVenue} onClose={() => setViewingVenue(null)} />}
     </div>
@@ -544,6 +554,8 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
   const [step, setStep] = useState<StepN>(1);
   const [detail, setDetail] = useState<BookingDetailFull | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(true);
+  // Go back from step 2–4 returns to the previous step (step 1 → back to the queue).
+  useBackStep(step > 1, () => setStep((n) => (n > 1 ? n - 1 : n) as StepN), 1);
 
   // ── Step 2 persistent state ──
   const [conflictChecked, setConflictChecked] = useState(false);
@@ -1179,6 +1191,7 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
   onBack: () => void;
 }) {
   const [mode, setMode] = useState<'none' | 'reject' | 'sendback'>('none');
+  useBackStep(mode !== 'none', () => setMode('none'), 2);
   const [feasNote, setFeasNote] = useState('');
   const [reason, setReason] = useState('');
   const [sendBackNote, setSendBackNote] = useState('');

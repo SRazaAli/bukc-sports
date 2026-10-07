@@ -22,6 +22,7 @@ import { useAuth } from '../../lib/auth.js';
 import { ApiRequestError } from '../../lib/api.js';
 import * as offlineApi from './api.js';
 import type { AuditEntry } from './api.js';
+import { HideInAppShell } from '../../components/AppShellContext.js';
 
 /* ---------- theme (identical values to LandingScreen/HomeScreen/ProfileUI/
    UsageHistoryScreen/AdminAccountsScreen `palette`) ---------- */
@@ -506,23 +507,25 @@ function Shell({ onBack, onSignOut, children }: { onBack: () => void; onSignOut:
       <div className="ofl-blob ofl-blob-a" aria-hidden />
       <div className="ofl-blob ofl-blob-b" aria-hidden />
 
-      <header style={topbar}>
-        <div style={brandRow}>
-          <img src="/landing/bu_logo.png" alt="Bahria University" style={crest} />
-          <div>
-            <div style={wordmark}>Bahria University</div>
-            <div style={wordmarkSub}>Sports Management Portal</div>
+      <HideInAppShell>
+        <header style={topbar}>
+          <div style={brandRow}>
+            <img src="/landing/bu_logo.png" alt="Bahria University" style={crest} />
+            <div>
+              <div style={wordmark}>Bahria University</div>
+              <div style={wordmarkSub}>Sports Management Portal</div>
+            </div>
           </div>
-        </div>
-        <div style={headerActions}>
-          <button type="button" className="ofl-back-btn" style={backBtn} onClick={onBack}>
-            <BackGlyph /> Back
-          </button>
-          <button type="button" className="ofl-signout-btn" style={signOutBtn} onClick={onSignOut}>
-            <SignOutGlyph /> Sign out
-          </button>
-        </div>
-      </header>
+          <div style={headerActions}>
+            <button type="button" className="ofl-back-btn" style={backBtn} onClick={onBack}>
+              <BackGlyph /> Back
+            </button>
+            <button type="button" className="ofl-signout-btn" style={signOutBtn} onClick={onSignOut}>
+              <SignOutGlyph /> Sign out
+            </button>
+          </div>
+        </header>
+      </HideInAppShell>
 
       <main style={main}>
         {/* Frosted glassmorphism shell around everything below the header —
@@ -539,9 +542,11 @@ function Shell({ onBack, onSignOut, children }: { onBack: () => void; onSignOut:
         </div>
       </main>
 
-      <footer style={footer}>
-        2026 © <a href="/" style={footerLink}>Bahria University</a>
-      </footer>
+      <HideInAppShell>
+        <footer style={footer}>
+          2026 © <a href="/" style={footerLink}>Bahria University</a>
+        </footer>
+      </HideInAppShell>
     </div>
   );
 }

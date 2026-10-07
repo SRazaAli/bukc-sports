@@ -19,6 +19,7 @@ import { listNotifications, unreadNotificationCount, markNotificationRead, markA
 import { getReputation, listMyRequests, type MyRequest, type Reputation } from '../borrow/api.js';
 import { listMyBookings, type MyBooking } from '../venue/api.js';
 import { ApiRequestError } from '../../lib/api.js';
+import { useBackStep } from '../../components/backStack.js';
 import {
   ProfilePage, ProfileTopBar, ProfileMain, ProfileGrid, ProfileFooter,
   IdentityCard, Panel, LinkBtn, DetailRow, Banner, NotifItem, CountPill,
@@ -234,6 +235,8 @@ function QuickLinks({ role, navigate }: { role: string; navigate: (to: string) =
 // that code actually applies the change.
 function ChangePasswordCard({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
   const [step, setStep] = useState<'form' | 'code'>('form');
+  // Go back (top right) from the code step returns to the password form (same as its Back link).
+  useBackStep(step === 'code', () => setStep('form'));
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');

@@ -10,6 +10,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
+import { useBackStep } from '../../components/backStack.js';
 import { listArticles, type Article } from '../inventory/api.js';
 import {
   listQueue, approveGroup, rejectRequest, lendGroup,
@@ -72,6 +73,10 @@ export default function BorrowQueueScreen() {
     try { const r = await listQueue(); setQueue(r.queue); } catch (e) { setError(errMsg(e)); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // Go back (top right) closes whichever view a button on this page opened.
+  useBackStep(!!selectedGroup, () => setSelectedGroup(null));
+  useBackStep(!!lendingGroup, () => setLendingGroup(null));
+  useBackStep(showWalkin, () => setShowWalkin(false));
 
   if (loading) return <PortalShell title="Borrow Queue"><p /></PortalShell>;
   if (!user) return <Navigate to="/" replace />;

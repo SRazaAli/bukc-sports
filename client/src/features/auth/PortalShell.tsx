@@ -5,6 +5,7 @@
  * (student = sage green, admin = navy, etc.), exactly as the real portal does.
  */
 import type { ReactNode } from 'react';
+import { HideInAppShell } from '../../components/AppShellContext.js';
 
 export type BarTint = 'navy' | 'sage' | 'blue' | 'slate';
 
@@ -20,16 +21,21 @@ export function PortalShell({
 }: { title: string; tint?: BarTint; children: ReactNode }) {
   return (
     <div style={s.page}>
-      <header style={{ ...s.topbar, background: TINTS[tint] }}>
-        <span style={s.wordmark}>Bahria University</span>
-      </header>
+      {/* Inside the sidebar layout the sidebar shows the brand instead. */}
+      <HideInAppShell>
+        <header style={{ ...s.topbar, background: TINTS[tint] }}>
+          <span style={s.wordmark}>Bahria University</span>
+        </header>
+      </HideInAppShell>
       <div style={s.titleBand}>
         <h1 style={s.title}>{title}</h1>
       </div>
       <main style={s.main}>{children}</main>
-      <footer style={s.footer}>
-        2026 © <a href="/" style={s.footerLink}>Bahria University</a>
-      </footer>
+      <HideInAppShell>
+        <footer style={s.footer}>
+          2026 © <a href="/" style={s.footerLink}>Bahria University</a>
+        </footer>
+      </HideInAppShell>
     </div>
   );
 }

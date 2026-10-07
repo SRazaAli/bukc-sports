@@ -21,6 +21,7 @@ import { listAvailability, type AvailabilityRow } from '../availability/api.js';
 import { submitRequest } from './api.js';
 import { ApiRequestError } from '../../lib/api.js';
 import { api } from '../../lib/api.js';
+import { HideInAppShell } from '../../components/AppShellContext.js';
 
 /* ---------- theme (identical values used across the app) ---------- */
 const palette = {
@@ -224,21 +225,23 @@ export default function EquipmentBorrowScreen() {
       <div style={s.blobB} aria-hidden />
       <div style={s.blobC} aria-hidden />
 
-      <header style={s.topbar}>
-        <div style={s.brand}>
-          <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
-          <div>
-            <div style={s.wordmark}>Bahria University</div>
-            <div style={s.wordmarkSub}>Sports Management Portal</div>
+      <HideInAppShell>
+        <header style={s.topbar}>
+          <div style={s.brand}>
+            <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
+            <div>
+              <div style={s.wordmark}>Bahria University</div>
+              <div style={s.wordmarkSub}>Sports Management Portal</div>
+            </div>
           </div>
-        </div>
-        <div style={s.topbarRight}>
-          <button type="button" className="hist-topbtn" style={s.topBtn} onClick={() => navigate(-1)}><BackIcon /> Back</button>
-          <button type="button" className="hist-topbtn hist-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
-            <SignOutIcon /> Sign out
-          </button>
-        </div>
-      </header>
+          <div style={s.topbarRight}>
+            <button type="button" className="hist-topbtn" style={s.topBtn} onClick={() => navigate(-1)}><BackIcon /> Back</button>
+            <button type="button" className="hist-topbtn hist-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
+              <SignOutIcon /> Sign out
+            </button>
+          </div>
+        </header>
+      </HideInAppShell>
 
       <main style={s.main}>
         <div className="ebw-glass" style={s.glassPanel}>
@@ -489,9 +492,11 @@ export default function EquipmentBorrowScreen() {
         </div>
       </main>
 
-      <footer style={s.footer}>
-        2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
-      </footer>
+      <HideInAppShell>
+        <footer style={s.footer}>
+          2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
+        </footer>
+      </HideInAppShell>
     </div>
   );
 }
