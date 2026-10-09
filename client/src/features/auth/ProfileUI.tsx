@@ -19,6 +19,7 @@
  * is the only consumer of this file.
  */
 import { useState, type ReactNode } from 'react';
+import { HideInAppShell, useInAppShell } from '../../components/AppShellContext.js';
 
 /* ---------- theme (identical values to LandingScreen/HomeScreen `palette`) ---------- */
 
@@ -130,7 +131,9 @@ const s = {
 /* ---------- Top bar: brand + Go back / Sign out ---------- */
 
 export function ProfileTopBar({ onBack, onSignOut }: { onBack: () => void; onSignOut: () => void }) {
+  // Inside the sidebar layout the sidebar shows the brand and Sign out instead.
   return (
+    <HideInAppShell>
     <header className="pf-topbar" style={tb.wrap}>
       <div style={tb.brand}>
         <img src="/landing/bu_logo.png" alt="Bahria University" style={tb.logoImg} />
@@ -148,6 +151,7 @@ export function ProfileTopBar({ onBack, onSignOut }: { onBack: () => void; onSig
         </button>
       </div>
     </header>
+    </HideInAppShell>
   );
 }
 
@@ -165,7 +169,9 @@ const tb = {
 /* ---------- Main wrap + grid ---------- */
 
 export function ProfileMain({ children }: { children: ReactNode }) {
-  return <main className="pf-main bukc-container" style={{ position: 'relative', zIndex: 1, flex: 1, padding: '8px 0 56px', maxWidth: 1320, margin: '0 auto', width: '100%', paddingLeft: 22, paddingRight: 22 }}>{children}</main>;
+  // No top bar above it inside the sidebar layout, so give the content some breathing room.
+  const inShell = useInAppShell();
+  return <main className="pf-main bukc-container" style={{ position: 'relative', zIndex: 1, flex: 1, padding: inShell ? '28px 0 56px' : '8px 0 56px', maxWidth: 1320, margin: '0 auto', width: '100%', paddingLeft: 22, paddingRight: 22 }}>{children}</main>;
 }
 
 export function ProfileGrid({ sidebar, children }: { sidebar: ReactNode; children: ReactNode }) {
@@ -183,9 +189,11 @@ export function ProfileGrid({ sidebar, children }: { sidebar: ReactNode; childre
 
 export function ProfileFooter() {
   return (
+    <HideInAppShell>
     <footer className="bukc-container" style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '20px 22px', fontSize: 12.5, color: palette.slate400, borderTop: `1px solid ${palette.slate600}55` }}>
       2026 © <a href="/" style={{ color: palette.accentSoft, textDecoration: 'none', fontWeight: 600 }}>Bahria University</a> — Sports Management Portal
     </footer>
+    </HideInAppShell>
   );
 }
 

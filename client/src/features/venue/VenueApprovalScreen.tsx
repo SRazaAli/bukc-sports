@@ -22,6 +22,8 @@ import {
 } from './api.js';
 import { listSportCategories, type SportCategory } from '../inventory/api.js';
 import { ApiRequestError } from '../../lib/api.js';
+import { HideInAppShell } from '../../components/AppShellContext.js';
+import { useBackStep } from '../../components/backStack.js';
 
 function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
 
@@ -78,22 +80,29 @@ export default function VenueApprovalScreen() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  // Go back (top right) closes whichever view a button on this page opened.
+  useBackStep(!!selected, () => setSelected(null));
+  useBackStep(showForm, () => { setShowForm(false); setEditingId(null); });
+  useBackStep(editingId !== null && !showForm, () => setEditingId(null));
+
   const header = (
-    <header style={s.topbar}>
-      <div style={s.brand}>
-        <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
-        <div>
-          <div style={s.wordmark}>Bahria University</div>
-          <div style={s.wordmarkSub}>Sports Management Portal</div>
+    <HideInAppShell>
+      <header style={s.topbar}>
+        <div style={s.brand}>
+          <img src="/landing/bu_logo.png" alt="Bahria University" style={s.logoImg} />
+          <div>
+            <div style={s.wordmark}>Bahria University</div>
+            <div style={s.wordmarkSub}>Sports Management Portal</div>
+          </div>
         </div>
-      </div>
-      <div style={s.topbarRight}>
-        <Link to="/home" className="va-topbtn" style={s.topBtn}><BackIcon /> Back</Link>
-        <button type="button" className="va-topbtn va-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
-          <SignOutIcon /> Sign out
-        </button>
-      </div>
-    </header>
+        <div style={s.topbarRight}>
+          <Link to="/home" className="va-topbtn" style={s.topBtn}><BackIcon /> Back</Link>
+          <button type="button" className="va-topbtn va-signout" style={s.topBtn} onClick={() => { void logout(); navigate('/'); }}>
+            <SignOutIcon /> Sign out
+          </button>
+        </div>
+      </header>
+    </HideInAppShell>
   );
 
   if (loading) {
@@ -382,9 +391,11 @@ export default function VenueApprovalScreen() {
         </div>
       </main>
 
-      <footer style={s.footer}>
-        2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
-      </footer>
+      <HideInAppShell>
+        <footer style={s.footer}>
+          2026 © <a href="/" style={s.footerLink}>Bahria University</a> — Sports Management Portal
+        </footer>
+      </HideInAppShell>
 
       {viewingVenue && <VenueDetailModal venue={viewingVenue} onClose={() => setViewingVenue(null)} />}
 
@@ -473,6 +484,7 @@ function DecisionPanel({ item, onBack, onDone, onError }: {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<import('./api.js').BookingDetailFull | null>(null);
+  useBackStep(mode !== 'none', () => setMode('none'), 1);
 
   useEffect(() => {
     getBookingFull(item.booking_id).then(setDetail).catch(() => {});

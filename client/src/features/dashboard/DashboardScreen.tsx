@@ -19,6 +19,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { PortalShell } from '../auth/PortalShell.js';
+import { useBackStep } from '../../components/backStack.js';
 import { ApiRequestError } from '../../lib/api.js';
 import { getDashboard, type DashboardResponse, type BorrowRequestPreview } from './api.js';
 import { subscribeAvailability, type AvailabilityRow } from '../availability/api.js';
@@ -111,6 +112,8 @@ function ApprovalQueuePanel({
   const [localError, setLocalError] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  // Go back (top right) cancels the inline reject form.
+  useBackStep(rejectingId !== null, () => { setRejectingId(null); setRejectReason(''); });
 
   const totalPending = approvalQueue.pendingBorrowRequests + approvalQueue.pendingVenueBookings;
 

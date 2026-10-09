@@ -1,5 +1,10 @@
 /**
  * App root. Route tree with the auth provider.
+ *
+ * Public pages (landing, login, register, password reset, accept invite) render
+ * on their own. Every signed-in page renders inside <AppLayout>, which adds the
+ * role-based collapsible sidebar (logo at the top, Sign out at the bottom).
+ * After login users land on /profile; the old /home address redirects there.
  */
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './lib/auth.js';
@@ -26,7 +31,7 @@ import ConflictDetectionScreen from './features/venue/ConflictDetectionScreen.js
 import UsageHistoryScreen from './features/history/UsageHistoryScreen.js';
 import DashboardScreen from './features/dashboard/DashboardScreen.js';
 import OfflineFallbackScreen from './features/offline/OfflineFallbackScreen.js';
-import HomeScreen from './features/auth/HomeScreen.js';
+import AppLayout from './components/AppLayout.js';
 
 export default function App() {
   return (
@@ -47,9 +52,13 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPasswordScreen />} />
           <Route path="/accept-invite" element={<AcceptInviteScreen />} />
 
-          <Route path="/home" element={<HomeScreen />} />
+          {/* ── Signed-in pages: shown inside the sidebar layout ── */}
+          <Route element={<AppLayout />}>
+          {/* The old home screen is replaced by the sidebar; anything that still
+              points at /home (role redirects, bookmarks) lands on the profile. */}
+          <Route path="/home" element={<Navigate to="/profile" replace />} />
 
-          {/* Profile — all authenticated roles */}
+          {/* Profile — all authenticated roles (first page after login) */}
           <Route path="/profile" element={<ProfileScreen />} />
 
           <Route
@@ -165,7 +174,9 @@ export default function App() {
             }
           />
 
-          {/* Catch-all → home dashboard, not the landing screen */}
+          </Route>
+
+          {/* Catch-all → /home (→ profile when signed in, landing page when not) */}
           <Route path="*" element={<Navigate to="/home" replace />} />
         </Routes>
       </BrowserRouter>
