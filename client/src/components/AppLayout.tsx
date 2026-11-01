@@ -27,6 +27,7 @@ import { AppShellContext } from './AppShellContext.js';
 import { getNavItems, groupNavItems, isItemActive, ROLE_LABEL } from './navigation.js';
 import { useInAppHistory, clearInAppHistory } from './useInAppHistory.js';
 import { BackStackProvider, useBackStackRegistry } from './backStack.js';
+import { useUnreadMessages } from './useUnreadMessages.js';
 
 const COLLAPSE_KEY = 'bukc:sidebarCollapsed';
 function readCollapsed(): boolean {
@@ -49,6 +50,7 @@ export default function AppLayout() {
   const [signingOut, setSigningOut] = useState(false);
   const { previous, goBack: historyBack } = useInAppHistory();
   const { registry, hasStep, stepBack } = useBackStackRegistry();
+  const unreadMessages = useUnreadMessages(!!user, pathname);
 
   // Close the mobile drawer whenever the page changes.
   useEffect(() => { setMobileOpen(false); }, [pathname]);
@@ -131,12 +133,16 @@ export default function AppLayout() {
               <ul>
                 {g.items.map((item) => {
                   const active = isItemActive(item, pathname);
+                  const badge = item.badge === 'messages' ? unreadMessages : 0;
+                  const badgeText = badge > 99 ? '99+' : String(badge);
                   return (
                     <li key={item.key}>
                       <Link to={item.to} className={`sb-link${active ? ' is-active' : ''}`} aria-current={active ? 'page' : undefined}
-                        data-tip={item.label}>
+                        data-tip={badge > 0 ? `${item.label} (${badgeText} unread)` : item.label}
+                        aria-label={badge > 0 ? `${item.label}, ${badgeText} unread` : undefined}>
                         <span className="sb-icon">{item.icon}</span>
                         <span className="sb-label">{item.label}</span>
+                        {badge > 0 && <span className="sb-badge" aria-hidden>{badgeText}</span>}
                       </Link>
                     </li>
                   );
@@ -253,6 +259,15 @@ function ShellStyles() {
       }
       .sb-icon { flex: 0 0 22px; display: inline-flex; align-items: center; justify-content: center; }
       .sb-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      /* Unread badge (Messages) — red circle with the live count */
+      .sb-badge {
+        margin-left: auto; flex: 0 0 auto; min-width: 21px; height: 21px; padding: 0 6px; border-radius: 999px;
+        display: inline-flex; align-items: center; justify-content: center;
+        background: #E5484D; color: #fff; font: 700 11.5px/1 Inter, system-ui, sans-serif;
+        box-shadow: 0 0 0 2px ${C.sbBg}, 0 4px 10px -4px rgba(229,72,77,.8);
+        animation: sbBadgeIn .25s ease;
+      }
+      @keyframes sbBadgeIn { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
       .sb-footer { padding: 12px; border-top: 1px solid ${C.line}; }
       .sb-signout { color: #FCA5A5; }
@@ -269,6 +284,7 @@ function ShellStyles() {
       .is-collapsed .sb-section { height: 1px; padding: 0; margin: 12px 8px 10px; background: ${C.line}; color: transparent; overflow: hidden; }
       .is-collapsed .sb-group:first-child .sb-section { margin-top: 4px; }
       .is-collapsed .sb-link { justify-content: center; padding: 11px 0; }
+      .is-collapsed .sb-badge { position: absolute; top: 3px; right: 9px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 10.5px; }
       /* hover tooltip with the page name */
       .is-collapsed .sb-link::after {
         content: attr(data-tip); position: fixed; left: calc(var(--sb-w) + 8px); transform: translateY(2px);
@@ -317,6 +333,7 @@ function ShellStyles() {
         .is-collapsed .sb-user { justify-content: flex-start; margin: 2px 14px 10px; padding: 11px 12px; }
         .is-collapsed .sb-section { height: auto; padding: 10px 10px 6px; margin: 0; background: none; color: ${C.dim}; }
         .is-collapsed .sb-link { justify-content: flex-start; padding: 10px 12px; }
+        .is-collapsed .sb-badge { position: static; min-width: 21px; height: 21px; padding: 0 6px; font-size: 11.5px; }
         .is-collapsed .sb-link::after { display: none; }
         .sb-mobile-toggle {
           display: inline-flex; position: fixed; top: 12px; left: 12px; z-index: 40; width: 44px; height: 44px;

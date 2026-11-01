@@ -19,6 +19,8 @@ export interface NavItem {
   icon: ReactNode;
   /** Other route prefixes that belong to this item (keeps it highlighted on sub-pages). */
   alsoActiveOn?: string[];
+  /** Shows a live unread-count badge next to the label. */
+  badge?: 'messages';
 }
 
 export const SECTION_ORDER: NavSection[] = ['Account', 'Equipment', 'Venues', 'Records'];
@@ -35,6 +37,8 @@ export function getNavItems(role: UserRole): NavItem[] {
   const push = (i: NavItem) => items.push(i);
 
   push({ key: 'profile', label: 'My Profile', to: '/profile', section: 'Account', icon: <ProfileIcon /> });
+  // Chat with the Coordinator desk (Coordinators: inbox of everyone who wrote).
+  push({ key: 'messages', label: 'Messages', to: '/messages', section: 'Account', icon: <ChatIcon />, badge: 'messages' });
 
   if (role === 'SUPER_ADMIN') {
     push({ key: 'dashboard', label: 'Admin Dashboard', to: '/dashboard', section: 'Account', icon: <DashboardIcon /> });
@@ -111,4 +115,5 @@ function ShieldCheckIcon() { return <svg width={sz} height={sz} viewBox="0 0 24 
 function AlertIcon() { return <svg width={sz} height={sz} viewBox="0 0 24 24" fill="none" aria-hidden><path d="M12 3.5 21.5 20h-19L12 3.5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/><path d="M12 10v4.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><circle cx="12" cy="17" r="0.9" fill="currentColor"/></svg>; }
 function CalendarIcon() { return <svg width={sz} height={sz} viewBox="0 0 24 24" fill="none" aria-hidden><rect x="4" y="5.5" width="16" height="14.5" rx="1.8" stroke="currentColor" strokeWidth="1.6"/><path d="M4 9.5h16M8 3.5v4M16 3.5v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>; }
 function HistoryIcon() { return <svg width={sz} height={sz} viewBox="0 0 24 24" fill="none" aria-hidden><circle cx="12" cy="13" r="7.5" stroke="currentColor" strokeWidth="1.6"/><path d="M12 9v4.2l3 1.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M8.5 3.5A9.6 9.6 0 0 0 4.3 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>; }
+function ChatIcon() { return <svg width={sz} height={sz} viewBox="0 0 24 24" fill="none" aria-hidden><path d="M4.5 5.5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4.5 3.5V16.5h-1a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/><path d="M8 10h8M8 13h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>; }
 function WifiOffIcon() { return <svg width={sz} height={sz} viewBox="0 0 24 24" fill="none" aria-hidden><path d="M3 8.5c2.6-2.2 6-3.3 9-3.3M21 8.5c-1.3-1.1-2.8-1.9-4.4-2.5M6.5 12.3c1.6-1.2 3.5-1.8 5.5-1.8M17.5 12.3a9 9 0 0 0-2-1.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M9.8 16a4.8 4.8 0 0 1 4.4 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><circle cx="12" cy="19" r="1" fill="currentColor"/><path d="M2.5 3 21.5 21" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>; }
