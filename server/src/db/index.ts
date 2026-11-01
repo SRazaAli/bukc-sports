@@ -525,6 +525,26 @@ export interface HealthCheckSessionTable {
   completed_at:        Timestamp | null;
 }
 
+// Messages (migration 029) — chat with the Coordinator desk.
+export interface ConversationTable {
+  conversation_id: Generated<string>;
+  party_user_id: string;
+  created_at: Generated<Timestamp>;
+  last_message_at: Timestamp | null;
+}
+export interface MessageTable {
+  message_id: Generated<string>;
+  conversation_id: string;
+  sender_id: string;
+  body: string;
+  created_at: Generated<Timestamp>;
+}
+export interface ConversationReadTable {
+  conversation_id: string;
+  user_id: string;
+  last_read_at: Timestamp;
+}
+
 export interface DB {
   app_user: AppUserTable;
   student_profile: StudentProfileTable;
@@ -570,6 +590,10 @@ export interface DB {
   // inventory audit + health check sessions (Feature 4 — INV-25/28/29)
   article_audit_log: ArticleAuditLogTable;
   health_check_session: HealthCheckSessionTable;
+  // messages
+  conversation: ConversationTable;
+  message: MessageTable;
+  conversation_read: ConversationReadTable;
 }
 
 const { Pool } = pg;

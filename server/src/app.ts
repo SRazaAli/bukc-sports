@@ -18,6 +18,7 @@ import { notificationsRouter } from './features/notifications/router.js';
 import { historyRouter } from './features/history/router.js';
 import { offlineRouter } from './features/offline/router.js';
 import { dashboardRouter } from './features/dashboard/router.js';
+import { messagesRouter } from './features/messages/router.js';
 
 export function createApp() {
   const app = express();
@@ -51,6 +52,7 @@ export function createApp() {
   app.use('/api/history', historyRouter);   // Feature 10
   app.use('/api/offline', offlineRouter);   // Feature 11
   app.use('/api/dashboard', dashboardRouter); // Feature 12
+  app.use('/api/messages', messagesRouter);   // chat with the Coordinator desk
   // ...
 
   // Error handler must be last

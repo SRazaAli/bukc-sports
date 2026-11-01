@@ -31,6 +31,7 @@ import ConflictDetectionScreen from './features/venue/ConflictDetectionScreen.js
 import UsageHistoryScreen from './features/history/UsageHistoryScreen.js';
 import DashboardScreen from './features/dashboard/DashboardScreen.js';
 import OfflineFallbackScreen from './features/offline/OfflineFallbackScreen.js';
+import MessagesScreen from './features/messages/MessagesScreen.js';
 import AppLayout from './components/AppLayout.js';
 
 export default function App() {
@@ -164,6 +165,9 @@ export default function App() {
           {/* Usage History — staff get full view + article lifecycle tab;
               students/externals see their own records only */}
           <Route path="/usage-history" element={<UsageHistoryScreen />} />
+
+          {/* Messages — chat with the Coordinator desk (every signed-in role) */}
+          <Route path="/messages" element={<MessagesScreen />} />
 
           <Route
             path="/offline-fallback"
