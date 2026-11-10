@@ -50,6 +50,10 @@ export function getNavItems(role: UserRole): NavItem[] {
   if (role === 'SUPER_ADMIN' || role === 'COORDINATOR') {
     push({ key: 'inventory', label: 'Inventory', to: '/inventory', section: 'Equipment', icon: <BoxIcon /> });
   }
+  if (role === 'COORDINATOR') {
+    // CV health check: photo → health score + damage heatmap (Basketball, Football, Volleyball)
+    push({ key: 'equipment-health', label: 'Equipment Health Check', to: '/equipment-health', section: 'Equipment', icon: <ShieldCheckIcon /> });
+  }
 
   push({
     key: 'availability', label: 'Equipment Availability', to: '/availability', section: 'Equipment', icon: <ToolIcon />,

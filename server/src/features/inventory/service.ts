@@ -845,3 +845,9 @@ export async function listArticleAuditLog(filter: {
 export async function getArticleLifecycle(articleId: string) {
   return getArticleDetail(articleId);
 }
+
+// ── Shared with the CV Equipment Health Check feature (features/healthcheck) ──
+// Additive export only: CV scans reuse the exact same score→label mapping
+// (INV-17), damage-flag bookkeeping (INV-18/21) and audit trail (INV-25) as
+// manual scans, so both paths always behave identically.
+export { scoreToLabel, settleAfterScan, writeAudit, mapDbError };

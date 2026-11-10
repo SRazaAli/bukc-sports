@@ -19,6 +19,7 @@ import { historyRouter } from './features/history/router.js';
 import { offlineRouter } from './features/offline/router.js';
 import { dashboardRouter } from './features/dashboard/router.js';
 import { messagesRouter } from './features/messages/router.js';
+import { healthCheckRouter } from './features/healthcheck/router.js';
 
 export function createApp() {
   const app = express();
@@ -29,6 +30,10 @@ export function createApp() {
       credentials: true, // refresh-token cookie
     }),
   );
+  // CV Equipment Health Check — mounted BEFORE the global JSON parser because it
+  // receives photos (base64) and uses its own, larger body limit. Every other
+  // route keeps the default express.json() below, unchanged.
+  app.use('/api/health-check', healthCheckRouter);
   app.use(express.json());
   app.use(cookieParser());
 

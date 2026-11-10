@@ -32,6 +32,7 @@ import UsageHistoryScreen from './features/history/UsageHistoryScreen.js';
 import DashboardScreen from './features/dashboard/DashboardScreen.js';
 import OfflineFallbackScreen from './features/offline/OfflineFallbackScreen.js';
 import MessagesScreen from './features/messages/MessagesScreen.js';
+import EquipmentHealthCheckScreen from './features/healthcheck/EquipmentHealthCheckScreen.js';
 import AppLayout from './components/AppLayout.js';
 
 export default function App() {
@@ -85,6 +86,16 @@ export default function App() {
             element={
               <RequireRole roles={['SUPER_ADMIN', 'COORDINATOR']}>
                 <InventoryScreen />
+              </RequireRole>
+            }
+          />
+
+          {/* CV Equipment Health Check — Coordinator only */}
+          <Route
+            path="/equipment-health"
+            element={
+              <RequireRole roles={['COORDINATOR']}>
+                <EquipmentHealthCheckScreen />
               </RequireRole>
             }
           />
