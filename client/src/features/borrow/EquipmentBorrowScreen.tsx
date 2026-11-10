@@ -400,7 +400,7 @@ export default function EquipmentBorrowScreen() {
 
                   {notice && (
                     <div style={successActions}>
-                      <button className="ebw-btn-primary" style={viewRequestsBtn} onClick={() => navigate('/my-borrows')}>
+                      <button className="ebw-btn-primary" style={viewRequestsBtn} onClick={() => navigate('/my-borrow-requests')}>
                         View My Requests
                       </button>
                       <button className="ebw-link" style={backLink} onClick={() => navigate(-1)}>

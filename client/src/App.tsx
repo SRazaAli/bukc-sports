@@ -19,6 +19,7 @@ import ProfileScreen from './features/auth/ProfileScreen.js';
 import InventoryScreen from './features/inventory/InventoryScreen.js';
 import AvailabilityScreen from './features/availability/AvailabilityScreen.js';
 import MyBorrowsScreen from './features/borrow/MyBorrowsScreen.js';
+import MyBorrowRequestsScreen from './features/borrow/MyBorrowRequestsScreen.js';
 import EquipmentBorrowScreen from './features/borrow/EquipmentBorrowScreen.js';
 import BorrowQueueScreen from './features/borrow/BorrowQueueScreen.js';
 import ActiveBorrowsScreen from './features/borrow/ActiveBorrowsScreen.js';
@@ -112,6 +113,7 @@ export default function App() {
           />
 
           <Route path="/my-borrows" element={<MyBorrowsScreen />} />
+          <Route path="/my-borrow-requests" element={<MyBorrowRequestsScreen />} />
 
           <Route
             path="/borrow-queue"

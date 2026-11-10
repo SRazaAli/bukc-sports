@@ -13,6 +13,7 @@ import { authRouter } from './features/auth/router.js';
 import { inventoryRouter } from './features/inventory/router.js';
 import { availabilityRouter } from './features/availability/router.js';
 import { borrowRouter } from './features/borrow/router.js';
+import { borrowDeskRouter } from './features/borrow/deskRouter.js';
 import { venueRouter } from './features/venue/router.js';
 import { notificationsRouter } from './features/notifications/router.js';
 import { historyRouter } from './features/history/router.js';
@@ -53,6 +54,7 @@ export function createApp() {
   app.use('/api/inventory', inventoryRouter); // Feature 4
   app.use('/api/availability', availabilityRouter); // Feature 2
   app.use('/api/borrow', borrowRouter); // Feature 3
+  app.use('/api/borrow-desk', borrowDeskRouter); // collection on the day, history, live loans, sidebar badges
   app.use('/api/venue', venueRouter); // Feature 5
   app.use('/api/notifications', notificationsRouter);
   app.use('/api/history', historyRouter);   // Feature 10

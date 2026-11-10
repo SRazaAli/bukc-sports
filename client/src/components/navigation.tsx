@@ -20,7 +20,7 @@ export interface NavItem {
   /** Other route prefixes that belong to this item (keeps it highlighted on sub-pages). */
   alsoActiveOn?: string[];
   /** Shows a live unread-count badge next to the label. */
-  badge?: 'messages';
+  badge?: 'messages' | 'borrowQueue' | 'myBorrowRequests';
 }
 
 export const SECTION_ORDER: NavSection[] = ['Account', 'Equipment', 'Venues', 'Records'];
@@ -61,8 +61,12 @@ export function getNavItems(role: UserRole): NavItem[] {
     alsoActiveOn: ['/borrow/', '/my-borrows'],
   });
 
+  if (role === 'STUDENT') {
+    // Full borrow history; the badge counts newly approved requests.
+    push({ key: 'my-borrow-requests', label: 'My Borrow Requests', to: '/my-borrow-requests', section: 'Equipment', icon: <ClipboardIcon />, badge: 'myBorrowRequests' });
+  }
   if (role === 'COORDINATOR') {
-    push({ key: 'borrow-queue', label: 'Borrow Queue', to: '/borrow-queue', section: 'Equipment', icon: <QueueIcon /> });
+    push({ key: 'borrow-queue', label: 'Borrow Queue', to: '/borrow-queue', section: 'Equipment', icon: <QueueIcon />, badge: 'borrowQueue' });
   }
   if (role === 'SUPER_ADMIN' || role === 'COORDINATOR') {
     push({ key: 'active-borrows', label: 'Active Borrows', to: '/active-borrows', section: 'Equipment', icon: <ClipboardIcon /> });

@@ -665,6 +665,12 @@ export async function checkOverdueBorrows() {
     await notifyStaff('BORROW_OVERDUE_COORDINATOR', 'Equipment overdue',
       'A borrowed item has passed its agreed return time and has not been returned.',
       { borrowTxnId: txn.borrow_txn_id, subjectUserId: txn.borrower_user_id ?? undefined });
+    // Tell the student too (shown as the "Late submission" alert on their pages).
+    if (txn.borrower_user_id) {
+      await notifyStudent('BORROW_OVERDUE_CLIENT', txn.borrower_user_id, 'Late submission',
+        'Your borrow window has ended. Please return the equipment to the sports office as soon as possible.',
+        { borrowTxnId: txn.borrow_txn_id });
+    }
   }
   return overdue.length;
 }

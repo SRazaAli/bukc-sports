@@ -16,17 +16,16 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import { getMyProfile, requestChangePasswordOtp, confirmChangePassword, type ManagedAccount } from './api.js';
 import { listNotifications, unreadNotificationCount, markNotificationRead, markAllNotificationsRead, type AppNotification } from '../notifications/api.js';
-import { getReputation, listMyRequests, type MyRequest, type Reputation } from '../borrow/api.js';
 import { listMyBookings, type MyBooking } from '../venue/api.js';
 import { ApiRequestError } from '../../lib/api.js';
 import { useBackStep } from '../../components/backStack.js';
 import {
   ProfilePage, ProfileTopBar, ProfileMain, ProfileGrid, ProfileFooter,
   IdentityCard, Panel, LinkBtn, DetailRow, Banner, NotifItem, CountPill,
-  StatBox, WarnBanner, StatusPill, DataTable, td, ActivityRow, Muted,
-  PfField, PfInput, PfPasswordInput, PfButton, QuickLinkItem, palette,
-  roleToPortalKey, type PortalKey,
-  BellIcon, IdCardIcon, KeyIcon, ChartIcon, CalendarIcon, CompassIcon,
+  StatusPill, ActivityRow, Muted,
+  PfField, PfInput, PfPasswordInput, PfButton, palette,
+  roleToPortalKey,
+  BellIcon, IdCardIcon, KeyIcon, CalendarIcon,
 } from './ProfileUI.js';
 
 function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
@@ -83,7 +82,6 @@ export default function ProfileScreen() {
                 deactivated={account?.status === 'DEACTIVATED'}
               />
               {account && <PersonalDetails account={account} />}
-              <QuickLinks role={user.role} navigate={navigate} />
             </>
           }
         >
@@ -91,7 +89,6 @@ export default function ProfileScreen() {
 
           <ChangePasswordCard onDone={(m) => { setNotice(m); setError(null); }} onError={(m) => { setError(m); setNotice(null); }} />
 
-          {user.role === 'STUDENT' && <StudentActivity userId={user.userId} onError={setError} />}
           {user.role === 'EXTERNAL' && <ExternalActivity onError={setError} />}
         </ProfileGrid>
       </ProfileMain>
@@ -184,55 +181,6 @@ function PersonalDetails({ account: a }: { account: ManagedAccount }) {
 // Fills out the sidebar with real navigation instead of leaving it as just
 // two short cards — the sidebar is otherwise much shorter than the activity
 // column, which is what left that empty gap on the left as you scrolled.
-function QuickLinks({ role, navigate }: { role: string; navigate: (to: string) => void }) {
-  const links: Array<{ label: string; to: string }> =
-    role === 'STUDENT'
-      ? [
-          { label: 'Browse Equipment', to: '/availability' },
-          { label: 'My Borrow Requests', to: '/my-borrows' },
-          { label: 'Book a Venue', to: '/book-venue' },
-          { label: 'Usage History', to: '/usage-history' },
-        ]
-      : role === 'EXTERNAL'
-      ? [
-          { label: 'Book a Venue', to: '/book-venue' },
-          { label: 'Usage History', to: '/usage-history' },
-        ]
-      : role === 'COORDINATOR'
-      ? [
-          { label: 'Dashboard', to: '/dashboard' },
-          { label: 'Borrow Queue', to: '/borrow-queue' },
-          { label: 'Venue Queue', to: '/venue-queue' },
-          { label: 'Equipment Alerts', to: '/equipment-alerts' },
-          { label: 'Manage Accounts', to: '/admin/accounts' },
-          { label: 'Inventory', to: '/inventory' },
-          { label: 'Usage History', to: '/usage-history' },
-        ]
-      : [
-          { label: 'Dashboard', to: '/dashboard' },
-          { label: 'Manage Accounts', to: '/admin/accounts' },
-          { label: 'Inventory', to: '/inventory' },
-          { label: 'Active Borrows', to: '/active-borrows' },
-          { label: 'Venue Approvals', to: '/venue-approvals' },
-          { label: 'Conflict Detection', to: '/conflict-detection' },
-          { label: 'Usage History', to: '/usage-history' },
-        ];
-
-  return (
-    <Panel icon={<CompassIcon />} title="Quick Links">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {links.map((l) => (
-          <QuickLinkItem key={l.to} label={l.label} onClick={() => navigate(l.to)} />
-        ))}
-      </div>
-    </Panel>
-  );
-}
-
-// ── Change password (AUTH-17) ──
-// AUTH-17, two-step: fill current+new+confirm, submit sends an OTP to your
-// email (step-up confirmation, GitHub-"Verify via email"-style); entering
-// that code actually applies the change.
 function ChangePasswordCard({ onDone, onError }: { onDone: (m: string) => void; onError: (m: string) => void }) {
   const [step, setStep] = useState<'form' | 'code'>('form');
   // Go back (top right) from the code step returns to the password form (same as its Back link).
@@ -298,57 +246,6 @@ function ChangePasswordCard({ onDone, onError }: { onDone: (m: string) => void; 
             <LinkBtn type="button" onClick={() => setStep('form')}>Back</LinkBtn>
           </div>
         </form>
-      )}
-    </Panel>
-  );
-}
-
-// ── Student activity: reputation + recent requests ──
-function StudentActivity({ userId, onError }: { userId: string; onError: (m: string) => void }) {
-  const navigate = useNavigate();
-  const [rep, setRep] = useState<Reputation | null>(null);
-  const [requests, setRequests] = useState<MyRequest[] | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [r, req] = await Promise.all([getReputation(userId), listMyRequests()]);
-        setRep(r);
-        setRequests(req.requests);
-      } catch (e) { onError(errMsg(e)); }
-    })();
-  }, [userId, onError]);
-
-  return (
-    <Panel icon={<ChartIcon />} title="Borrowing Activity" accent
-      action={<LinkBtn onClick={() => navigate('/availability')}>Request Equipment →</LinkBtn>}>
-      {rep && (
-        <>
-          {rep.isBadSport && (
-            <WarnBanner>BAD SPORT — You have {rep.lateReturns} late return{rep.lateReturns !== 1 ? 's' : ''}. Repeated late returns affect your borrowing standing.</WarnBanner>
-          )}
-          <div style={{ display: 'flex', gap: 12, marginBottom: 8 }}>
-            <StatBox label="Total borrows" value={rep.totalBorrows} />
-            <StatBox label="Late returns" value={rep.lateReturns} warn={rep.lateReturns > 0} />
-            <StatBox label="Damaged returns" value={rep.damagedReturns} warn={rep.damagedReturns > 0} />
-          </div>
-        </>
-      )}
-      {requests === null ? (
-        <Muted>Loading…</Muted>
-      ) : requests.length === 0 ? (
-        <Muted>No borrow requests yet.</Muted>
-      ) : (
-        <DataTable head={['Equipment', 'Window', 'Status', 'Note']}>
-          {requests.map((r) => (
-            <tr key={r.borrow_request_id}>
-              <td style={td}>{r.equipment_type_name}</td>
-              <td style={td}>{new Date(r.requested_start_at).toLocaleString()} → {new Date(r.requested_return_at).toLocaleTimeString()}</td>
-              <td style={td}><StatusPill status={r.status} /></td>
-              <td style={{ ...td, color: '#8F2323' }}>{r.rejection_reason ?? ''}</td>
-            </tr>
-          ))}
-        </DataTable>
       )}
     </Panel>
   );
