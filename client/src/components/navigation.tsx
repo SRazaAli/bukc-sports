@@ -20,7 +20,7 @@ export interface NavItem {
   /** Other route prefixes that belong to this item (keeps it highlighted on sub-pages). */
   alsoActiveOn?: string[];
   /** Shows a live unread-count badge next to the label. */
-  badge?: 'messages';
+  badge?: 'messages' | 'borrowQueue' | 'myBorrowRequests' | 'equipmentAlerts';
 }
 
 export const SECTION_ORDER: NavSection[] = ['Account', 'Equipment', 'Venues', 'Records'];
@@ -50,6 +50,10 @@ export function getNavItems(role: UserRole): NavItem[] {
   if (role === 'SUPER_ADMIN' || role === 'COORDINATOR') {
     push({ key: 'inventory', label: 'Inventory', to: '/inventory', section: 'Equipment', icon: <BoxIcon /> });
   }
+  if (role === 'COORDINATOR') {
+    // CV health check: photo → health score + damage heatmap (Basketball, Football, Volleyball)
+    push({ key: 'equipment-health', label: 'Equipment Health Check', to: '/equipment-health', section: 'Equipment', icon: <ShieldCheckIcon /> });
+  }
 
   push({
     key: 'availability', label: 'Equipment Availability', to: '/availability', section: 'Equipment', icon: <ToolIcon />,
@@ -57,8 +61,12 @@ export function getNavItems(role: UserRole): NavItem[] {
     alsoActiveOn: ['/borrow/', '/my-borrows'],
   });
 
+  if (role === 'STUDENT') {
+    // Full borrow history; the badge counts newly approved requests.
+    push({ key: 'my-borrow-requests', label: 'My Borrow Requests', to: '/my-borrow-requests', section: 'Equipment', icon: <ClipboardIcon />, badge: 'myBorrowRequests' });
+  }
   if (role === 'COORDINATOR') {
-    push({ key: 'borrow-queue', label: 'Borrow Queue', to: '/borrow-queue', section: 'Equipment', icon: <QueueIcon /> });
+    push({ key: 'borrow-queue', label: 'Borrow Queue', to: '/borrow-queue', section: 'Equipment', icon: <QueueIcon />, badge: 'borrowQueue' });
   }
   if (role === 'SUPER_ADMIN' || role === 'COORDINATOR') {
     push({ key: 'active-borrows', label: 'Active Borrows', to: '/active-borrows', section: 'Equipment', icon: <ClipboardIcon /> });
@@ -68,7 +76,7 @@ export function getNavItems(role: UserRole): NavItem[] {
   }
   if (role === 'COORDINATOR') {
     push({ key: 'venue-queue', label: 'Venue Queue', to: '/venue-queue', section: 'Venues', icon: <QueueIcon /> });
-    push({ key: 'equipment-alerts', label: 'Equipment Alerts', to: '/equipment-alerts', section: 'Equipment', icon: <BellIcon /> });
+    push({ key: 'equipment-alerts', label: 'Equipment Alerts', to: '/equipment-alerts', section: 'Equipment', icon: <BellIcon />, badge: 'equipmentAlerts' });
   }
   if (role === 'SUPER_ADMIN') {
     push({ key: 'venue-approvals', label: 'Venue Approvals', to: '/venue-approvals', section: 'Venues', icon: <ShieldCheckIcon /> });

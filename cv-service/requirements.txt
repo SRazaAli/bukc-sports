@@ -1,0 +1,27 @@
+# BUKC Equipment Health Check - CV microservice
+# Python 3.11 (tested). 3.10 and 3.12 also work with these pins.
+#
+# Install (inside a virtual environment):
+#   Windows / macOS : pip install -r requirements.txt
+#   Linux           : pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+#                     pip install -r requirements.txt
+#   (the Linux line avoids downloading ~2.5 GB of NVIDIA GPU libraries you do not need)
+
+# --- model runtime ---
+torch==2.5.1                    # runs DINOv2 on the CPU (no GPU needed)
+transformers==4.46.3            # loads facebook/dinov2-small (frozen, no fine-tuning)
+rembg==2.0.59                   # background removal (ISNet model, offline after first download)
+onnxruntime==1.20.1             # engine rembg uses to run ISNet on the CPU
+
+# --- image + maths ---
+pillow==11.0.0
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+scipy==1.14.1                   # Spearman correlation in calibrate.py
+scikit-learn==1.5.2             # AUROC in calibrate.py
+
+# --- web service ---
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.19        # lets FastAPI read uploaded files (multipart/form-data)
+pydantic==2.10.3

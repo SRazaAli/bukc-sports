@@ -20,6 +20,7 @@ import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { badRequest, AppError } from '../../middleware/errors.js';
 import * as svc from './service.js';
 import * as eq from './equipment.js';
+import * as alertsSvc from './equipmentAlerts.js';
 import * as v from './validators.js';
 
 export const venueRouter = Router();
@@ -253,13 +254,25 @@ venueRouter.get('/sessions', ...anyStaff, asyncHandler(async (req, res) => {
   res.json({ sessions });
 }));
 
+// Equipment Alerts (corrected logic lives in ./equipmentAlerts.ts).
 venueRouter.get('/event-equipment/alerts', ...coordinatorOnly, asyncHandler(async (_req, res) => {
   await eq.checkEquipmentLocks();
   await eq.checkPostEventRelease();
-  res.json({ alerts: await eq.listAlertingAllocations() });
+  const [alerts, recent] = await Promise.all([alertsSvc.listEquipmentAlerts(), alertsSvc.listRecentFixes()]);
+  res.json({ alerts, recent, now: new Date().toISOString() });
 }));
 venueRouter.post('/event-equipment/:id/swap', ...coordinatorOnly, asyncHandler(async (req, res) => {
   const input = parse(v.performSwapSchema, req.body);
-  await eq.performSwap(reqId(req), req.user!.userId, input);
-  res.json({ message: 'Swap recorded.' });
+  const r = await alertsSvc.swapArticle(reqId(req), req.user!.userId, input);
+  res.json({ message: `Swap recorded: ${r.outgoing} replaced by ${r.incoming}.` });
+}));
+venueRouter.post('/event-equipment/:id/reduce', ...coordinatorOnly, asyncHandler(async (req, res) => {
+  const input = parse(v.reduceAllocationSchema, req.body);
+  const r = await alertsSvc.reduceQuantity(reqId(req), req.user!.userId, input);
+  res.json({ message: `Quantity reduced from ${r.from} to ${r.to}. The organiser has been told.` });
+}));
+venueRouter.post('/event-equipment/:id/self-managed', ...coordinatorOnly, asyncHandler(async (req, res) => {
+  const input = parse(v.selfManageAllocationSchema, req.body);
+  await alertsSvc.markSelfManaged(reqId(req), req.user!.userId, input);
+  res.json({ message: 'Marked as self-managed. The organiser has been asked to bring this equipment.' });
 }));

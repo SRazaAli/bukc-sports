@@ -22,6 +22,8 @@
  */
 import { useEffect, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useBorrowBadges } from './useBorrowBadges.js';
+import { LateReturnAlert } from './LateReturnAlert.js';
 import { useAuth } from '../lib/auth.js';
 import { AppShellContext } from './AppShellContext.js';
 import { getNavItems, groupNavItems, isItemActive, ROLE_LABEL } from './navigation.js';
@@ -51,6 +53,7 @@ export default function AppLayout() {
   const { previous, goBack: historyBack } = useInAppHistory();
   const { registry, hasStep, stepBack } = useBackStackRegistry();
   const unreadMessages = useUnreadMessages(!!user, pathname);
+  const borrowBadges = useBorrowBadges(user?.role === 'COORDINATOR' || user?.role === 'STUDENT', pathname);
 
   // Close the mobile drawer whenever the page changes.
   useEffect(() => { setMobileOpen(false); }, [pathname]);
@@ -133,13 +136,17 @@ export default function AppLayout() {
               <ul>
                 {g.items.map((item) => {
                   const active = isItemActive(item, pathname);
-                  const badge = item.badge === 'messages' ? unreadMessages : 0;
+                  const badge = item.badge === 'messages' ? unreadMessages
+                    : item.badge === 'borrowQueue' ? borrowBadges.borrowQueue
+                    : item.badge === 'myBorrowRequests' ? borrowBadges.myBorrowRequests
+                    : item.badge === 'equipmentAlerts' ? borrowBadges.equipmentAlerts : 0;
+                  const badgeWord = item.badge === 'messages' ? 'unread' : item.badge === 'borrowQueue' ? 'pending' : item.badge === 'equipmentAlerts' ? 'need attention' : 'new';
                   const badgeText = badge > 99 ? '99+' : String(badge);
                   return (
                     <li key={item.key}>
                       <Link to={item.to} className={`sb-link${active ? ' is-active' : ''}`} aria-current={active ? 'page' : undefined}
-                        data-tip={badge > 0 ? `${item.label} (${badgeText} unread)` : item.label}
-                        aria-label={badge > 0 ? `${item.label}, ${badgeText} unread` : undefined}>
+                        data-tip={badge > 0 ? `${item.label} (${badgeText} ${badgeWord})` : item.label}
+                        aria-label={badge > 0 ? `${item.label}, ${badgeText} ${badgeWord}` : undefined}>
                         <span className="sb-icon">{item.icon}</span>
                         <span className="sb-label">{item.label}</span>
                         {badge > 0 && <span className="sb-badge" aria-hidden>{badgeText}</span>}
@@ -172,6 +179,7 @@ export default function AppLayout() {
             </button>
           </div>
           <Outlet />
+          <LateReturnAlert enabled={user?.role === 'STUDENT'} pathname={pathname} />
         </main>
        </BackStackProvider>
       </AppShellContext.Provider>

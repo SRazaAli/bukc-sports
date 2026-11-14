@@ -1,0 +1,30 @@
+{
+  "equipment_type": "football",
+  "tau": 0.3809,
+  "d_severe": 0.454,
+  "w_severity": 0.7,
+  "w_coverage": 0.3,
+  "coverage_full": 0.4,
+  "thresholds": {
+    "good": 85,
+    "fair": 75,
+    "poor": 55
+  },
+  "blur_threshold": 60.0,
+  "type_min_similarity": 0.1929,
+  "source": "calibrate",
+  "created_at": "2026-11-13T07:33:41+00:00",
+  "stats": {
+    "n_healthy": 13,
+    "n_damaged": 20,
+    "auroc_healthy_vs_damaged": 0.752,
+    "spearman_score_vs_grade": 0.737,
+    "label_accuracy": 0.636,
+    "mean_score_by_grade": {
+      "GOOD": 93.3,
+      "FAIR": 100.0,
+      "POOR": 75.3,
+      "REPLACE": 37.9
+    }
+  }
+}

@@ -1,0 +1,8 @@
+file,true_grade,health_score,predicted_label
+basketball\test\healthy\BB_healthyTest_02.jpg,GOOD,100,GOOD
+basketball\test\healthy\BB_healthyTest_03.jpg,GOOD,100,GOOD
+basketball\test\healthy\BB_healthyTest_05.jpg,GOOD,100,GOOD
+basketball\test\healthy\BB_healthyTest_07.jpg,GOOD,100,GOOD
+basketball\test\healthy\BB_healthyTest_09.jpg,GOOD,100,GOOD
+basketball\test\healthy\BB_healthyTest_11.jpg,GOOD,100,GOOD
+basketball\test\healthy\BB_healthyTest_12.jpg,GOOD,79,FAIR

@@ -2,21 +2,30 @@
  * Coordinator — Borrow Queue.
  * Requests are grouped by request_group_id into logical "group" units.
  * A group may contain 1 item (single borrow) or N items (kit/multi-item).
- * Approve & Lend opens a single scrollable form showing article selectors
- * for every equipment type in the group (BORROW-11).
- * ID card checkbox (BORROW-06) gates the final Confirm Lend button.
+ *
+ * Flow (fixed so equipment can't be handed out days early):
+ *   1. Approve — any time before the requested start. The request then moves
+ *      to "Approved — ready to collect".
+ *   2. Lend — only on the requested day, when the student is at the desk with
+ *      their university card. The coordinator searches the student, types the
+ *      enrollment number printed on the card (must match the account) and
+ *      picks the articles. The server re-checks both rules.
  */
 import { useEffect, useState, useCallback } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
-import { PortalShell } from '../auth/PortalShell.js';
+import { HideInAppShell } from '../../components/AppShellContext.js';
 import { useBackStep } from '../../components/backStack.js';
 import { listArticles, type Article } from '../inventory/api.js';
 import {
-  listQueue, approveGroup, rejectRequest, lendGroup,
+  listQueue, approveGroup, rejectRequest,
   lendWalkinGuest, lendWalkinRegistered, resolveRegisteredBorrower,
   type QueueItem, type QueueGroup, type RegisteredBorrower,
 } from './api.js';
+import {
+  getDeskOverview, lendWithCard, normalizeEnrollment, notifyBorrowBadgesChanged,
+  type DeskOverview, type ReadyGroup,
+} from './deskApi.js';
 import { listTypes, type EquipmentType } from '../inventory/api.js';
 import { ApiRequestError } from '../../lib/api.js';
 
@@ -31,6 +40,21 @@ function fmtTime(iso: string) {
 }
 function isExpired(requestedStartAt: string): boolean {
   return new Date(requestedStartAt).getTime() < Date.now();
+}
+
+// Same rule as the server (deskService.lendWindow): lending opens on the
+// requested day (Pakistan time) and closes at the requested return time.
+const karachiDay = (d: Date) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Karachi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+function lendState(startIso: string, endIso: string): { ok: boolean; why: string | null; today: boolean } {
+  const now = new Date();
+  const start = new Date(startIso);
+  const today = karachiDay(now) === karachiDay(start);
+  if (karachiDay(now) < karachiDay(start)) {
+    return { ok: false, today, why: `Lending opens on ${fmtDate(startIso)} — when the student brings their university card.` };
+  }
+  if (now.getTime() >= new Date(endIso).getTime()) return { ok: false, today, why: 'The borrow window has passed.' };
+  return { ok: true, today, why: null };
 }
 
 // Group flat QueueItem[] into QueueGroup[] by request_group_id
@@ -58,36 +82,75 @@ function groupItems(queue: QueueItem[]): QueueGroup[] {
   );
 }
 
+/** Everything the lend form needs — built from a pending group or an approved one. */
+interface LendTarget {
+  groupId: string; studentName: string; studentEmail: string; enrollmentNo: string | null;
+  startAt: string; returnAt: string;
+  items: Array<{ typeId: number; typeName: string; lendingUnit: 'SINGLE' | 'PAIR' }>;
+}
+const targetFromPending = (g: QueueGroup, enrollmentNo: string | null): LendTarget => ({
+  groupId: g.groupId, studentName: g.studentName, studentEmail: g.studentEmail, enrollmentNo,
+  startAt: g.items[0]!.requested_start_at, returnAt: g.items[0]!.requested_return_at,
+  items: g.items.map((i) => ({ typeId: i.equipment_type_id, typeName: i.equipment_type_name, lendingUnit: i.lending_unit })),
+});
+const targetFromReady = (g: ReadyGroup): LendTarget => ({
+  groupId: g.groupId, studentName: g.studentName, studentEmail: g.studentEmail, enrollmentNo: g.enrollmentNo,
+  startAt: g.startAt, returnAt: g.returnAt,
+  items: g.items.map((i) => ({ typeId: i.equipmentTypeId, typeName: i.equipmentTypeName, lendingUnit: i.lendingUnit })),
+});
+
+/** Case-insensitive match on name, email or enrollment (dashes optional). */
+function matches(q: string, name: string, email: string, enrollment: string | null) {
+  const s = q.trim().toLowerCase();
+  if (!s) return true;
+  const digits = s.replace(/\D/g, '');
+  return name.toLowerCase().includes(s) || email.toLowerCase().includes(s)
+    || (!!enrollment && (enrollment.toLowerCase().includes(s) || (digits.length >= 3 && enrollment.replace(/\D/g, '').includes(digits))));
+}
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function BorrowQueueScreen() {
   const { user, loading } = useAuth();
   const [queue, setQueue] = useState<QueueItem[] | null>(null);
+  const [desk, setDesk] = useState<DeskOverview | null>(null);
+  const [search, setSearch] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<QueueGroup | null>(null);
-  const [lendingGroup, setLendingGroup] = useState<QueueGroup | null>(null);
+  const [lendingGroup, setLendingGroup] = useState<LendTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showWalkin, setShowWalkin] = useState(false);
 
   const load = useCallback(async () => {
-    try { const r = await listQueue(); setQueue(r.queue); } catch (e) { setError(errMsg(e)); }
+    try {
+      const [q, d] = await Promise.all([listQueue(), getDeskOverview()]);
+      setQueue(q.queue); setDesk(d);
+    } catch (e) { setError(errMsg(e)); }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const t = window.setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 60_000);
+    return () => window.clearInterval(t);
+  }, [load]);
   // Go back (top right) closes whichever view a button on this page opened.
   useBackStep(!!selectedGroup, () => setSelectedGroup(null));
   useBackStep(!!lendingGroup, () => setLendingGroup(null));
   useBackStep(showWalkin, () => setShowWalkin(false));
 
-  if (loading) return <PortalShell title="Borrow Queue"><p /></PortalShell>;
+  if (loading) return <NavyShell><p /></NavyShell>;
   if (!user) return <Navigate to="/" replace />;
   if (user.role !== 'COORDINATOR') return <Navigate to="/home" replace />;
 
   const flash = {
-    ok: (m: string) => { setNotice(m); setError(null); void load(); },
+    ok: (m: string) => { setNotice(m); setError(null); void load(); notifyBorrowBadgesChanged(); },
     err: (m: string) => { setError(m); setNotice(null); },
   };
 
+  const enrollmentOf = (studentId: string) => desk?.pendingEnrollments[studentId] ?? null;
   const groups = queue ? groupItems(queue) : [];
+  const shownPending = groups.filter((g) => matches(search, g.studentName, g.studentEmail, enrollmentOf(g.studentId)));
+  const ready = desk?.ready ?? [];
+  const shownReady = ready.filter((g) => matches(search, g.studentName, g.studentEmail, g.enrollmentNo));
 
   // Keep selection in sync after reload
   const syncedGroup = selectedGroup
@@ -97,22 +160,22 @@ export default function BorrowQueueScreen() {
   // Lend view
   if (lendingGroup) {
     return (
-      <PortalShell title="Borrow Queue" tint="slate">
+      <NavyShell>
         <div style={wrap}>
           {error && <div style={box.err}>{error}</div>}
           <GroupLendForm
-            group={lendingGroup}
+            target={lendingGroup}
             onBack={() => setLendingGroup(null)}
             onDone={(m) => { setLendingGroup(null); flash.ok(m); }}
             onError={flash.err}
           />
         </div>
-      </PortalShell>
+      </NavyShell>
     );
   }
 
   return (
-    <PortalShell title="Borrow Queue" tint="slate">
+    <NavyShell>
       <div style={wrap}>
         {error && <div style={box.err}>{error}</div>}
         {notice && <div style={box.ok}>{notice}</div>}
@@ -120,51 +183,129 @@ export default function BorrowQueueScreen() {
         {syncedGroup ? (
           <GroupReviewPanel
             group={syncedGroup}
+            enrollmentNo={enrollmentOf(syncedGroup.studentId)}
             onBack={() => setSelectedGroup(null)}
             onDone={(m) => { flash.ok(m); setSelectedGroup(null); }}
-            onLend={(g) => { setSelectedGroup(null); setLendingGroup(g); }}
+            onLend={(t) => { setSelectedGroup(null); setLendingGroup(t); }}
             onError={flash.err}
           />
         ) : (
           <>
-            <Panel title="Pending Requests">
-              {queue === null ? (
+            {/* Search — find the student standing at the desk with their card */}
+            <div style={searchWrap} className="bq-searchbox">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+              </svg>
+              <input
+                className="bq-search"
+                style={searchInput}
+                type="search"
+                placeholder="Search student by name, email or enrollment no. (e.g. 02-134222-001)"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                aria-label="Search students"
+              />
+              {search && <button style={clearBtn} onClick={() => setSearch('')} aria-label="Clear search">×</button>}
+            </div>
+
+            <Panel title={`Approved — Ready to collect${ready.length ? ` (${ready.length})` : ''}`}>
+              {desk === null ? (
                 <p style={muted}>Loading…</p>
-              ) : groups.length === 0 ? (
-                <p style={muted}>No pending requests.</p>
+              ) : shownReady.length === 0 ? (
+                <p style={muted}>{ready.length === 0 ? 'No approved requests waiting for collection.' : 'No approved request matches your search.'}</p>
               ) : (
                 <table style={table}>
                   <thead>
                     <tr>
                       <th style={th}>Student</th>
                       <th style={th}>Items</th>
+                      <th style={th}>Borrow window</th>
+                      <th style={th} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shownReady.map((g) => (
+                      <tr key={g.groupId}>
+                        <td style={td}>
+                          <span style={sName}>{g.studentName}</span>
+                          <span style={sEmail}>{g.enrollmentNo ?? 'No enrollment no.'}{g.department ? ` · ${g.department}` : ''}</span>
+                        </td>
+                        <td style={td}>
+                          {g.items.length > 1 && <span style={countBadge}>{g.items.length}</span>}
+                          <span style={itemNames}>{g.items.map((i) => i.equipmentTypeName).join(', ')}</span>
+                        </td>
+                        <td style={td}>
+                          {fmtDate(g.startAt)}{lendState(g.startAt, g.returnAt).today && <span style={todayTag}>Today</span>}<br />
+                          <span style={{ color: '#6b7280', fontSize: 12 }}>{fmtTime(g.startAt)} – {fmtTime(g.returnAt)}</span>
+                        </td>
+                        <td style={{ ...td, textAlign: 'right', maxWidth: 230 }}>
+                          <button
+                            style={g.lendable ? lendBtn : { ...lendBtn, opacity: 0.45, cursor: 'not-allowed' }}
+                            disabled={!g.lendable}
+                            title={g.message ?? 'Check the university card and hand over the equipment'}
+                            onClick={() => setLendingGroup(targetFromReady(g))}
+                          >
+                            Lend
+                          </button>
+                          {!g.lendable && g.message && <span style={lockNote}>{g.message}</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Panel>
+
+            <Panel title={`Pending Requests${groups.length ? ` (${groups.length})` : ''}`}>
+              {queue === null ? (
+                <p style={muted}>Loading…</p>
+              ) : shownPending.length === 0 ? (
+                <p style={muted}>{groups.length === 0 ? 'No pending requests.' : 'No pending request matches your search.'}</p>
+              ) : (
+                <table style={table}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Student</th>
+                      <th style={th}>Items</th>
+                      <th style={th}>Borrow window</th>
                       <th style={th}>Submitted</th>
                       <th style={th} />
                     </tr>
                   </thead>
                   <tbody>
-                    {groups.map((g) => (
-                      <tr key={g.groupId}>
-                        <td style={td}>
-                          <span style={sName}>{g.studentName}</span>
-                          <span style={sEmail}>{g.studentEmail}</span>
-                          {g.isBadSport && <span style={badSportBadge}>⚠ Late returner</span>}
-                        </td>
-                        <td style={td}>
-                          {g.items.length > 1 && (
-                            <span style={countBadge}>{g.items.length}</span>
-                          )}
-                          <span style={itemNames}>{g.items.map((i) => i.equipment_type_name).join(', ')}</span>
-                        </td>
-                        <td style={td}>
-                          {fmtDate(g.submittedAt)}<br />
-                          <span style={{ color: '#6b7280', fontSize: 12 }}>{fmtTime(g.submittedAt)}</span>
-                        </td>
-                        <td style={{ ...td, textAlign: 'right' }}>
-                          <button style={reviewBtn} onClick={() => setSelectedGroup(g)}>Review →</button>
-                        </td>
-                      </tr>
-                    ))}
+                    {shownPending.map((g) => {
+                      const f = g.items[0]!;
+                      const enr = enrollmentOf(g.studentId);
+                      return (
+                        <tr key={g.groupId}>
+                          <td style={td}>
+                            <span style={sName}>{g.studentName}</span>
+                            <span style={sEmail}>{enr ?? g.studentEmail}</span>
+                            {g.isBadSport && <span style={badSportBadge}>⚠ Late returner</span>}
+                          </td>
+                          <td style={td}>
+                            {g.items.length > 1 && (
+                              <span style={countBadge}>{g.items.length}</span>
+                            )}
+                            <span style={itemNames}>{g.items.map((i) => i.equipment_type_name).join(', ')}</span>
+                          </td>
+                          <td style={td}>
+                            {fmtDate(f.requested_start_at)}
+                            {lendState(f.requested_start_at, f.requested_return_at).today
+                              ? <span style={todayTag}>Today</span>
+                              : <span style={upcomingTag}>Upcoming</span>}<br />
+                            <span style={{ color: '#6b7280', fontSize: 12 }}>{fmtTime(f.requested_start_at)} – {fmtTime(f.requested_return_at)}</span>
+                          </td>
+                          <td style={td}>
+                            {fmtDate(g.submittedAt)}<br />
+                            <span style={{ color: '#6b7280', fontSize: 12 }}>{fmtTime(g.submittedAt)}</span>
+                          </td>
+                          <td style={{ ...td, textAlign: 'right' }}>
+                            <button style={reviewBtn} onClick={() => setSelectedGroup(g)}>Review →</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -185,17 +326,18 @@ export default function BorrowQueueScreen() {
           </>
         )}
       </div>
-    </PortalShell>
+    </NavyShell>
   );
 }
 
 // ─── Group review panel ───────────────────────────────────────────────────────
 
-function GroupReviewPanel({ group, onBack, onDone, onLend, onError }: {
+function GroupReviewPanel({ group, enrollmentNo, onBack, onDone, onLend, onError }: {
   group: QueueGroup;
+  enrollmentNo: string | null;
   onBack: () => void;
   onDone: (m: string) => void;
-  onLend: (g: QueueGroup) => void;
+  onLend: (t: LendTarget) => void;
   onError: (m: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -205,21 +347,16 @@ function GroupReviewPanel({ group, onBack, onDone, onLend, onError }: {
 
   const expired = group.items.some((i) => isExpired(i.requested_start_at));
   const first = group.items[0]!;
+  const lend = lendState(first.requested_start_at, first.requested_return_at);
 
   async function handleApprove() {
     setBusy(true);
     try {
       await approveGroup(group.groupId);
       setDone(true);
-      onDone(`Approved request for ${group.studentName}.`);
-    } catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
-  }
-
-  async function handleApproveAndLend() {
-    setBusy(true);
-    try {
-      await approveGroup(group.groupId);
-      onLend(group);
+      onDone(lend.ok
+        ? `Approved request for ${group.studentName}. Use “Lend” under Ready to collect when they bring their university card.`
+        : `Approved request for ${group.studentName}. It can be lent on ${fmtDate(first.requested_start_at)} when they bring their university card.`);
     } catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
 
@@ -237,13 +374,13 @@ function GroupReviewPanel({ group, onBack, onDone, onLend, onError }: {
   }
 
   return (
-    <div>
+    <div style={lendBox}>
       <button style={backBtn} onClick={onBack}>← Back to queue</button>
 
       <div style={studentHeader}>
         <div>
           <h2 style={reviewTitle}>{group.studentName}</h2>
-          <span style={reviewEmail}>{group.studentEmail}</span>
+          <span style={reviewEmail}>{enrollmentNo ? `${enrollmentNo} · ` : ''}{group.studentEmail}</span>
         </div>
         <span style={pendingBadge}>{group.items.length} item{group.items.length > 1 ? 's' : ''} pending</span>
       </div>
@@ -288,17 +425,29 @@ function GroupReviewPanel({ group, onBack, onDone, onLend, onError }: {
         )}
 
         {!done && !expired && !rejectOpen && (
-          <div style={actionRow}>
-            <button style={busy ? { ...approveBtn, opacity: 0.6 } : approveBtn} disabled={busy} onClick={handleApprove}>
-              Approve
-            </button>
-            <button style={busy ? { ...approveLendBtn, opacity: 0.6 } : approveLendBtn} disabled={busy} onClick={handleApproveAndLend}>
-              Approve &amp; Lend →
-            </button>
-            <button style={rejectOutlineBtn} disabled={busy} onClick={() => setRejectOpen(true)}>
-              Reject
-            </button>
-          </div>
+          <>
+            <div style={actionRow}>
+              <button style={busy ? { ...approveBtn, opacity: 0.6 } : approveBtn} disabled={busy} onClick={handleApprove}>
+                Approve
+              </button>
+              <button
+                style={busy || !lend.ok ? { ...approveLendBtn, opacity: 0.45, cursor: 'not-allowed' } : approveLendBtn}
+                disabled={busy || !lend.ok}
+                title={lend.why ?? 'Student is here with their university card'}
+                onClick={() => onLend(targetFromPending(group, enrollmentNo))}
+              >
+                Lend
+              </button>
+              <button style={rejectOutlineBtn} disabled={busy} onClick={() => setRejectOpen(true)}>
+                Reject
+              </button>
+            </div>
+            <p style={lockNote}>
+              {lend.ok
+                ? 'Lend only when the student is at the desk with their university card — you will check the enrollment number on the card next.'
+                : lend.why}
+            </p>
+          </>
         )}
 
         {!done && !expired && rejectOpen && (
@@ -369,32 +518,25 @@ function buildPairs(articles: Article[]): ArticlePairRow[] {
   return pairs;
 }
 
-function GroupLendForm({ group, onBack, onDone, onError }: {
-  group: QueueGroup;
+function GroupLendForm({ target, onBack, onDone, onError }: {
+  target: LendTarget;
   onBack: () => void;
   onDone: (m: string) => void;
   onError: (m: string) => void;
 }) {
   const [typeArticles, setTypeArticles] = useState<TypeArticles[]>([]);
+  const [cardNo, setCardNo] = useState('');
   const [idCardHeld, setIdCardHeld] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  const first = group.items[0]!;
 
   useEffect(() => {
     async function load() {
       try {
         const results = await Promise.all(
-          group.items.map(async (item) => {
-            const r = await listArticles({ equipmentTypeId: item.equipment_type_id, state: 'AVAILABLE' });
-            return {
-              typeId: item.equipment_type_id,
-              typeName: item.equipment_type_name,
-              lendingUnit: item.lending_unit,
-              articles: r.articles,
-              selected: [] as string[],
-            };
+          target.items.map(async (item) => {
+            const r = await listArticles({ equipmentTypeId: item.typeId, state: 'AVAILABLE' });
+            return { ...item, articles: r.articles, selected: [] as string[] };
           }),
         );
         setTypeArticles(results);
@@ -403,7 +545,7 @@ function GroupLendForm({ group, onBack, onDone, onError }: {
       }
     }
     void load();
-  }, [group]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [target]);
 
   function selectArticle(typeId: number, articleIds: string[]) {
     setTypeArticles((prev) =>
@@ -416,9 +558,15 @@ function GroupLendForm({ group, onBack, onDone, onError }: {
     );
   }
 
+  // University card check: the number typed from the card must match the account.
+  const typed = normalizeEnrollment(cardNo);
+  const cardEntered = cardNo.trim().length > 0;
+  const cardMatches = !!target.enrollmentNo && cardEntered && typed === target.enrollmentNo;
+  const cardMismatch = cardEntered && typed.replace(/\D/g, '').length >= 11 && !cardMatches;
+
   // Every type must have ≥ 1 article selected
   const allSelected = typeArticles.length > 0 && typeArticles.every((ta) => ta.selected.length > 0);
-  const canLend = allSelected && idCardHeld;
+  const canLend = allSelected && cardMatches && idCardHeld;
 
   async function handleLend() {
     if (!canLend) return;
@@ -428,13 +576,8 @@ function GroupLendForm({ group, onBack, onDone, onError }: {
       for (const ta of typeArticles) {
         articlesPerType[ta.typeId] = ta.selected;
       }
-      await lendGroup({
-        groupId: group.groupId,
-        articlesPerType,
-        agreedStartAt: first.requested_start_at,
-        agreedReturnAt: first.requested_return_at,
-      });
-      onDone(`Equipment lent to ${group.studentName}.`);
+      await lendWithCard(target.groupId, { idCardEnrollmentNo: typed, articlesPerType });
+      onDone(`Equipment lent to ${target.studentName}. Return by ${fmtTime(target.returnAt)}.`);
     } catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
 
@@ -444,8 +587,8 @@ function GroupLendForm({ group, onBack, onDone, onError }: {
 
       <div style={studentHeader}>
         <div>
-          <h2 style={reviewTitle}>Lend to {group.studentName}</h2>
-          <span style={reviewEmail}>{group.studentEmail}</span>
+          <h2 style={reviewTitle}>Lend to {target.studentName}</h2>
+          <span style={reviewEmail}>{target.enrollmentNo ? `${target.enrollmentNo} · ` : ''}{target.studentEmail}</span>
         </div>
       </div>
 
@@ -453,8 +596,26 @@ function GroupLendForm({ group, onBack, onDone, onError }: {
       <div style={timeSummary}>
         <span style={detailLabel}>Window</span>
         <span style={{ fontSize: 14, fontWeight: 600 }}>
-          {fmtDate(first.requested_start_at)} · {fmtTime(first.requested_start_at)} – {fmtTime(first.requested_return_at)}
+          {fmtDate(target.startAt)} · {fmtTime(target.startAt)} – {fmtTime(target.returnAt)}
         </span>
+      </div>
+
+      {/* Step 1 — university card */}
+      <div style={cardBox}>
+        <label style={fieldLabel} htmlFor="card-enrollment">Enrollment no. on the student's university card</label>
+        <input
+          id="card-enrollment"
+          style={{ ...fieldInput, marginTop: 6, borderColor: cardMatches ? '#16a34a' : cardMismatch ? '#dc2626' : '#d1d5db' }}
+          placeholder="e.g. 02-134222-001"
+          value={cardNo}
+          autoComplete="off"
+          onChange={(e) => setCardNo(e.target.value)}
+        />
+        {!target.enrollmentNo && (
+          <p style={{ ...idCardWarning, color: '#b91c1c' }}>This student has no enrollment number on their profile, so the card can't be verified.</p>
+        )}
+        {cardMatches && <p style={selectionHint}>✓ Card matches {target.studentName}</p>}
+        {cardMismatch && <p style={{ ...idCardWarning, color: '#b91c1c' }}>This card does not belong to {target.studentName}. Lend only to the student who made the request.</p>}
       </div>
 
       {loadError && <div style={box.err}>{loadError}</div>}
@@ -535,8 +696,10 @@ function GroupLendForm({ group, onBack, onDone, onError }: {
         </span>
       </label>
 
-      {!idCardHeld && allSelected && (
-        <p style={idCardWarning}>You must confirm the ID card is held before completing the lend.</p>
+      {allSelected && (!cardMatches || !idCardHeld) && (
+        <p style={idCardWarning}>
+          {!cardMatches ? 'Enter the enrollment number from the student\'s university card first.' : 'You must confirm the ID card is held before completing the lend.'}
+        </p>
       )}
 
       <div style={{ marginTop: 18 }}>
@@ -629,7 +792,7 @@ function WalkinRegisteredForm({ onDone, onError }: { onDone: (m: string) => void
   }
 
   return (
-    <div style={walkinGrid}>
+    <div style={walkinGrid} className="bq-walkin">
       <div style={{ ...formField, gridColumn: '1 / -1' }}>
         <label style={fieldLabel}>Enrollment number</label>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -734,7 +897,7 @@ function WalkinGuestForm({ onDone, onError }: { onDone: (m: string) => void; onE
   }
 
   return (
-    <div style={walkinGrid}>
+    <div style={walkinGrid} className="bq-walkin">
       {([['Full name', fullName, setFullName], ['ID number', idNumber, setIdNumber], ['Contact', contact, setContact]] as [string, string, (v: string) => void][]).map(([label, val, set]) => (
         <div key={label} style={formField}>
           <label style={fieldLabel}>{label}</label>
@@ -782,6 +945,56 @@ function WalkinGuestForm({ onDone, onError }: { onDone: (m: string) => void; onE
   );
 }
 
+// ─── Navy page shell (same look as Active Borrows / Inventory / Messages) ─────
+
+function NavyShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="bq-ui" style={shell.page}>
+      <style>{`
+        .bq-ui { font-family: 'Inter', system-ui, sans-serif; }
+        .bq-ui * { box-sizing: border-box; }
+        .bq-ui table tbody tr { transition: background-color .12s ease; }
+        .bq-ui table tbody tr:hover { background: rgba(28,57,142,0.05); }
+        .bq-ui button { font-family: inherit; }
+        .bq-ui input:focus, .bq-ui select:focus { outline: none; box-shadow: 0 0 0 3px #DBEAFE; }
+        .bq-ui input.bq-search, .bq-ui input.bq-search:focus { border: none !important; outline: none !important; box-shadow: none !important; background: transparent; -webkit-appearance: none; appearance: none; }
+        .bq-ui input.bq-search::-webkit-search-cancel-button { display: none; }
+        .bq-searchbox, .bq-searchbox:focus-within { outline: none !important; }
+        .bq-ui input.bq-search:focus-visible { outline: none !important; box-shadow: none !important; }
+        .bq-ui .bq-table-scroll { overflow-x: auto; }
+        @media (max-width: 620px) {
+          .bq-glass { padding: 20px 12px 24px !important; border-radius: 18px !important; }
+          .bq-main { padding: 12px 10px 32px !important; }
+          .bq-walkin { grid-template-columns: 1fr !important; }
+          .bq-walkin > * { grid-column: auto !important; min-width: 0; }
+          .bq-walkin input, .bq-walkin select { width: 100%; min-width: 0; }
+        }
+      `}</style>
+      <div style={shell.blobA} aria-hidden />
+      <div style={shell.blobB} aria-hidden />
+      <HideInAppShell>
+        <header style={shell.topbar}>
+          <img src="/landing/bu_logo.png" alt="Bahria University" style={shell.logo} />
+          <div>
+            <div style={shell.wordmark}>Bahria University</div>
+            <div style={shell.wordmarkSub}>Sports Management Portal</div>
+          </div>
+        </header>
+      </HideInAppShell>
+      <main className="bq-main" style={shell.main}>
+        <div className="bq-glass" style={shell.glass}>
+          <div style={shell.headRow}>
+            <span style={shell.eyebrow}>Coordinator Portal</span>
+            <h1 style={shell.title}>Borrow Queue</h1>
+            <p style={shell.subtitle}>Approve requests, then lend on the requested day once the student shows their university card.</p>
+          </div>
+          {children}
+        </div>
+      </main>
+    </div>
+  );
+}
+
 // ─── Panel wrapper ────────────────────────────────────────────────────────────
 
 function Panel({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
@@ -791,24 +1004,50 @@ function Panel({ title, children, action }: { title: string; children: React.Rea
         <span style={panelTitleStyle}>{title}</span>
         {action}
       </div>
-      <div style={panelBody}>{children}</div>
+      <div style={panelBody} className="bq-table-scroll">{children}</div>
     </div>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const wrap: React.CSSProperties = { maxWidth: 860, margin: '0 auto', padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: 20 };
+const NAVY = { n900: '#0F172B', n800: '#132357', accent: '#1C398E', s400: '#90A1B9', s300: '#CAD5E2', s100: '#E2E8F0', s50: '#F8FAFC' };
+const CARD_BG = 'linear-gradient(145deg, #F8FAFF 0%, #EAF0FC 100%)';
+const CARD_SHADOW = '0 12px 30px -22px rgba(3,22,54,.85)';
+const shell = {
+  page: {
+    minHeight: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden',
+    background: `radial-gradient(1100px 700px at 15% 0%, ${NAVY.n800}aa 0%, transparent 60%), radial-gradient(900px 600px at 100% 100%, ${NAVY.accent}22 0%, transparent 55%), ${NAVY.n900}`,
+  } as React.CSSProperties,
+  blobA: { position: 'absolute', width: 420, height: 420, borderRadius: '50%', background: `${NAVY.accent}1a`, top: -160, left: -140, filter: 'blur(30px)', pointerEvents: 'none' } as React.CSSProperties,
+  blobB: { position: 'absolute', width: 380, height: 380, borderRadius: '50%', background: `${NAVY.n800}22`, bottom: -160, right: -120, filter: 'blur(30px)', pointerEvents: 'none' } as React.CSSProperties,
+  topbar: { position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 12, padding: '18px 32px' } as React.CSSProperties,
+  logo: { width: 40, height: 40, borderRadius: 10, objectFit: 'contain', background: NAVY.s50, padding: 4, border: `1px solid ${NAVY.s300}` } as React.CSSProperties,
+  wordmark: { fontSize: 16, fontWeight: 700, color: '#fff', lineHeight: 1.2 } as React.CSSProperties,
+  wordmarkSub: { fontSize: 12, color: NAVY.s400, marginTop: 1 } as React.CSSProperties,
+  main: { position: 'relative', zIndex: 1, flex: 1, padding: '20px 24px 56px', width: '100%', maxWidth: 1040, margin: '0 auto' } as React.CSSProperties,
+  glass: {
+    position: 'relative', background: 'rgba(255,255,255,0.07)', backdropFilter: 'blur(22px) saturate(160%)', WebkitBackdropFilter: 'blur(22px) saturate(160%)',
+    border: '1px solid rgba(255,255,255,0.16)', borderRadius: 24, padding: '28px 24px 32px',
+    boxShadow: '0 24px 60px -32px rgba(3,22,54,0.75), inset 0 1px 0 rgba(255,255,255,0.10)',
+  } as React.CSSProperties,
+  headRow: { marginBottom: 20 } as React.CSSProperties,
+  eyebrow: { display: 'inline-block', fontSize: 11.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', padding: '6px 14px', borderRadius: 999, marginBottom: 10, color: NAVY.s100, background: `${NAVY.n800}88`, border: `1px solid ${NAVY.s400}55` } as React.CSSProperties,
+  title: { fontSize: 28, fontWeight: 800, color: '#fff', margin: 0, letterSpacing: '-0.5px' } as React.CSSProperties,
+  subtitle: { fontSize: 14, color: NAVY.s300, margin: '6px 0 0' } as React.CSSProperties,
+};
+
+const wrap: React.CSSProperties = { width: '100%', display: 'flex', flexDirection: 'column', gap: 18 };
 const muted: React.CSSProperties = { color: '#6b7280', fontSize: 14, margin: 0 };
 const box = {
   err: { background: '#fdecec', color: '#8f2323', border: '1px solid #f3caca', borderRadius: 6, padding: '10px 14px', fontSize: 14 } as React.CSSProperties,
   ok: { background: '#eaf6ee', color: '#1e6b3a', border: '1px solid #c2e6cd', borderRadius: 6, padding: '10px 14px', fontSize: 14 } as React.CSSProperties,
 };
 
-const panelWrap: React.CSSProperties = { border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', background: '#fff' };
-const panelHeader: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb', gap: 12 };
+const panelWrap: React.CSSProperties = { border: `1px solid ${NAVY.s300}e6`, borderRadius: 16, overflow: 'hidden', background: CARD_BG, boxShadow: CARD_SHADOW };
+const panelHeader: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', background: '#fff', borderBottom: `1px solid ${NAVY.s300}`, gap: 12 };
 const panelTitleStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: '#111' };
-const panelBody: React.CSSProperties = { padding: '16px 18px' };
+const panelBody: React.CSSProperties = { padding: '18px 20px' };
 
 const table: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 14 };
 const th: React.CSSProperties = { padding: '8px 10px', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e5e7eb', color: '#374151', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.04em' };
@@ -824,7 +1063,7 @@ const reviewTitle: React.CSSProperties = { margin: 0, fontSize: 18, fontWeight: 
 const reviewEmail: React.CSSProperties = { fontSize: 13, color: '#6b7280' };
 const pendingBadge: React.CSSProperties = { background: '#fef3c7', color: '#92400e', fontSize: 12, fontWeight: 600, padding: '4px 12px', borderRadius: 20 };
 
-const reqCard: React.CSSProperties = { border: '1px solid #e5e7eb', borderRadius: 8, padding: '16px', background: '#fafafa' };
+const reqCard: React.CSSProperties = { border: `1px solid ${NAVY.s300}`, borderRadius: 12, padding: '16px', background: '#fff' };
 const detailGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px 16px', marginBottom: 16 };
 const detailCell: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 2 };
 const detailLabel: React.CSSProperties = { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#9ca3af' };
@@ -832,22 +1071,22 @@ const detailValue: React.CSSProperties = { fontSize: 14, color: '#111', fontWeig
 const itemRow: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 7 };
 
 const actionRow: React.CSSProperties = { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 12 };
-const approveBtn: React.CSSProperties = { background: '#374151', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
-const approveLendBtn: React.CSSProperties = { background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const approveBtn: React.CSSProperties = { background: '#1F7A45', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const approveLendBtn: React.CSSProperties = { background: NAVY.accent, color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const rejectOutlineBtn: React.CSSProperties = { background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const confirmRejectBtn: React.CSSProperties = { background: '#6b7280', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const cancelBtn: React.CSSProperties = { background: 'transparent', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: 6, padding: '8px 14px', fontSize: 13, cursor: 'pointer' };
 const ghostBtn: React.CSSProperties = { background: 'transparent', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, padding: '6px 14px', fontSize: 13, cursor: 'pointer' };
-const reviewBtn: React.CSSProperties = { background: 'transparent', color: '#2563eb', border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
+const reviewBtn: React.CSSProperties = { background: 'transparent', color: NAVY.accent, border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const rejectForm: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 };
 const rejectInput: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14, width: '100%', boxSizing: 'border-box' };
 const approvedTag: React.CSSProperties = { display: 'inline-block', background: '#d1fae5', color: '#065f46', fontSize: 12, fontWeight: 600, padding: '4px 12px', borderRadius: 12 };
 const expiredTag: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 7, background: '#f3f4f6', color: '#6b7280', fontSize: 13, fontWeight: 500, marginTop: 8 };
 
-const backBtn: React.CSSProperties = { background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: 14, padding: 0, marginBottom: 20 };
+const backBtn: React.CSSProperties = { background: 'none', border: 'none', color: NAVY.accent, cursor: 'pointer', fontSize: 14, padding: 0, marginBottom: 20 };
 
 // Lend form styles
-const lendBox: React.CSSProperties = { border: '1px solid #e5e7eb', borderRadius: 8, padding: '20px', background: '#fff' };
+const lendBox: React.CSSProperties = { border: `1px solid ${NAVY.s300}e6`, borderRadius: 16, padding: '22px', background: CARD_BG, boxShadow: CARD_SHADOW };
 const timeSummary: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, padding: '10px 14px', background: '#f9fafb', borderRadius: 8, border: '1px solid #e5e7eb' };
 const typeSection: React.CSSProperties = { border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', background: '#fafafa' };
 const typeSectionHeader: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 };
@@ -855,10 +1094,18 @@ const typeSectionTitle: React.CSSProperties = { fontSize: 15, fontWeight: 700, c
 const typeSectionMeta: React.CSSProperties = { fontSize: 12, color: '#6b7280', background: '#e5e7eb', padding: '2px 8px', borderRadius: 10 };
 const articleList: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8 };
 const articleRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, cursor: 'pointer' };
+const searchWrap: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', background: '#fff', border: `1px solid ${NAVY.s300}`, borderRadius: 12, boxShadow: CARD_SHADOW };
+const searchInput: React.CSSProperties = { flex: 1, border: 'none', outline: 'none', padding: '12px 0', fontSize: 14, background: 'transparent', minWidth: 0 };
+const clearBtn: React.CSSProperties = { border: 'none', background: '#f3f4f6', color: '#374151', borderRadius: 6, width: 26, height: 26, cursor: 'pointer', fontSize: 16, lineHeight: 1 };
+const todayTag: React.CSSProperties = { display: 'inline-block', marginLeft: 6, background: '#dcfce7', color: '#15803d', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700 };
+const upcomingTag: React.CSSProperties = { display: 'inline-block', marginLeft: 6, background: '#e0e7ff', color: '#3730a3', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700 };
+const lendBtn: React.CSSProperties = { background: NAVY.accent, color: '#fff', border: 'none', borderRadius: 6, padding: '8px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
+const lockNote: React.CSSProperties = { display: 'block', margin: '6px 0 0', fontSize: 12, color: '#6b7280', lineHeight: 1.4 };
+const cardBox: React.CSSProperties = { marginTop: 14, padding: '14px 16px', borderRadius: 8, border: '1px solid #bfdbfe', background: '#eff6ff', display: 'flex', flexDirection: 'column' };
 const selectionHint: React.CSSProperties = { margin: '8px 0 0', fontSize: 12, color: '#065f46', fontWeight: 600 };
 const idCardLabel: React.CSSProperties = { display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 20, padding: '14px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, fontSize: 14, cursor: 'pointer' };
 const idCardWarning: React.CSSProperties = { margin: '8px 0 0', fontSize: 13, color: '#92400e', fontWeight: 500 };
-const confirmLendBtn: React.CSSProperties = { background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 6, padding: '10px 22px', fontSize: 14, fontWeight: 700, cursor: 'pointer', width: '100%' };
+const confirmLendBtn: React.CSSProperties = { background: NAVY.accent, color: '#fff', border: 'none', borderRadius: 6, padding: '10px 22px', fontSize: 14, fontWeight: 700, cursor: 'pointer', width: '100%' };
 
 // Walk-in
 const walkinGrid: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 20px' };
@@ -866,9 +1113,9 @@ const formField: React.CSSProperties = { display: 'flex', flexDirection: 'column
 const fieldLabel: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: '#374151' };
 const fieldInput: React.CSSProperties = { padding: '8px 10px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 14 };
 const tabBar: React.CSSProperties = { display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid #e5e7eb' };
-const activeTab: React.CSSProperties = { background: 'none', border: 'none', borderBottom: '2px solid #1d4ed8', color: '#1d4ed8', fontWeight: 700, fontSize: 13, padding: '8px 18px', cursor: 'pointer', marginBottom: -1 };
+const activeTab: React.CSSProperties = { background: 'none', border: 'none', borderBottom: '2px solid #1d4ed8', color: NAVY.accent, fontWeight: 700, fontSize: 13, padding: '8px 18px', cursor: 'pointer', marginBottom: -1 };
 const inactiveTab: React.CSSProperties = { background: 'none', border: 'none', borderBottom: '2px solid transparent', color: '#6b7280', fontWeight: 500, fontSize: 13, padding: '8px 18px', cursor: 'pointer', marginBottom: -1 };
-const resolveBtn: React.CSSProperties = { background: '#374151', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' };
+const resolveBtn: React.CSSProperties = { background: NAVY.accent, color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' };
 const resolvedCard: React.CSSProperties = { marginTop: 8, padding: '10px 14px', borderRadius: 7, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 2 };
 const resolvedName: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: '#065f46' };
 const resolvedDetail: React.CSSProperties = { fontSize: 12, color: '#047857' };

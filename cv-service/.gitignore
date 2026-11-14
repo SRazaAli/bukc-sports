@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+# downloaded model weights (re-create with: python -m scripts.download_models)
+models/
+# photos are large and personal to the department - keep them out of git
+dataset/
+# generated reference banks are ~25 MB per type - share them via Drive/USB instead
+banks/*/bank.npy
+*_heatmap.jpg

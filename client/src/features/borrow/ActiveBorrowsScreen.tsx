@@ -9,13 +9,17 @@
  * Book a Venue): dark navy page with two soft glow blobs, the same header
  * (logo, wordmark, ghost Back/Sign out) as Accounts, everything wrapped in
  * one frosted glass panel, white/soft-gradient cards, and a single accent
- * blue for interactive elements. No backend calls, state, or validation
- * were touched — only the wrapper and styling.
+ * blue for interactive elements.
+ *
+ * Each row shows the student (name, enrollment no.), the equipment + barcode,
+ * the borrow window and a live "Currently out" timer that turns into a red
+ * "Overtime" timer once the return time passes. Refreshes every minute.
  */
 import { useEffect, useState, useCallback } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
-import { listActive, getTransaction, returnArticles, type ActiveBorrow, type TxnDetail } from './api.js';
+import { getTransaction, returnArticles, type TxnDetail } from './api.js';
+import { formatDuration, listActiveDetailed, type ActiveLoan } from './deskApi.js';
 import { ApiRequestError } from '../../lib/api.js';
 import { HideInAppShell } from '../../components/AppShellContext.js';
 import { useBackStep } from '../../components/backStack.js';
@@ -37,20 +41,29 @@ const palette = {
   accentWash: '#1C398E14',
 };
 
+const fmtDay = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtClock = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
 function errMsg(e: unknown) { return e instanceof ApiRequestError ? e.body.error : 'Something went wrong.'; }
 
 export default function ActiveBorrowsScreen() {
   const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
-  const [rows, setRows] = useState<ActiveBorrow[] | null>(null);
+  const [rows, setRows] = useState<ActiveLoan[] | null>(null);
+  const [now, setNow] = useState(Date.now());
   const [detail, setDetail] = useState<TxnDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try { const r = await listActive(); setRows(r.transactions); } catch (e) { setError(errMsg(e)); }
+    try { const r = await listActiveDetailed(); setRows(r.transactions); } catch (e) { setError(errMsg(e)); }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const poll = window.setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 60_000);
+    const clock = window.setInterval(() => setNow(Date.now()), 1_000); // live timers
+    return () => { window.clearInterval(poll); window.clearInterval(clock); };
+  }, [load]);
   // Go back (top right) closes the return panel opened from the list.
   useBackStep(!!detail, () => setDetail(null));
 
@@ -62,7 +75,7 @@ export default function ActiveBorrowsScreen() {
   if (!user) return <Navigate to="/" replace />;
   if (user.role !== 'COORDINATOR' && user.role !== 'SUPER_ADMIN') return <Navigate to="/home" replace />;
 
-  const stateBadge = (s: string) => s === 'OVERDUE' ? badge.danger : s === 'INCOMPLETE' ? badge.warn : badge.ok;
+  const overtimeCount = (rows ?? []).filter((r) => now >= new Date(r.agreed_return_at).getTime()).length;
 
   return (
     <div className="abw-ui" style={s.page}>
@@ -108,26 +121,55 @@ export default function ActiveBorrowsScreen() {
               <ReturnPanel txn={detail} onBack={() => setDetail(null)}
                 onDone={(m) => { setNotice(m); setError(null); setDetail(null); void load(); }} onError={setError} />
             ) : (
-              <Panel title="Currently Out">
+              <Panel title={`Currently Out${rows?.length ? ` (${rows.length})` : ''}${overtimeCount ? ` · ${overtimeCount} overtime` : ''}`}>
                 {rows === null ? <p style={muted}>Loading…</p> : rows.length === 0 ? (
                   <p style={muted}>Nothing is currently borrowed.</p>
                 ) : (
+                  <div style={{ overflowX: 'auto' }}>
                   <table style={table}>
-                    <thead><tr><th style={th}>Borrower</th><th style={th}>Equipment</th><th style={th}>Due</th><th style={th}>Status</th><th style={th} /></tr></thead>
+                    <thead><tr><th style={th}>Student</th><th style={th}>Equipment</th><th style={th}>Borrow window</th><th style={th}>Live status</th><th style={th} /></tr></thead>
                     <tbody>
-                      {rows.map((r) => (
-                        <tr key={r.borrow_txn_id} className="abw-row">
-                          <td style={td}>{r.borrower_name ?? r.guest_name ?? '—'}</td>
-                          <td style={td}>{r.equipment_type_name}</td>
-                          <td style={td}>{new Date(r.agreed_return_at).toLocaleString()}</td>
-                          <td style={td}><span style={{ ...badgeBase, ...stateBadge(r.status) }}>{r.status}</span></td>
+                      {rows.map((r) => {
+                        const due = new Date(r.agreed_return_at).getTime();
+                        const out = new Date(r.actual_start_at).getTime();
+                        const over = now >= due;
+                        const total = Math.max(1, due - out);
+                        const pct = Math.min(100, Math.max(0, ((now - out) / total) * 100));
+                        return (
+                        <tr key={r.borrow_txn_id} className="abw-row" style={over ? { background: '#FFF5F5' } : undefined}>
+                          <td style={td}>
+                            <span style={nameTxt}>{r.borrower_name ?? r.guest_name ?? '—'}</span>
+                            <span style={subTxt}>
+                              {r.enrollment_no ?? (r.guest_id_number ? `Guest · ID ${r.guest_id_number}` : r.borrower_email ?? '')}
+                              {r.department ? ` · ${r.department}` : ''}
+                            </span>
+                          </td>
+                          <td style={td}>
+                            <span style={nameTxt}>{r.equipment_type_name}</span>
+                            {r.barcodes && <span style={{ ...subTxt, fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>{r.barcodes}</span>}
+                          </td>
+                          <td style={td}>
+                            <span style={nameTxt}>{fmtDay(r.agreed_start_at)}</span>
+                            <span style={subTxt}>{fmtClock(r.agreed_start_at)} – {fmtClock(r.agreed_return_at)}</span>
+                          </td>
+                          <td style={{ ...td, minWidth: 170 }}>
+                            {over ? (
+                              <span style={{ ...liveBase, ...badge.danger }}><i style={{ ...dot, background: '#DC2626' }} className="abw-pulse" />Overtime · {formatDuration(now - due)}</span>
+                            ) : (
+                              <span style={{ ...liveBase, ...badge.ok }}><i style={{ ...dot, background: '#1F7A45' }} className="abw-pulse" />Currently out · {formatDuration(now - out)}</span>
+                            )}
+                            <span style={barTrack}><span style={{ ...barFill, width: `${over ? 100 : pct}%`, background: over ? '#DC2626' : pct > 80 ? '#D97706' : '#1F7A45' }} /></span>
+                            <span style={subTxt}>{over ? `Was due ${fmtClock(r.agreed_return_at)}` : `${formatDuration(due - now)} left`}{r.status === 'INCOMPLETE' ? ' · partly returned' : ''}</span>
+                          </td>
                           <td style={{ ...td, textAlign: 'right' }}>
                             <button className="abw-btn-primary" style={reviewBtn} onClick={() => open(r.borrow_txn_id)}>Process Return</button>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </Panel>
             )}
@@ -245,6 +287,9 @@ function AbwStyles() {
       .abw-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
       .abw-btn-ghost { transition: background-color .15s ease, border-color .15s ease; }
       .abw-btn-ghost:hover { background: ${palette.slate50}; }
+      .abw-pulse { animation: abwPulse 1.6s ease-in-out infinite; }
+      @keyframes abwPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+      @media (prefers-reduced-motion: reduce) { .abw-pulse { animation: none; } }
       .abw-input:focus { outline: none; border-color: ${palette.accent} !important; box-shadow: 0 0 0 3px ${palette.accentSoft}; }
       @media (max-width: 620px) {
         .abw-glass { padding: 20px 14px 26px !important; border-radius: 18px !important; }
@@ -318,6 +363,12 @@ const ghostBtn: React.CSSProperties = { background: palette.white, color: palett
 const acceptBtn: React.CSSProperties = { background: '#1F7A45', color: '#fff', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 14.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' };
 const actionRow: React.CSSProperties = { display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' };
 const checkRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: palette.navy900 };
+const nameTxt: React.CSSProperties = { display: 'block', fontWeight: 600, fontSize: 14, color: palette.navy900 };
+const subTxt: React.CSSProperties = { display: 'block', fontSize: 12, color: palette.slate500, marginTop: 2 };
+const liveBase: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, font: '700 12px Inter, sans-serif', padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' };
+const dot: React.CSSProperties = { width: 7, height: 7, borderRadius: '50%', display: 'inline-block' };
+const barTrack: React.CSSProperties = { display: 'block', height: 4, borderRadius: 4, background: palette.slate100, margin: '7px 0 0', overflow: 'hidden', maxWidth: 170 };
+const barFill: React.CSSProperties = { display: 'block', height: '100%', borderRadius: 4, transition: 'width .6s linear' };
 const badgeBase: React.CSSProperties = { font: '700 11px "JetBrains Mono", ui-monospace, monospace', padding: '2px 8px', borderRadius: 999 };
 const badge = {
   ok: { background: '#E6F4EC', color: '#1F7A45' } as React.CSSProperties,

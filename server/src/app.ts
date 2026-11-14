@@ -13,12 +13,15 @@ import { authRouter } from './features/auth/router.js';
 import { inventoryRouter } from './features/inventory/router.js';
 import { availabilityRouter } from './features/availability/router.js';
 import { borrowRouter } from './features/borrow/router.js';
+import { borrowDeskRouter } from './features/borrow/deskRouter.js';
 import { venueRouter } from './features/venue/router.js';
 import { notificationsRouter } from './features/notifications/router.js';
 import { historyRouter } from './features/history/router.js';
 import { offlineRouter } from './features/offline/router.js';
 import { dashboardRouter } from './features/dashboard/router.js';
+import { dashboardInsightsRouter } from './features/dashboard/insights.js';
 import { messagesRouter } from './features/messages/router.js';
+import { healthCheckRouter } from './features/healthcheck/router.js';
 
 export function createApp() {
   const app = express();
@@ -29,6 +32,10 @@ export function createApp() {
       credentials: true, // refresh-token cookie
     }),
   );
+  // CV Equipment Health Check — mounted BEFORE the global JSON parser because it
+  // receives photos (base64) and uses its own, larger body limit. Every other
+  // route keeps the default express.json() below, unchanged.
+  app.use('/api/health-check', healthCheckRouter);
   app.use(express.json());
   app.use(cookieParser());
 
@@ -47,11 +54,13 @@ export function createApp() {
   app.use('/api/inventory', inventoryRouter); // Feature 4
   app.use('/api/availability', availabilityRouter); // Feature 2
   app.use('/api/borrow', borrowRouter); // Feature 3
+  app.use('/api/borrow-desk', borrowDeskRouter); // collection on the day, history, live loans, sidebar badges
   app.use('/api/venue', venueRouter); // Feature 5
   app.use('/api/notifications', notificationsRouter);
   app.use('/api/history', historyRouter);   // Feature 10
   app.use('/api/offline', offlineRouter);   // Feature 11
   app.use('/api/dashboard', dashboardRouter); // Feature 12
+  app.use('/api/dashboard-insights', dashboardInsightsRouter); // redesigned dashboard: read-only trends
   app.use('/api/messages', messagesRouter);   // chat with the Coordinator desk
   // ...
 
