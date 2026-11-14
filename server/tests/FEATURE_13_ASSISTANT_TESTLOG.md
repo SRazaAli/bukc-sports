@@ -41,8 +41,25 @@ Run: `TEST_DATABASE_URL=... npx vitest run tests/assistant.*.test.ts`
 Regression: no existing test changed. The existing suite has failures on `main` that pre-date
 this feature (venue/borrow tests); the team decided not to fix them as part of Feature 13.
 
+## Step 4 — Coach bubble and panel (manual UI checks, headless Chrome)
+
+| Check | Rule (plan §7) | Result |
+|---|---|---|
+| Bubble bottom-right on student pages; not shown to other roles | §1, §7 | ✅ |
+| Panel: header "Coach · BUKC Sports Assistant", clear chat, close | §7 | ✅ |
+| Welcome "Hi {first name}! I'm Coach…" + 4 starter chips | §7 | ✅ |
+| Streamed answer renders bold, numbered and bullet lists (no raw HTML) | §7 | ✅ |
+| Server error → red note + **Open Messages** button | §3 | ✅ |
+| Messages page: bubble raised above the send box | §7 | ✅ |
+| Phone width (390 px): panel opens full-screen | §7 | ✅ |
+| Esc closes the panel | §7 | ✅ |
+| Chat survives page navigation and refresh; cleared on sign-out | §7 | ✅ |
+
 ## Real-model checks (manual, with a teammate's key)
 
 | Date | Model | Check | Result |
 |---|---|---|---|
-| | | | |
+| 15 Nov 2026 | gemini-3.5-flash-lite | "How do I borrow a badminton racket?" | ✅ correct but too brief → prompt tuned |
+| 15 Nov 2026 | gemini-3.5-flash-lite | "Can I book a venue on Saturday?" | ✅ Mon–Fri rule held |
+| 15 Nov 2026 | gemini-3.5-flash-lite | "venue booking ka process kya hai?" (Roman Urdu) | ✅ correct steps; one Devanagari word → prompt tuned |
+| 15 Nov 2026 | gemini-3.5-flash-lite | "write my OOP assignment" | ✅ exact agreed refusal |
