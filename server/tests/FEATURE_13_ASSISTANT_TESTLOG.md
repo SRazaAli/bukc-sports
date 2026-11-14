@@ -54,6 +54,9 @@ this feature (venue/borrow tests); the team decided not to fix them as part of F
 | Phone width (390 px): panel opens full-screen | §7 | ✅ |
 | Esc closes the panel | §7 | ✅ |
 | Chat survives page navigation and refresh; cleared on sign-out | §7 | ✅ |
+| Full-screen mode: expand button in header; centred reading column; exit button returns to the small window | §7 (added 15 Nov) | ✅ |
+| Esc in full screen → back to small window; Esc again → closes | §7 | ✅ |
+| Full-screen choice remembered after refresh (this tab); hidden on phones (already full screen) | §7 | ✅ |
 
 ## Real-model checks (manual, with a teammate's key)
 

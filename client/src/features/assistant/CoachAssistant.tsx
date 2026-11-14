@@ -16,6 +16,7 @@ import { getCoachConfig, streamCoachReply, CoachError, type CoachAction, type Co
 const MAX_CHARS = 1000; // plan §6
 const HISTORY_TURNS = 12; // plan §6
 const STORE_PREFIX = 'bukc:coach:';
+const EXPANDED_KEY = STORE_PREFIX + 'expanded'; // cleared with the chat on sign-out
 const MESSAGES_ACTION: CoachAction = { label: 'Open Messages', href: '/messages' };
 
 interface ChatMessage {
@@ -47,9 +48,13 @@ function saveChat(userId: string, messages: ChatMessage[]) {
   try { sessionStorage.setItem(STORE_PREFIX + userId, JSON.stringify(messages)); } catch { /* fine — in-memory still works */ }
 }
 const newId = () => Math.random().toString(36).slice(2, 10);
+function loadExpanded(): boolean {
+  try { return sessionStorage.getItem(EXPANDED_KEY) === '1'; } catch { return false; }
+}
 
 export function CoachAssistant({ userId, pathname }: { userId: string; pathname: string }) {
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(loadExpanded); // full-screen mode, remembered for this tab
   const [config, setConfig] = useState<CoachConfig | null>(null);
   const [configFailed, setConfigFailed] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() => loadChat(userId));
@@ -65,6 +70,10 @@ export function CoachAssistant({ userId, pathname }: { userId: string; pathname:
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => { saveChat(userId, messages); }, [userId, messages]);
+  useEffect(() => {
+    try { sessionStorage.setItem(EXPANDED_KEY, expanded ? '1' : '0'); } catch { /* fine */ }
+  }, [expanded]);
+  const toggleExpanded = () => { setExpanded((v) => !v); setTimeout(() => inputRef.current?.focus(), 30); };
   useEffect(() => () => abortRef.current?.abort(), []);
 
   // Load config the first time the panel opens.
@@ -86,7 +95,7 @@ export function CoachAssistant({ userId, pathname }: { userId: string; pathname:
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, status, open]);
+  }, [messages, status, open, expanded]);
 
   const available = !!config?.configured;
 
@@ -159,7 +168,11 @@ export function CoachAssistant({ userId, pathname }: { userId: string; pathname:
 
   // Esc closes; Tab stays inside the open panel (focus trap).
   function onPanelKey(e: ReactKeyboardEvent<HTMLDivElement>) {
-    if (e.key === 'Escape') { e.stopPropagation(); close(); return; }
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      if (expanded) setExpanded(false); else close();
+      return;
+    }
     if (e.key !== 'Tab' || !panelRef.current) return;
     const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -176,17 +189,24 @@ export function CoachAssistant({ userId, pathname }: { userId: string; pathname:
   const remaining = MAX_CHARS - input.length;
 
   return (
-    <div className={`coach${raised ? ' is-raised' : ''}${open ? ' is-open' : ''}`}>
+    <div className={`coach${raised ? ' is-raised' : ''}${open ? ' is-open' : ''}${open && expanded ? ' is-expanded' : ''}`}>
       <CoachStyles />
 
+      {open && expanded && <div className="coach-backdrop" onClick={() => setExpanded(false)} aria-hidden />}
+
       {open && (
-        <div ref={panelRef} className="coach-panel" role="dialog" aria-label="Coach, BUKC Sports assistant" onKeyDown={onPanelKey}>
+        <div ref={panelRef} className="coach-panel" role="dialog" aria-modal={expanded || undefined} aria-label="Coach, BUKC Sports assistant" onKeyDown={onPanelKey}>
           <header className="coach-head">
             <span className="coach-head-avatar" aria-hidden><WhistleIcon /></span>
             <span className="coach-head-text">
               <span className="coach-head-name">Coach</span>
               <span className="coach-head-sub">BUKC Sports Assistant</span>
             </span>
+            <button type="button" className="coach-icon-btn coach-expand-btn" onClick={toggleExpanded}
+              title={expanded ? 'Exit full screen' : 'Full screen'} aria-label={expanded ? 'Exit full screen' : 'Open Coach in full screen'}
+              aria-pressed={expanded}>
+              {expanded ? <CollapseIcon /> : <ExpandIcon />}
+            </button>
             <button type="button" className="coach-icon-btn" onClick={clearChat} disabled={messages.length === 0 && !busy}
               title="Clear chat" aria-label="Clear chat"><ResetIcon /></button>
             <button type="button" className="coach-icon-btn" onClick={close} title="Close" aria-label="Close Coach"><CloseIcon /></button>
@@ -393,6 +413,22 @@ function CoachStyles() {
       .coach-send:disabled { background: #A9B6D3; cursor: default; }
       .coach-send:focus-visible { outline: 3px solid #9DBBFF; outline-offset: 2px; }
       .coach-count { font-size: 11.5px; color: #62748E; text-align: right; padding: 0 12px 8px; background: #fff; }
+      /* Full-screen mode */
+      .coach-backdrop { position: fixed; inset: 0; background: rgba(10,18,41,0.6); backdrop-filter: blur(2px); }
+      .coach.is-expanded .coach-bubble { display: none; }
+      .coach.is-expanded .coach-panel {
+        position: fixed; inset: 20px; width: auto; height: auto; max-height: none; border-radius: 20px;
+      }
+      .coach.is-expanded .coach-head { padding: 14px 16px 14px 20px; }
+      .coach.is-expanded .coach-head-name { font-size: 16.5px; }
+      .coach.is-expanded .coach-list { padding: 28px max(20px, calc((100% - 860px) / 2)); gap: 12px; }
+      .coach.is-expanded .coach-msg { max-width: 78%; font-size: 14.5px; padding: 11px 15px; }
+      .coach.is-expanded .coach-chip { font-size: 13.5px; padding: 8px 13px; }
+      .coach.is-expanded .coach-compose { padding: 14px max(20px, calc((100% - 860px) / 2)) 18px; }
+      .coach.is-expanded .coach-input { font-size: 14.5px; min-height: 46px; max-height: 180px; }
+      .coach.is-expanded .coach-send { width: 46px; height: 46px; }
+      .coach.is-expanded .coach-count { padding: 0 max(20px, calc((100% - 860px) / 2)) 10px; }
+
       .coach-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
       @media (max-width: 520px) {
@@ -401,6 +437,9 @@ function CoachStyles() {
         .coach.is-open .coach-bubble { display: none; }
         .coach-panel { position: fixed; inset: 0; width: auto; height: auto; max-height: none; border-radius: 0; border: 0; }
         .coach.is-raised .coach-panel { max-height: none; }
+        .coach-expand-btn { display: none !important; } /* already full screen on phones */
+        .coach.is-expanded .coach-panel { inset: 0; border-radius: 0; }
+        .coach-backdrop { display: none; }
       }
     `}</style>
   );
@@ -415,6 +454,12 @@ function WhistleIcon() {
 }
 function CloseIcon() {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
+}
+function ExpandIcon() {
+  return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+}
+function CollapseIcon() {
+  return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M20 10h-6V4M4 14h6v6M14 10l7-7M10 14l-7 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
 function ResetIcon() {
   return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>;
