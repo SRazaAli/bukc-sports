@@ -57,6 +57,12 @@ describe('Coach system prompt', () => {
     expect(safeFirstName('محمد علی')).toBe('محمد');
   });
 
+  it('tells the model to keep Roman Urdu in Latin letters and to offer an alternative on "no"', () => {
+    expect(prompt).toMatch(/Never use Hindi\/Devanagari characters/);
+    expect(prompt).toMatch(/closest thing the student CAN do/);
+    expect(prompt).toMatch(/2–3 rules from the RULEBOOK/);
+  });
+
   it('builds the welcome message with the Coach name', () => {
     expect(welcomeText('Aimen')).toMatch(/^Hi Aimen! I'm Coach, the BUKC Sports assistant\./);
   });
