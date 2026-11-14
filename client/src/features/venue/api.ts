@@ -149,8 +149,18 @@ export interface AllocationLine {
   is_self_managed: boolean; needs_shortfall_confirmation: boolean;
 }
 export interface AllocationAlert {
-  allocation_id: string; equipment_type_id: number; equipment_type_name: string;
-  quantity: number; session_id: string; venue_name: string; availableUnits: number;
+  allocation_id: string; booking_id: string; session_id: string; session_no: number;
+  purpose: string; organiser: string; venue_name: string; start_at: string; end_at: string;
+  equipment_type_id: number; equipment_type_name: string; lending_unit: 'SINGLE' | 'PAIR';
+  quantity: number; covered: number; short: number;
+  problems: Array<{ article_id: string; barcode: string; state: string }>;
+  picked_count: number;
+  picked_ids: string[];
+}
+export interface AlertFix {
+  kind: 'SWAP' | 'SELF_MANAGED'; id: string; at: string | null; purpose: string; venue_name: string;
+  equipment_type_name: string; start_at: string; reason?: string | null; outgoing_barcode?: string;
+  incoming_barcode?: string; performed_by?: string; quantity?: number;
 }
 
 export const getAllocationPlan = (bookingId: string) =>
@@ -158,7 +168,11 @@ export const getAllocationPlan = (bookingId: string) =>
 export const confirmShortfall = (bookingId: string, confirm: boolean) =>
   api<{ status: string; message: string }>(`/api/venue/bookings/${bookingId}/shortfall-confirm`, { method: 'POST', body: { confirm } });
 
-export const listAllocationAlerts = () => api<{ alerts: AllocationAlert[] }>('/api/venue/event-equipment/alerts');
+export const listAllocationAlerts = () => api<{ alerts: AllocationAlert[]; recent: AlertFix[]; now: string }>('/api/venue/event-equipment/alerts');
+export const reduceAllocation = (allocationId: string, input: { quantity: number; reason: string }) =>
+  api<{ message: string }>(`/api/venue/event-equipment/${allocationId}/reduce`, { method: 'POST', body: input });
+export const markAllocationSelfManaged = (allocationId: string, input: { reason: string }) =>
+  api<{ message: string }>(`/api/venue/event-equipment/${allocationId}/self-managed`, { method: 'POST', body: input });
 export const performSwap = (allocationId: string, input: { outgoingArticleId: string; incomingArticleId: string; reason?: string }) =>
   api<{ message: string }>(`/api/venue/event-equipment/${allocationId}/swap`, { method: 'POST', body: input });
 

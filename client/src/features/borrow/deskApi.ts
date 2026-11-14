@@ -33,7 +33,7 @@ export interface HistoryRow {
 }
 export interface LateLoan { borrow_txn_id: string; equipment_type_name: string; agreed_return_at: string; barcodes: string | null }
 
-export const getBadges = () => api<{ borrowQueue?: number; myBorrowRequests?: number }>('/api/borrow-desk/badges');
+export const getBadges = () => api<{ borrowQueue?: number; myBorrowRequests?: number; equipmentAlerts?: number }>('/api/borrow-desk/badges');
 export const getDeskOverview = () => api<DeskOverview>('/api/borrow-desk/overview');
 export const lendWithCard = (groupId: string, body: { idCardEnrollmentNo: string; articlesPerType: Record<number, string[]> }) =>
   api<{ transactions: string[] }>(`/api/borrow-desk/groups/${groupId}/lend`, { method: 'POST', body });

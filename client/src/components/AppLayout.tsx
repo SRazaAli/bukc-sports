@@ -138,8 +138,9 @@ export default function AppLayout() {
                   const active = isItemActive(item, pathname);
                   const badge = item.badge === 'messages' ? unreadMessages
                     : item.badge === 'borrowQueue' ? borrowBadges.borrowQueue
-                    : item.badge === 'myBorrowRequests' ? borrowBadges.myBorrowRequests : 0;
-                  const badgeWord = item.badge === 'messages' ? 'unread' : item.badge === 'borrowQueue' ? 'pending' : 'new';
+                    : item.badge === 'myBorrowRequests' ? borrowBadges.myBorrowRequests
+                    : item.badge === 'equipmentAlerts' ? borrowBadges.equipmentAlerts : 0;
+                  const badgeWord = item.badge === 'messages' ? 'unread' : item.badge === 'borrowQueue' ? 'pending' : item.badge === 'equipmentAlerts' ? 'need attention' : 'new';
                   const badgeText = badge > 99 ? '99+' : String(badge);
                   return (
                     <li key={item.key}>

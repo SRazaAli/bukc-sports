@@ -20,7 +20,7 @@ export interface NavItem {
   /** Other route prefixes that belong to this item (keeps it highlighted on sub-pages). */
   alsoActiveOn?: string[];
   /** Shows a live unread-count badge next to the label. */
-  badge?: 'messages' | 'borrowQueue' | 'myBorrowRequests';
+  badge?: 'messages' | 'borrowQueue' | 'myBorrowRequests' | 'equipmentAlerts';
 }
 
 export const SECTION_ORDER: NavSection[] = ['Account', 'Equipment', 'Venues', 'Records'];
@@ -76,7 +76,7 @@ export function getNavItems(role: UserRole): NavItem[] {
   }
   if (role === 'COORDINATOR') {
     push({ key: 'venue-queue', label: 'Venue Queue', to: '/venue-queue', section: 'Venues', icon: <QueueIcon /> });
-    push({ key: 'equipment-alerts', label: 'Equipment Alerts', to: '/equipment-alerts', section: 'Equipment', icon: <BellIcon /> });
+    push({ key: 'equipment-alerts', label: 'Equipment Alerts', to: '/equipment-alerts', section: 'Equipment', icon: <BellIcon />, badge: 'equipmentAlerts' });
   }
   if (role === 'SUPER_ADMIN') {
     push({ key: 'venue-approvals', label: 'Venue Approvals', to: '/venue-approvals', section: 'Venues', icon: <ShieldCheckIcon /> });

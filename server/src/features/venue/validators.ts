@@ -142,6 +142,14 @@ export const performSwapSchema = z.object({
   reason: z.string().max(300).optional(),
 });
 
+export const reduceAllocationSchema = z.object({
+  quantity: z.number().int().min(1),
+  reason: z.string().trim().min(3, 'Please give a reason.').max(300),
+});
+export const selfManageAllocationSchema = z.object({
+  reason: z.string().trim().min(3, 'Please give a reason.').max(300),
+});
+
 export type BookingMetadata = z.infer<typeof bookingMetaSchema>;
 export type InterUniversityMeta = z.infer<typeof interUniversityMetaSchema>;
 export type InternalMeta = z.infer<typeof internalMetaSchema>;

@@ -174,7 +174,10 @@ export async function materializeAllocations(
 export async function checkEquipmentLocks(): Promise<number> {
   const due = await db.selectFrom('event_equipment_allocation as ea')
     .innerJoin('booking_session as bs', 'bs.session_id', 'ea.session_id')
-    .select(['ea.allocation_id', 'ea.equipment_type_id', 'ea.quantity', 'bs.session_id'])
+    .innerJoin('equipment_type as et', 'et.equipment_type_id', 'ea.equipment_type_id')
+    .innerJoin('venue as v', 'v.venue_id', 'bs.venue_id')
+    .select(['ea.allocation_id', 'ea.equipment_type_id', 'ea.quantity', 'bs.session_id', 'bs.booking_id',
+      'et.name as type_name', 'v.name as venue_name', sql<Date>`lower(bs.slot)`.as('start_at')])
     .where('ea.locked_at', 'is', null)
     .where('ea.is_self_managed', '=', false)
     .where('bs.status', 'in', ['SCHEDULED', 'IN_PROGRESS'])
@@ -195,9 +198,10 @@ export async function checkEquipmentLocks(): Promise<number> {
 
     // EQUIP-AVAIL-19: silence is confirmation — only alert when short.
     if (short) {
+      const when = new Date(row.start_at).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
       await notifyStaffRole('COORDINATOR', 'T24_LOCK_ALERT', 'Equipment lock alert: insufficient stock',
-        `An event's equipment lock has triggered but only ${availableUnits} of the ${row.quantity} required units are currently available. A swap or shortfall resolution is needed.`,
-        {});
+        `${row.type_name} for the event at ${row.venue_name} (${when}): only ${Math.max(0, availableUnits)} of the ${row.quantity} needed are ready. Open Equipment Alerts to fix it.`,
+        { bookingId: row.booking_id });
     }
   }
   return due.length;

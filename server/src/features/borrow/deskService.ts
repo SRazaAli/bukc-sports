@@ -14,6 +14,7 @@
  * (with enrollment no. and borrow window), the student's late-return alert,
  * and the counts shown as badges in the sidebar.
  */
+import { countEquipmentAlerts } from '../venue/equipmentAlerts.js';
 import { sql } from 'kysely';
 import { db } from '../../db/index.js';
 import { AppError, badRequest, conflict, notFound } from '../../middleware/errors.js';
@@ -256,7 +257,9 @@ export async function badgeCounts(userId: string, role: string) {
     const r = await sql<{ n: string }>`
       SELECT count(DISTINCT request_group_id) AS n FROM borrow_request
        WHERE status = 'PENDING' AND requested_start_at >= now()`.execute(db);
-    return { borrowQueue: Number(r.rows[0]?.n ?? 0) };
+    // Equipment Alerts badge: locked event equipment lines that need attention.
+    const equipmentAlerts = await countEquipmentAlerts().catch(() => 0);
+    return { borrowQueue: Number(r.rows[0]?.n ?? 0), equipmentAlerts };
   }
   if (role === 'STUDENT') {
     const r = await sql<{ n: string }>`
