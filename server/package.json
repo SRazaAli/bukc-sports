@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file=.env src/server.ts",
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('src/features/assistant/knowledge','dist/features/assistant/knowledge',{recursive:true})\"",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
