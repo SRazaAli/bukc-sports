@@ -283,7 +283,7 @@ export function CoachAssistant({ userId, pathname }: { userId: string; pathname:
         aria-label={open ? 'Close Coach' : 'Open Coach, the BUKC Sports assistant'}
         title={open ? 'Close Coach' : 'Ask Coach'}
       >
-        {open ? <CloseIcon /> : <ChatIcon />}
+        {open ? <CloseIcon /> : <WhistleIcon size={26} />}
       </button>
     </div>
   );
@@ -446,11 +446,8 @@ function CoachStyles() {
 }
 
 /* ---------- icons ---------- */
-function ChatIcon() {
-  return <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.2 3.6c-.5.4-1.3.1-1.3-.6V16A2.5 2.5 0 0 1 4 13.5v-8Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"/><circle cx="8.5" cy="9.5" r="1.1" fill="currentColor"/><circle cx="12" cy="9.5" r="1.1" fill="currentColor"/><circle cx="15.5" cy="9.5" r="1.1" fill="currentColor"/></svg>;
-}
-function WhistleIcon() {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden><circle cx="9" cy="14" r="5" stroke="currentColor" strokeWidth="1.7"/><path d="M12.5 10.5 20 7v4l-5.5 1.5M4 6l2 2M8 4v2.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+function WhistleIcon({ size = 18 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden><circle cx="9" cy="14" r="5" stroke="currentColor" strokeWidth="1.7"/><path d="M12.5 10.5 20 7v4l-5.5 1.5M4 6l2 2M8 4v2.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
 function CloseIcon() {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
