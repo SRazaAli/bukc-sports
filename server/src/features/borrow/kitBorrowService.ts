@@ -11,6 +11,7 @@
  */
 import { randomUUID } from 'crypto';
 import { db } from '../../db/index.js';
+import { isWeekendKarachi } from './returnOutcome.js';
 
 export interface KitBorrowInput {
   sportCategoryId: number;
@@ -35,6 +36,13 @@ export async function submitKitBorrowRequest(input: KitBorrowInput): Promise<Kit
   }
   if (requestedReturnAt <= requestedStartAt) {
     throw Object.assign(new Error('Return time must be after start time.'), { status: 400 });
+  }
+  // Weekdays only, and not a time that has already passed.
+  if (requestedStartAt.getTime() <= Date.now()) {
+    throw Object.assign(new Error('That time has already passed. Pick a start time later today or on another day.'), { status: 400 });
+  }
+  if (isWeekendKarachi(requestedStartAt)) {
+    throw Object.assign(new Error('Equipment is not lent on Saturdays or Sundays. Pick a weekday (Mon–Fri).'), { status: 400 });
   }
 
   // Fetch all available types for the sport

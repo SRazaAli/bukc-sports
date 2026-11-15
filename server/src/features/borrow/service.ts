@@ -10,6 +10,7 @@
 import { sql } from 'kysely';
 import { db, isPgError, type ConditionLabel } from '../../db/index.js';
 import { AppError, badRequest, notFound, conflict } from '../../middleware/errors.js';
+import { returnOutcome, isWeekendKarachi } from './returnOutcome.js';
 import { sendEmail } from '../../lib/email.js';
 
 function mapDbError(e: unknown): AppError {
@@ -92,6 +93,15 @@ export async function submitRequest(studentId: string, input: {
     if (Date.now() < cooldownEnds) {
       throw conflict(`You can resubmit in ${Math.ceil((cooldownEnds - Date.now()) / 60000)} minute(s).`, 'COOLDOWN');
     }
+  }
+
+  // Borrow window rules: not in the past, and weekdays only (no Sat/Sun lending).
+  const reqStart = new Date(input.requestedStartAt);
+  if (reqStart.getTime() <= Date.now()) {
+    throw badRequest('That time has already passed. Pick a start time later today or on another day.', 'WINDOW_IN_PAST');
+  }
+  if (isWeekendKarachi(reqStart)) {
+    throw badRequest('Equipment is not lent on Saturdays or Sundays. Pick a weekday (Mon–Fri).', 'WEEKEND');
   }
 
   // BORROW-14: cannot request equipment with zero available units.
@@ -210,13 +220,21 @@ export async function checkExpiredRequests() {
 // Approve all rows in a request group atomically.
 export async function approveGroup(groupId: string, coordinatorId: string) {
   const rows = await db.selectFrom('borrow_request')
-    .select(['borrow_request_id', 'requested_by', 'equipment_type_id', 'status'])
+    .select(['borrow_request_id', 'requested_by', 'equipment_type_id', 'status', 'requested_start_at', 'requested_return_at'])
     .where('request_group_id', '=', groupId)
     .execute();
 
   if (rows.length === 0) throw notFound('Request group not found.');
   const pending = rows.filter((r) => r.status === 'PENDING');
   if (pending.length === 0) throw conflict('All requests in this group are already actioned.');
+  // Weekend or already-ended windows can never be lent — don't approve them.
+  const first = pending[0]!;
+  if (isWeekendKarachi(new Date(first.requested_start_at))) {
+    throw conflict('This request is for a Saturday or Sunday — equipment is not lent on weekends. Reject it with a reason.', 'WEEKEND');
+  }
+  if (new Date(first.requested_return_at).getTime() <= Date.now()) {
+    throw conflict('This borrow window has already ended, so it can no longer be lent. Reject it with a reason.', 'WINDOW_PASSED');
+  }
 
   // Check stock for all types in the group
   for (const row of pending) {
@@ -245,6 +263,16 @@ export async function approveGroup(groupId: string, coordinatorId: string) {
   } catch (e) { throw mapDbError(e); }
 }
 
+// Every lend path: no Sat/Sun, and not once the borrow window has ended.
+function assertLendableWindow(agreedStartAt: string, agreedReturnAt: string) {
+  if (isWeekendKarachi(new Date(agreedStartAt))) {
+    throw conflict('Equipment is not lent on Saturdays or Sundays.', 'WEEKEND');
+  }
+  if (new Date(agreedReturnAt).getTime() <= Date.now()) {
+    throw conflict('This borrow window has already ended — equipment can no longer be lent for it.', 'WINDOW_PASSED');
+  }
+}
+
 // Lend all items in a group in one transaction. articlesPerType maps
 // equipment_type_id → article_ids[] selected by the coordinator.
 export async function lendPlatformGroup(input: {
@@ -253,6 +281,7 @@ export async function lendPlatformGroup(input: {
   agreedStartAt: string;
   agreedReturnAt: string;
 }, coordinatorId: string) {
+  assertLendableWindow(input.agreedStartAt, input.agreedReturnAt);
   try {
     const rows = await db.selectFrom('borrow_request')
       .select(['borrow_request_id', 'requested_by', 'equipment_type_id', 'status'])
@@ -359,6 +388,7 @@ async function markArticlesOnLoan(trx: import('kysely').Transaction<import('../.
 export async function lendPlatform(input: {
   borrowRequestId: string; articleIds: string[]; agreedStartAt: string; agreedReturnAt: string;
 }, coordinatorId: string) {
+  assertLendableWindow(input.agreedStartAt, input.agreedReturnAt);
   try {
     const req = await db.selectFrom('borrow_request')
       .select(['requested_by', 'equipment_type_id', 'status'])
@@ -394,6 +424,7 @@ export async function lendWalkinGuest(input: {
   guestFullName: string; guestIdNumber: string; guestContactNumber: string; guestIsFaculty: boolean;
   equipmentTypeId: number; articleIds: string[]; agreedStartAt: string; agreedReturnAt: string;
 }, coordinatorId: string) {
+  assertLendableWindow(input.agreedStartAt, input.agreedReturnAt);
   try {
     const txnId = await db.transaction().execute(async (trx) => {
       // BORROW-25: every guest transaction is independent — a fresh row each time.
@@ -449,6 +480,7 @@ export async function lendWalkinRegistered(input: {
   enrollmentNo: string;
   equipmentTypeId: number; articleIds: string[]; agreedStartAt: string; agreedReturnAt: string;
 }, coordinatorId: string) {
+  assertLendableWindow(input.agreedStartAt, input.agreedReturnAt);
   try {
     // Resolve borrower — must be ACTIVE.
     const borrower = await resolveRegisteredBorrower(input.enrollmentNo);
@@ -534,7 +566,11 @@ function scoreToLabel(score: number, good = 70, worn = 40): ConditionLabel {
 
 export async function returnArticles(txnId: string, input: {
   articleIds: string[]; mode: 'scan' | 'manual' | 'dismiss'; score?: number; label?: ConditionLabel;
-}, coordinatorId: string) {
+}, coordinatorId: string, opts: { source?: 'RETURN' | 'SUBMITTED' } = {}) {
+  // SUBMITTED = the Coordinator pressed "Submitted" in the Borrow Queue: the
+  // student handed everything back. Outcome per returnOutcome():
+  // COMPLETED_EARLY / COMPLETED / COMPLETED_LATE.
+  const submitted = opts.source === 'SUBMITTED';
   try {
     const txn = await db.selectFrom('borrow_transaction')
       .select(['status', 'agreed_return_at', 'equipment_type_id', 'borrower_user_id'])
@@ -602,7 +638,7 @@ export async function returnArticles(txnId: string, input: {
     const now = new Date();
     const isLate = now > new Date(txn.agreed_return_at);
     const anyDamaged = input.mode !== 'dismiss' && label === 'DAMAGED';
-    const finalStatus = anyDamaged ? 'COMPLETED_DAMAGED' : isLate ? 'COMPLETED_LATE' : 'COMPLETED';
+    const finalStatus = returnOutcome(now, txn.agreed_return_at, anyDamaged);
 
     await db.updateTable('borrow_transaction')
       .set({ status: finalStatus, actual_return_at: sql`now()`, id_card_returned_at: sql`now()` })
@@ -620,14 +656,14 @@ export async function returnArticles(txnId: string, input: {
         actor_user_id: txn.borrower_user_id,
         equipment_type_id: txn.equipment_type_id,
         outcome: finalStatus,
-        snapshot: JSON.stringify({ articleIds: input.articleIds, mode: input.mode }),
+        snapshot: JSON.stringify({ articleIds: input.articleIds, mode: input.mode, ...(submitted ? { source: 'SUBMITTED', submittedBy: coordinatorId } : {}) }),
       }).execute();
     }
     // Guests have no history entry — HIST-08/09 scope Usage History to
     // registered users; guest transactions remain deliberately unlinked
     // (BORROW-25) and are audited via borrow_transaction itself.
 
-    if (input.mode === 'dismiss') {
+    if (input.mode === 'dismiss' && !submitted) {
       await notifyStaff('RETURN_CONDITION_UNVERIFIED', 'Return condition not verified',
         'A return was dismissed without a health check. This article\'s condition data may now be inaccurate.',
         { borrowTxnId: txnId });

@@ -299,3 +299,7 @@ export const cancelSession = (sessionId: string, reason: string) =>
 // CONF-13: soft resolution — marks NEEDS_RESCHEDULING, releases the slot.
 export const markSessionNeedsRescheduling = (sessionId: string, reason: string) =>
   api<{ message: string }>(`/api/venue/sessions/${sessionId}/reschedule`, { method: 'POST', body: { reason } });
+
+// ── Sidebar badge (unread venue notifications for the signed-in role) ──
+export const getVenueBadge = () => api<{ count: number }>('/api/venue/badge');
+export const markVenueBadgeSeen = () => api<{ ok: boolean }>('/api/venue/badge/seen', { method: 'POST' });

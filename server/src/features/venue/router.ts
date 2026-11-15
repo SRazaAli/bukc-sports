@@ -82,6 +82,15 @@ venueRouter.get('/bookings/mine', ...requester, asyncHandler(async (req, res) =>
 venueRouter.get('/queue', ...coordinatorOnly, asyncHandler(async (_req, res) => {
   res.json({ queue: await svc.listCoordinatorQueue() });
 }));
+// Sidebar badge: unread venue notifications for the signed-in user's role.
+venueRouter.get('/badge', requireAuth, asyncHandler(async (req, res) => {
+  res.json({ count: await svc.venueBadgeCount(req.user!.userId, req.user!.role) });
+}));
+venueRouter.post('/badge/seen', requireAuth, asyncHandler(async (req, res) => {
+  await svc.markVenueBadgeSeen(req.user!.userId, req.user!.role);
+  res.json({ ok: true });
+}));
+
 // Status of forwarded requests (awaiting Super Admin / approved / rejected).
 venueRouter.get('/forwarded', ...coordinatorOnly, asyncHandler(async (_req, res) => {
   res.json({ bookings: await svc.listCoordinatorForwarded() });

@@ -28,7 +28,7 @@
  *   - cancelSession already existed; exposed via the conflict resolution screen.
  */
 import { sql } from 'kysely';
-import { db, isPgError } from '../../db/index.js';
+import { db, isPgError, type NotificationType } from '../../db/index.js';
 import { AppError, badRequest, notFound, conflict } from '../../middleware/errors.js';
 import { sendEmail } from '../../lib/email.js';
 import { materializeAllocations } from './equipment.js';
@@ -1393,4 +1393,40 @@ export async function markNeedsRescheduling(sessionId: string, staffId: string, 
   } catch (e) {
     throw mapDbError(e);
   }
+}
+
+// ── Sidebar badge: unread venue notifications ──
+// Same idea as the Messages badge — a number next to the role's venue link:
+//   EXTERNAL    → "Book a Venue": their request was approved / rejected (or later changed)
+//   COORDINATOR → "Venue Queue": a new request arrived, or the Super Admin decided one they forwarded
+//   SUPER_ADMIN → "Venue Approvals": a Coordinator forwarded a request for a decision
+// Cleared when the user opens that page (markVenueBadgeSeen).
+const VENUE_BADGE_TYPES: Record<string, NotificationType[]> = {
+  EXTERNAL: ['BOOKING_APPROVED', 'BOOKING_REJECTED', 'BOOKING_CANCELLED', 'BOOKING_POSTPONED', 'BOOKING_RESCHEDULED'],
+  COORDINATOR: ['QUEUE_NEW_ITEM', 'ITEM_APPROVED_UPSTREAM', 'ITEM_REJECTED_UPSTREAM', 'ITEM_RETURNED_FOR_REEVAL'],
+  SUPER_ADMIN: ['ITEM_FORWARDED'],
+};
+
+export async function venueBadgeCount(userId: string, role: string): Promise<number> {
+  const types = VENUE_BADGE_TYPES[role];
+  if (!types) return 0;
+  const r = await db.selectFrom('notification')
+    .select((eb) => eb.fn.countAll<string>().as('n'))
+    .where('recipient_id', '=', userId)
+    .where('booking_id', 'is not', null) // venue notifications only (borrow ones share some types)
+    .where('type', 'in', types)
+    .where('read_at', 'is', null)
+    .executeTakeFirst();
+  return Number(r?.n ?? 0);
+}
+
+export async function markVenueBadgeSeen(userId: string, role: string): Promise<void> {
+  const types = VENUE_BADGE_TYPES[role];
+  if (!types) return;
+  await db.updateTable('notification').set({ read_at: sql`now()` })
+    .where('recipient_id', '=', userId)
+    .where('booking_id', 'is not', null)
+    .where('type', 'in', types)
+    .where('read_at', 'is', null)
+    .execute();
 }

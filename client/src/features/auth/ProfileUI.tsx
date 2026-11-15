@@ -371,7 +371,7 @@ export function WarnBanner({ children }: { children: ReactNode }) {
 
 export function StatusPill({ status }: { status: string }) {
   let bg: string = palette.slate100, fg: string = palette.slate500;
-  if (['APPROVED', 'ACTIVE', 'COMPLETED'].includes(status)) { bg = palette.okBg; fg = palette.okText; }
+  if (['APPROVED', 'ACTIVE', 'COMPLETED', 'COMPLETED_EARLY'].includes(status)) { bg = palette.okBg; fg = palette.okText; }
   else if (['REJECTED', 'CANCELLED', 'COMPLETED_LATE', 'COMPLETED_DAMAGED'].includes(status)) { bg = palette.errorBg; fg = palette.errorText; }
   return <span style={{ font: '700 10.5px ui-monospace, "JetBrains Mono", monospace', padding: '3px 9px', borderRadius: 999, background: bg, color: fg, whiteSpace: 'nowrap' }}>{status}</span>;
 }
