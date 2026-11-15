@@ -22,6 +22,9 @@ describe('Coach rulebook', () => {
   it('contains the core borrowing and booking rules', () => {
     expect(rules).toMatch(/same day/);
     expect(rules).toMatch(/no later than 5:00 pm/);
+    expect(rules).toMatch(/You can request in advance/);
+    expect(rules).toMatch(/Weekdays only \(Monday to Friday\)/);
+    expect(rules).toMatch(/Completed — Earlier/);
     expect(rules).toMatch(/no grace period/);
   });
 
@@ -63,6 +66,9 @@ describe('Coach system prompt', () => {
     expect(prompt).toMatch(/Never use Hindi\/Devanagari characters/);
     expect(prompt).toMatch(/closest thing the student CAN do/);
     expect(prompt).toMatch(/2–3 rules from the RULEBOOK/);
+    // Borrow questions that name a sport/item are in scope, and advance requests are allowed.
+    expect(prompt).toMatch(/Naming a sport or an item does NOT make a question out of scope/);
+    expect(prompt).toMatch(/can request in advance for any weekday/);
   });
 
   it('builds the welcome message with the Coach name', () => {

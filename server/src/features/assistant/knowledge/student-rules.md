@@ -2,7 +2,7 @@
 
 This is the only source Coach uses for **rules and procedures**. Live facts (stock, free slots,
 the student's own requests and bookings) come from tools, never from this file.
-Every rule here was checked against the code and confirmed by the team on 14 Nov 2026 (venue rules updated 15 Nov 2026: students can no longer book a venue).
+Every rule here was checked against the code and confirmed by the team on 14 Nov 2026 (venue rules updated 15 Nov 2026: students can no longer book a venue; borrow rules updated 16 Nov 2026: weekdays only, requests in advance allowed, early returns recorded).
 If you change a rule in the app, update this file in the same commit.
 
 All dates and times are campus time (Asia/Karachi).
@@ -51,44 +51,52 @@ All dates and times are campus time (Asia/Karachi).
 
 **Who and when**
 1. Only students can borrow through the portal.
-2. A borrow starts and ends on the **same day**.
-3. The date must be today or later. The start time must be **no later than 5:00 pm** and not in the past.
-4. Each item has a **maximum borrow time** set by staff, up to 24 hours. When several items are borrowed together, the **shortest** limit applies to all of them.
+2. **You can request in advance.** Pick **today or any later weekday** (e.g. tomorrow, next Tuesday). You don't have to wait for the day itself.
+3. The borrow window (start and return time) must be **on one day**: you collect and return on the **same day** you picked. "Same day" is about the window, not about when you submit the request.
+4. **Weekdays only (Monday to Friday).** Equipment is not lent on Saturdays or Sundays.
+5. Times are between **8:00 am and 5:00 pm**: the start time is **no later than 5:00 pm**, and a start time that has **already passed** can't be picked.
+6. Each item has a **maximum borrow time** set by staff, up to 24 hours. When several items are borrowed together, the **shortest** limit applies to all of them.
 
 **Submitting a request**
 
-5. You can have only **one pending request** at a time. Items submitted together count as one request.
-6. You can't request an item that has **0 available** or that has been retired.
-7. After a request is **rejected**, there is a **cooldown** before you can submit again (currently **30 minutes**). The tool reports the exact time left. The cooldown **does not apply to kit requests**.
-8. **Kit request:** you can request all items of one sport in one go, only when the kit is fully Available. The per-item maximum borrow time **does not apply** to kit requests.
-9. If you still have equipment out, **return it before borrowing again**.
-10. Students **can't cancel** a borrow request in the app. To cancel, message the Coordinator.
+7. You can have only **one pending request** at a time. Items submitted together count as one request.
+8. You can't request an item that has **0 available** or that has been retired.
+9. After a request is **rejected**, there is a **cooldown** before you can submit again (currently **30 minutes**). The tool reports the exact time left. The cooldown **does not apply to kit requests**.
+10. **Kit request:** you can request all items of one sport in one go, only when the kit is fully Available. The per-item maximum borrow time **does not apply** to kit requests.
+11. If you still have equipment out, **return it before borrowing again**.
+12. Students **can't cancel** a borrow request in the app. To cancel, message the Coordinator.
 
 **Approval and collection**
 
-11. The Coordinator approves or rejects. A rejection always comes with a reason.
-12. If nobody reviews the request before its start time, it becomes **Expired** and you are notified. You can submit a new one.
-13. Once approved, collect it **on the requested day, before your return time**, at the sports office. Bring your **university card**. The Coordinator checks the card's enrollment number against your account and keeps the card until you return the equipment.
-14. If an approved request isn't collected before its return time, it shows as **Not collected**. You need a new request.
-15. Paired items are handed out and returned **as a pair**.
+13. The Coordinator approves or rejects. A rejection always comes with a reason.
+14. If nobody reviews the request before its start time, it becomes **Expired** and you are notified. You can submit a new one.
+15. Once approved, collect it **on the requested day, before your return time**, at the sports office. Bring your **university card**. The Coordinator checks the card's enrollment number against your account and keeps the card until you return the equipment.
+16. If an approved request isn't collected before its return time, it shows as **Not collected**. You need a new request.
+17. Paired items are handed out and returned **as a pair**.
 
 **Returning**
 
-16. **All items** must come back to close the loan. If only some come back, it shows as **Partly returned**.
-17. Staff record the condition as Good, Worn, or Damaged.
-18. There is **no grace period**. Returning at any time after the agreed return time counts as **late**.
-19. If an item comes back late **and** damaged, it is recorded as **damaged** only.
-20. When the return time passes, the loan becomes **Overdue**. You get a "Late submission" alert and the Coordinator is notified.
-21. Late and damaged returns stay on your record permanently. Three or more late returns flag you to staff. There is **no automatic penalty**.
+18. **All items** must come back to close the loan. If only some come back, it shows as **Partly returned**.
+19. Staff record the condition as Good, Worn, or Damaged.
+20. There is **no grace period**. Returning at any time after the agreed return time counts as **late**.
+21. If an item comes back late **and** damaged, it is recorded as **damaged** only.
+22. When the return time passes, the loan becomes **Overdue**. You get a "Late submission" alert and the Coordinator is notified.
+23. Late and damaged returns stay on your record permanently. Three or more late returns flag you to staff. There is **no automatic penalty**.
 
 **Borrowing Activity (reputation)**
 
-22. Never look up or state the student's own numbers. Point them to **My Profile → Borrowing Activity**, which shows:
+24. Never look up or state the student's own numbers. Point them to **My Profile → Borrowing Activity**, which shows:
     - **Total borrows**: completed loans
     - **Late returns**: loans returned after the agreed time
     - **Damaged returns**: loans where an item came back damaged
 
-**Borrow request stages a student may see:** Pending, Ready to collect (approved), On loan, Overdue, Partly returned, Returned, Returned late, Not collected, Rejected, Expired, Cancelled.
+**Borrow request stages a student may see:** Pending, Ready to collect (approved), On loan, Overdue, Partly returned, Returned, Returned early, Returned late, Not collected, Rejected, Expired, Cancelled.
+
+**How a finished borrow is recorded in Usage History**
+- Returned in the **last 10 minutes** of the window (e.g. 3:50–4:00 pm for a 3–4 pm borrow) → **Completed**
+- Returned **earlier** than that (e.g. 3:30 pm) → **Completed — Earlier**. Returning early is fine and is not a penalty.
+- Returned **after** the return time → **Completed — Late**
+- Any item damaged → **Completed — Damaged**
 
 ---
 
