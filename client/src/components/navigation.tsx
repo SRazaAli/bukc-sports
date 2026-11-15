@@ -71,7 +71,8 @@ export function getNavItems(role: UserRole): NavItem[] {
   if (role === 'SUPER_ADMIN' || role === 'COORDINATOR') {
     push({ key: 'active-borrows', label: 'Active Borrows', to: '/active-borrows', section: 'Equipment', icon: <ClipboardIcon /> });
   }
-  if (role === 'STUDENT' || role === 'EXTERNAL') {
+  // Venue booking is for external users only (BUKC students can't book a venue).
+  if (role === 'EXTERNAL') {
     push({ key: 'book-venue', label: 'Book a Venue', to: '/book-venue', section: 'Venues', icon: <PinIcon /> });
   }
   if (role === 'COORDINATOR') {

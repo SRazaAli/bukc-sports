@@ -1,8 +1,11 @@
 /**
  * Venue booking routes (Feature 5 + Feature 9).
  *
- * Feature 5: Students/External submit; Coordinator reviews+forwards; Super
- * Admin decides. Mirrors the DB's authority triggers.
+ * Feature 5 (current rules): only EXTERNAL users submit (BUKC students can't
+ * book a venue). Coordinator reviews + checks conflicts and forwards external
+ * requests; the Super Admin approves or rejects (with a reason) and the
+ * requester is notified with the schedule or the reason. Mirrors the DB's
+ * authority triggers.
  *
  * Feature 9 additions:
  *   GET  /venue/conflicts         — advisory view of current approved sessions
@@ -26,6 +29,9 @@ import * as v from './validators.js';
 export const venueRouter = Router();
 
 const requester = [requireAuth, requireRole('STUDENT', 'EXTERNAL')] as const;
+// New requests: externals only. (`requester` stays for legacy student bookings
+// that still need a response — sent back / shortfall — and their own list.)
+const externalOnly = [requireAuth, requireRole('EXTERNAL')] as const;
 const coordinatorOnly = [requireAuth, requireRole('COORDINATOR')] as const;
 const superAdminOnly = [requireAuth, requireRole('SUPER_ADMIN')] as const;
 const anyStaff = [requireAuth, requireRole('SUPER_ADMIN', 'COORDINATOR')] as const;
@@ -63,10 +69,9 @@ venueRouter.delete('/venues/:id', ...superAdminOnly, asyncHandler(async (req, re
 }));
 
 // ── requester ──
-venueRouter.post('/bookings', ...requester, asyncHandler(async (req, res) => {
+venueRouter.post('/bookings', ...externalOnly, asyncHandler(async (req, res) => {
   const input = parse(v.submitBookingSchema, req.body);
-  const origin = req.user!.role === 'STUDENT' ? 'CLIENT' : 'EXTERNAL';
-  const created = await svc.submitBooking(req.user!.userId, origin, input);
+  const created = await svc.submitBooking(req.user!.userId, input);
   res.status(201).json({ booking: { bookingId: created.booking_id } });
 }));
 venueRouter.get('/bookings/mine', ...requester, asyncHandler(async (req, res) => {
@@ -76,6 +81,10 @@ venueRouter.get('/bookings/mine', ...requester, asyncHandler(async (req, res) =>
 // ── coordinator ──
 venueRouter.get('/queue', ...coordinatorOnly, asyncHandler(async (_req, res) => {
   res.json({ queue: await svc.listCoordinatorQueue() });
+}));
+// Status of forwarded requests (awaiting Super Admin / approved / rejected).
+venueRouter.get('/forwarded', ...coordinatorOnly, asyncHandler(async (_req, res) => {
+  res.json({ bookings: await svc.listCoordinatorForwarded() });
 }));
 venueRouter.post('/bookings/:id/forward', ...coordinatorOnly, asyncHandler(async (req, res) => {
   const input = parse(v.feasibilityNoteSchema, req.body);
@@ -91,7 +100,9 @@ venueRouter.post('/academic-events', ...coordinatorOnly, asyncHandler(async (req
   res.status(201).json({ booking: { bookingId: created.booking_id } });
 }));
 
-// ── shared reject (Coordinator at PENDING, Super Admin at FORWARDED) ──
+// ── shared reject (Super Admin at FORWARDED; Coordinator only for academic /
+//    legacy requests at PENDING — external requests are never rejected by the
+//    Coordinator, the service enforces that) ──
 venueRouter.post('/bookings/:id/reject', ...anyStaff, asyncHandler(async (req, res) => {
   const input = parse(v.rejectBookingSchema, req.body);
   await svc.rejectBooking(reqId(req), req.user!.userId, req.user!.role as 'COORDINATOR' | 'SUPER_ADMIN', input.reason);

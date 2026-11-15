@@ -58,10 +58,14 @@ async function notifyStaffRole(role: 'COORDINATOR' | 'SUPER_ADMIN', type: import
     staff.map((s) => ({ recipient_id: s.user_id, type, title, body, booking_id: bookingId ?? null })),
   ).execute();
 }
-async function notifyRequester(type: import('../../db/index.js').NotificationType, userId: string, title: string, body: string, bookingId: string) {
+async function notifyRequester(type: import('../../db/index.js').NotificationType, userId: string, title: string, body: string, bookingId: string, html?: string) {
   const user = await db.selectFrom('app_user').select(['email']).where('user_id', '=', userId).executeTakeFirst();
   await db.insertInto('notification').values({ recipient_id: userId, type, title, body, booking_id: bookingId }).execute();
-  if (user) sendEmail({ to: user.email, subject: title, html: `<p>${body}</p>`, text: body }).catch((e) => console.error('notifyRequester email failed:', e));
+  if (user) sendEmail({ to: user.email, subject: title, html: html ?? `<p>${escapeHtml(body)}</p>`, text: body }).catch((e) => console.error('notifyRequester email failed:', e));
+}
+
+function escapeHtml(v: string): string {
+  return v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
 // ── venues ──
@@ -400,21 +404,22 @@ async function assertSlotsFree(exec: Exec, venueId: number, vName: string, sessi
 }
 
 // ── submission (VENUE-04..14, VENUE-06/35/36 multi-session) ──
-export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXTERNAL', input: {
+// Only EXTERNAL users can request a venue (BUKC students no longer book).
+// The request carries sport, number of teams and every team's members
+// (name, university name, free-text university ID) plus the session windows.
+export async function submitBooking(requesterId: string, input: {
   venueId: number; estimatedParticipants: number; sessions: SessionInput[];
-  metadata: import('./validators.js').BookingMetadata;
+  metadata: import('./validators.js').ExternalEventMeta;
 }) {
   validateSessions(input.sessions); // incl. no past dates, match hours only, no overlapping sessions
   const vName = await venueName(input.venueId);
 
-  // Derive a human-readable purpose string from metadata for coordinator display
   const meta = input.metadata;
-  let purposeSummary: string;
-  if (meta.bookingType === 'INTER_UNIVERSITY') {
-    purposeSummary = `Inter-University ${meta.matchFormat} — ${meta.sport} vs ${meta.visitingUniversity}`;
-  } else {
-    purposeSummary = `Internal ${meta.matchFormat} — ${meta.sport}: ${meta.teamAName} vs ${meta.teamBName}`;
-  }
+  // Participants are the members actually listed — not a separate guess.
+  const memberCount = meta.teams.reduce((n, t) => n + t.members.length, 0);
+  // Human-readable title for queues, calendar and conflict screens.
+  const teamNames = meta.teams.map((t) => t.teamName);
+  const purposeSummary = `${meta.sport} — ${meta.teams.length} team${meta.teams.length === 1 ? '' : 's'}: ${teamNames.join(' vs ')}`;
 
   // Clear out stale requests first, so an old request for a date that has
   // already passed doesn't count as this requester's "active" booking.
@@ -424,33 +429,38 @@ export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXT
     const bookingId = await db.transaction().execute(async (trx) => {
       await lockVenue(trx, input.venueId);
 
-      // VENUE-07: one active booking (PENDING/FORWARDED) at a time.
-      const active = await trx.selectFrom('booking').select('booking_id')
+      // VENUE-07: one active booking at a time — PENDING/FORWARDED, or an
+      // APPROVED booking that still has upcoming sessions (uq_one_active_booking).
+      const active = await trx.selectFrom('booking').select(['booking_id', 'status'])
         .where('requested_by', '=', requesterId)
-        .where('status', 'in', ['PENDING', 'FORWARDED'])
+        .where((eb) => eb.or([
+          eb('status', 'in', ['PENDING', 'FORWARDED']),
+          eb.and([eb('status', '=', 'APPROVED'), eb('holds_future_slot', '=', true)]),
+        ]))
         .executeTakeFirst();
-      if (active) throw conflict('You already have an active booking request.', 'ACTIVE_REQUEST');
+      if (active) {
+        throw conflict(active.status === 'APPROVED'
+          ? 'You already have an approved booking with upcoming sessions. You can request another venue once those sessions are over.'
+          : 'You already have an active booking request.', 'ACTIVE_REQUEST');
+      }
 
       // Approved bookings AND requests still waiting for a decision.
       await assertSlotsFree(trx, input.venueId, vName, input.sessions, 'requester');
 
       const row = await trx.insertInto('booking').values({
-        venue_id: input.venueId, origin, requested_by: requesterId,
+        venue_id: input.venueId, origin: 'EXTERNAL', requested_by: requesterId,
         purpose: purposeSummary.slice(0, 300),
-        estimated_participants: input.estimatedParticipants,
+        estimated_participants: memberCount,
         booking_type: meta.bookingType,
         booking_metadata: JSON.stringify(meta),
       }).returning('booking_id').executeTakeFirstOrThrow();
 
       for (const s of input.sessions) {
-        // teamName in session_request = BUKC team name for inter-uni, Team A for internal
-        const sessionTeamName = meta.bookingType === 'INTER_UNIVERSITY'
-          ? meta.bukcTeamName : meta.teamAName;
         await trx.insertInto('booking_session_request').values({
           booking_id: row.booking_id, session_no: s.sessionNo,
           requested_start_at: s.requestedStartAt, requested_end_at: s.requestedEndAt,
-          team_name: s.teamName || sessionTeamName || '',
-          participant_details: s.participantDetails ?? null,
+          team_name: (s.teamName || teamNames.join(' vs ')).slice(0, 120),
+          participant_details: s.participantDetails ?? `${meta.teams.length} team(s), ${memberCount} member(s)`,
         }).execute();
       }
 
@@ -463,7 +473,7 @@ export async function submitBooking(requesterId: string, origin: 'CLIENT' | 'EXT
 
     const sessionCount = input.sessions.length;
     await notifyStaffRole('COORDINATOR', 'QUEUE_NEW_ITEM', 'New venue booking request',
-      `A new ${sessionCount > 1 ? `${sessionCount}-session ` : ''}${meta.bookingType === 'INTER_UNIVERSITY' ? 'inter-university' : 'internal'} booking request is awaiting review.`, bookingId);
+      `A new ${sessionCount > 1 ? `${sessionCount}-session ` : ''}external booking request for ${vName} (${meta.sport}, ${meta.teams.length} team${meta.teams.length === 1 ? '' : 's'}) is awaiting review.`, bookingId);
 
     return { booking_id: bookingId };
   } catch (e) { throw mapDbError(e); }
@@ -570,26 +580,38 @@ export async function getSessionRequests(bookingId: string) {
 export async function forwardBooking(bookingId: string, coordinatorId: string, note: string | undefined) {
   try {
     await expireStaleBookings();
-    const b = await db.selectFrom('booking').select(['status', 'venue_id']).where('booking_id', '=', bookingId).executeTakeFirst();
+    const b = await db.selectFrom('booking').select(['status', 'venue_id', 'booking_type']).where('booking_id', '=', bookingId).executeTakeFirst();
     if (!b) throw notFound('Booking not found.');
     assertNotExpired(b.status);
     if (b.status !== 'PENDING') throw conflict(`Booking is already ${b.status}.`);
 
     // VENUE-11: complete upfront validation across every session before forwarding.
     const sessions = await getSessionRequests(bookingId);
-    const conflicts = await findConflictingSessions(b.venue_id, sessions.map((s) => ({
+    const sessionInputs = sessions.map((s) => ({
       sessionNo: s.session_no, requestedStartAt: s.requested_start_at as unknown as string,
       requestedEndAt: s.requested_end_at as unknown as string, teamName: s.team_name,
-    })));
+    }));
+    const conflicts = await findConflictingSessions(b.venue_id, sessionInputs);
+
+    // External requests: the Coordinator checks conflicts and ALWAYS forwards —
+    // the Super Admin is the only one who approves or rejects. Any conflict found
+    // is attached to the note so the Super Admin sees it and can reject with a reason.
+    let finalNote = note?.trim() || null;
     if (conflicts.length > 0) {
-      throw conflict(`Session(s) ${conflicts.join(', ')} now conflict with an approved booking — cannot forward as-is.`, 'PRELIMINARY_CONFLICT');
+      if (b.booking_type !== 'EXTERNAL_EVENT') {
+        throw conflict(`Session(s) ${conflicts.join(', ')} now conflict with an approved booking — cannot forward as-is.`, 'PRELIMINARY_CONFLICT');
+      }
+      const list = sessionInputs.filter((s) => conflicts.includes(s.sessionNo))
+        .map((s) => `session ${s.sessionNo} (${fmtWindow(s.requestedStartAt, s.requestedEndAt)})`).join(', ');
+      const flag = `⚠ Conflict check: ${list} overlap${conflicts.length === 1 ? 's' : ''} an approved booking at this venue.`;
+      finalNote = finalNote ? `${flag}\n${finalNote}` : flag;
     }
 
     await db.updateTable('booking')
-      .set({ status: 'FORWARDED', forwarded_by: coordinatorId, forwarded_at: sql`now()`, feasibility_note: note ?? null })
+      .set({ status: 'FORWARDED', forwarded_by: coordinatorId, forwarded_at: sql`now()`, feasibility_note: finalNote })
       .where('booking_id', '=', bookingId).execute();
     await db.insertInto('approval_action').values({
-      subject: 'VENUE_BOOKING', verb: 'FORWARD', booking_id: bookingId, actor_id: coordinatorId, note: note ?? null,
+      subject: 'VENUE_BOOKING', verb: 'FORWARD', booking_id: bookingId, actor_id: coordinatorId, note: finalNote,
     }).execute();
     await notifyStaffRole('SUPER_ADMIN', 'ITEM_FORWARDED', 'Venue booking forwarded for approval',
       'A Coordinator forwarded a venue booking request for your decision.', bookingId);
@@ -599,10 +621,17 @@ export async function forwardBooking(bookingId: string, coordinatorId: string, n
 export async function rejectBooking(bookingId: string, actorId: string, actorRole: 'COORDINATOR' | 'SUPER_ADMIN', reason: string) {
   try {
     await expireStaleBookings();
-    const b = await db.selectFrom('booking').select(['status', 'requested_by']).where('booking_id', '=', bookingId).executeTakeFirst();
+    const b = await db.selectFrom('booking as b')
+      .innerJoin('venue as v', 'v.venue_id', 'b.venue_id')
+      .select(['b.status', 'b.requested_by', 'b.booking_type', 'b.forwarded_by', 'v.name as venue_name'])
+      .where('b.booking_id', '=', bookingId).executeTakeFirst();
     if (!b) throw notFound('Booking not found.');
     if (b.status === 'EXPIRED') throw conflict('This request has already expired — there is nothing left to reject.', 'EXPIRED');
     if (!['PENDING', 'FORWARDED'].includes(b.status)) throw conflict(`Booking is already ${b.status}.`);
+    // External requests: only the Super Admin rejects (after the Coordinator forwards).
+    if (b.booking_type === 'EXTERNAL_EVENT' && actorRole !== 'SUPER_ADMIN') {
+      throw new AppError(403, 'External booking requests are approved or rejected by the Super Admin. Review the conflicts and forward the request instead.', 'SUPER_ADMIN_DECIDES');
+    }
 
     // fn_booking_authority_guard treats decided_by/decided_at as Super-Admin-
     // only fields (VENUE-19). A Coordinator's direct rejection at PENDING
@@ -621,8 +650,21 @@ export async function rejectBooking(bookingId: string, actorId: string, actorRol
       subject: 'VENUE_BOOKING', verb: 'REJECT', booking_id: bookingId, actor_id: actorId, note: reason,
     }).execute();
     if (b.requested_by) {
-      await notifyRequester('BOOKING_REJECTED', b.requested_by, 'Your venue booking was rejected',
-        `Reason: ${reason}`, bookingId);
+      const sessions = await getSessionRequests(bookingId);
+      const when = sessions.map((s) => fmtWindow(s.requested_start_at, s.requested_end_at)).join('; ');
+      const body = `Your booking request for ${b.venue_name} (${when}) was rejected. Reason: ${reason}`;
+      await notifyRequester('BOOKING_REJECTED', b.requested_by, 'Your venue booking was rejected', body, bookingId,
+        `<p>Your booking request for <strong>${escapeHtml(b.venue_name)}</strong> was rejected.</p>`
+        + `<p><strong>Reason:</strong> ${escapeHtml(reason)}</p>`
+        + `<p>Requested: ${escapeHtml(when)}</p>`);
+    }
+    // The Coordinator who forwarded it sees the outcome too.
+    if (actorRole === 'SUPER_ADMIN' && b.forwarded_by) {
+      await db.insertInto('notification').values({
+        recipient_id: b.forwarded_by, type: 'ITEM_REJECTED_UPSTREAM', booking_id: bookingId,
+        title: 'Forwarded venue booking rejected',
+        body: `The Super Admin rejected the ${b.venue_name} request. Reason: ${reason}. The requester has been notified.`,
+      }).execute();
     }
   } catch (e) { throw mapDbError(e); }
 }
@@ -642,15 +684,24 @@ export async function listSuperAdminQueue() {
 
 export async function approveBooking(bookingId: string, superAdminId: string) {
   await expireStaleBookings();
-  const b = await db.selectFrom('booking')
-    .select(['status', 'venue_id', 'requested_by'])
-    .where('booking_id', '=', bookingId).executeTakeFirst();
+  const b = await db.selectFrom('booking as b')
+    .innerJoin('venue as v', 'v.venue_id', 'b.venue_id')
+    .select(['b.status', 'b.venue_id', 'b.requested_by', 'b.booking_type', 'b.booking_metadata', 'b.forwarded_by',
+      'v.name as venue_name', 'v.location as venue_location'])
+    .where('b.booking_id', '=', bookingId).executeTakeFirst();
   if (!b) throw notFound('Booking not found.');
   assertNotExpired(b.status);
   if (b.status !== 'FORWARDED') throw conflict(`Booking is already ${b.status}.`);
 
   const sessions = await getSessionRequests(bookingId);
   if (sessions.length === 0) throw badRequest('Booking has no session requests.');
+
+  // External requests: every listed member becomes a session participant
+  // (first member of each team is the team contact).
+  const meta = (b.booking_metadata
+    ? (typeof b.booking_metadata === 'string' ? JSON.parse(b.booking_metadata) : b.booking_metadata)
+    : null) as { bookingType?: string; sport?: string; teams?: Array<{ teamName: string; members: Array<{ fullName: string; universityName: string; universityId: string }> }> } | null;
+  const externalTeams = b.booking_type === 'EXTERNAL_EVENT' && meta?.teams?.length ? meta.teams : null;
 
   try {
     await db.transaction().execute(async (trx) => {
@@ -670,10 +721,19 @@ export async function approveBooking(bookingId: string, superAdminId: string) {
           slot: sql`tstzrange(${s.requested_start_at}::timestamptz, ${s.requested_end_at}::timestamptz, '[)')`,
         }).returning('session_id').executeTakeFirstOrThrow();
 
-        await trx.insertInto('session_participant').values({
-          session_id: session.session_id, team_name: s.team_name,
-          member_name: s.participant_details ?? 'See booking details', is_team_contact: true,
-        }).execute();
+        if (externalTeams) {
+          await trx.insertInto('session_participant').values(
+            externalTeams.flatMap((t) => t.members.map((m, i) => ({
+              session_id: session.session_id, team_name: t.teamName, member_name: m.fullName,
+              member_identifier: `${m.universityId} · ${m.universityName}`.slice(0, 200), is_team_contact: i === 0,
+            }))),
+          ).execute();
+        } else {
+          await trx.insertInto('session_participant').values({
+            session_id: session.session_id, team_name: s.team_name,
+            member_name: s.participant_details ?? 'See booking details', is_team_contact: true,
+          }).execute();
+        }
 
         // VENUE-13: materialize the Coordinator's planned equipment allocation
         // for this session into the real, post-approval table.
@@ -704,10 +764,50 @@ export async function approveBooking(bookingId: string, superAdminId: string) {
     throw mapDbError(e);
   }
 
+  // Notify the requester with the confirmed schedule.
   if (b.requested_by) {
-    await notifyRequester('BOOKING_APPROVED', b.requested_by, 'Your venue booking was approved',
-      `Your ${sessions.length > 1 ? `${sessions.length}-session ` : ''}venue booking is confirmed. Check the calendar for details.`, bookingId);
+    const where = `${b.venue_name}${b.venue_location ? `, ${b.venue_location}` : ''}`;
+    const lines = sessions.map((s) => `Session ${s.session_no}: ${fmtWindow(s.requested_start_at, s.requested_end_at)}`);
+    const body = `Your venue booking is approved. Venue: ${where}${meta?.sport ? ` · Sport: ${meta.sport}` : ''}. Schedule — ${lines.join('; ')}.`;
+    const html = `<p>Your venue booking has been <strong>approved</strong>.</p>`
+      + `<p><strong>Venue:</strong> ${escapeHtml(where)}${meta?.sport ? `<br/><strong>Sport:</strong> ${escapeHtml(meta.sport)}` : ''}`
+      + `${externalTeams ? `<br/><strong>Teams:</strong> ${escapeHtml(externalTeams.map((t) => t.teamName).join(', '))}` : ''}</p>`
+      + `<p><strong>Schedule</strong></p><ul>${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`
+      + `<p>Please arrive on time and bring your university ID cards.</p>`;
+    await notifyRequester('BOOKING_APPROVED', b.requested_by, 'Your venue booking was approved', body, bookingId, html);
   }
+  // The Coordinator who forwarded it sees the outcome too.
+  if (b.forwarded_by) {
+    await db.insertInto('notification').values({
+      recipient_id: b.forwarded_by, type: 'ITEM_APPROVED_UPSTREAM', booking_id: bookingId,
+      title: 'Forwarded venue booking approved',
+      body: `The Super Admin approved the ${b.venue_name} request (${sessions.length} session${sessions.length === 1 ? '' : 's'}). The requester has been sent the schedule.`,
+    }).execute();
+  }
+}
+
+// ── Coordinator: status of requests they have forwarded ──
+// FORWARDED = waiting for the Super Admin; APPROVED / REJECTED = decided
+// (the requester was notified automatically with the schedule or the reason).
+const FORWARDED_VISIBLE_DAYS = 30;
+export async function listCoordinatorForwarded() {
+  await expireStaleBookings();
+  const rows = await db.selectFrom('booking as b')
+    .innerJoin('venue as v', 'v.venue_id', 'b.venue_id')
+    .leftJoin('app_user as u', 'u.user_id', 'b.requested_by')
+    .leftJoin('app_user as f', 'f.user_id', 'b.forwarded_by')
+    .select(['b.booking_id', 'b.origin', 'b.booking_type', 'b.purpose', 'b.estimated_participants', 'b.status',
+      'b.forwarded_at', 'b.decided_at', 'b.rejection_reason', 'b.feasibility_note',
+      'v.venue_id', 'v.name as venue_name', 'u.full_name as requester_name', 'u.email as requester_email',
+      'f.full_name as forwarded_by_name'])
+    .where('b.forwarded_at', 'is not', null)
+    .where('b.status', 'in', ['FORWARDED', 'APPROVED', 'REJECTED', 'EXPIRED', 'COMPLETED'])
+    .where((eb) => eb.or([
+      eb('b.status', '=', 'FORWARDED'),
+      eb(sql<Date>`coalesce(b.decided_at, b.expired_at, b.forwarded_at)`, '>', sql<Date>`now() - make_interval(days => ${FORWARDED_VISIBLE_DAYS})`),
+    ]))
+    .orderBy('b.forwarded_at', 'desc').execute();
+  return attachSessionSummary(rows);
 }
 
 // ── Coordinator: send booking back to requester (VENUE-12) ──
@@ -723,12 +823,15 @@ export async function sendBackToRequester(
   try {
     await expireStaleBookings();
     const b = await db.selectFrom('booking')
-      .select(['status', 'requested_by', 'purpose'])
+      .select(['status', 'requested_by', 'purpose', 'booking_type'])
       .where('booking_id', '=', bookingId)
       .executeTakeFirst();
     if (!b) throw notFound('Booking not found.');
     assertNotExpired(b.status);
     if (b.status !== 'PENDING') throw conflict(`Cannot send back — booking is ${b.status}.`);
+    if (b.booking_type === 'EXTERNAL_EVENT') {
+      throw conflict('External booking requests are not sent back — check conflicts and forward them to the Super Admin.', 'FORWARD_ONLY');
+    }
 
     // A proposed alternative schedule follows the same rules as a new request:
     // no past dates, no overlapping sessions.

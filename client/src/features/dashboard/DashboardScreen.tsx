@@ -564,7 +564,7 @@ function UpcomingCard({ ins }: { ins: DashboardInsights }) {
                 <div className="adb-event-body" style={{ borderColor: color }}>
                   <strong title={e.title}>{e.title}</strong>
                   <span>{e.venue} · {fmtTime(e.start)} – {fmtTime(e.end)}</span>
-                  {e.bookingType && <em>{e.bookingType === 'INTER_UNIVERSITY' ? 'Inter-university' : 'Internal'}</em>}
+                  {e.bookingType && <em>{e.bookingType === 'EXTERNAL_EVENT' ? 'External' : e.bookingType === 'INTER_UNIVERSITY' ? 'Inter-university' : 'Internal'}</em>}
                 </div>
               </li>
             );

@@ -134,7 +134,8 @@ export default function App() {
           <Route
             path="/book-venue"
             element={
-              <RequireRole roles={['STUDENT', 'EXTERNAL']}>
+              /* Externals only — BUKC students can't book a venue. */
+              <RequireRole roles={['EXTERNAL']}>
                 <MyBookingsScreen />
               </RequireRole>
             }

@@ -357,7 +357,7 @@ export interface VenueSportTable {
   sport_category_id: number;
 }
 
-export type BookingEventType = 'INTER_UNIVERSITY' | 'INTERNAL';
+export type BookingEventType = 'INTER_UNIVERSITY' | 'INTERNAL' | 'EXTERNAL_EVENT';
 
 export interface BookingTable {
   booking_id: Generated<string>;

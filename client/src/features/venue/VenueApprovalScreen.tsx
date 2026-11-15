@@ -522,6 +522,11 @@ function DecisionPanel({ item, onBack, onDone, onError }: {
         <Row label="Sessions" value={`${item.sessionCount}${item.firstStart ? ` · from ${new Date(item.firstStart).toLocaleDateString()}` : ''}`} />
         <Row label="Forwarded at" value={item.forwarded_at ? new Date(item.forwarded_at).toLocaleString() : '—'} />
         <Row label="Coordinator's note" value={item.feasibility_note ?? '—'} />
+        {item.feasibility_note?.startsWith('⚠') && (
+          <div style={{ margin: '8px 0 4px', padding: '9px 12px', borderRadius: 8, background: '#FDECEC', color: '#8F2323', fontSize: 13.5 }}>
+            The Coordinator found a conflict with an approved booking. Approving will fail for clashing sessions — reject with a reason instead.
+          </div>
+        )}
       </div>
 
       {/* Coordinator's proposed schedule (if any) */}
@@ -536,8 +541,51 @@ function DecisionPanel({ item, onBack, onDone, onError }: {
         </div>
       )}
 
-      {/* Pitch metadata summary */}
-      {meta && (
+      {/* External request: teams and every member's university details */}
+      {meta && meta.bookingType === 'EXTERNAL_EVENT' && (() => {
+        const teams = (meta.teams as Array<{ teamName: string; members: Array<{ fullName: string; universityName: string; universityId: string }> }> | undefined) ?? [];
+        return (
+          <div style={s.infoPanel}>
+            <div style={s.sectionLabel}>External Request — {String(meta.sport ?? '—')} · {teams.length} team{teams.length === 1 ? '' : 's'}</div>
+            {teams.map((t, ti) => (
+              <div key={ti} style={{ marginBottom: 12 }}>
+                <div style={{ font: '700 13.5px Inter, sans-serif', color: palette.navy900, marginBottom: 6 }}>
+                  Team {ti + 1}: {t.teamName} <span style={{ color: palette.slate400, fontWeight: 600 }}>({t.members.length})</span>
+                </div>
+                <div style={{ display: 'grid', gap: 4 }}>
+                  {t.members.map((m, mi) => (
+                    <div key={mi} className="va-detail-grid" style={{ display: 'grid', gridTemplateColumns: '28px 1.3fr 1.5fr 1fr', gap: 8, fontSize: 13.5, color: palette.navy900 }}>
+                      <span style={{ color: palette.slate400 }}>#{mi + 1}</span>
+                      <span>{m.fullName}</span>
+                      <span>{m.universityName}</span>
+                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 13 }}>{m.universityId}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {detail?.sessions && detail.sessions.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ ...s.sectionLabel, marginBottom: 6 }}>Requested date &amp; time</div>
+                {detail.sessions.map((ss) => (
+                  <div key={ss.request_session_id} style={{ fontSize: 13.5, color: palette.navy900, marginBottom: 3 }}>
+                    Session {ss.session_no}: {new Date(ss.requested_start_at).toLocaleDateString('en-PK', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} · {new Date(ss.requested_start_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}–{new Date(ss.requested_end_at).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                ))}
+              </div>
+            )}
+            {meta.specialRequirements ? (
+              <div style={{ marginTop: 8, fontSize: 13.5, color: palette.navy900 }}><strong>Special requirements:</strong> {String(meta.specialRequirements)}</div>
+            ) : null}
+            <div style={{ marginTop: 10, fontSize: 12.5, color: palette.slate500 }}>
+              Approving notifies the requester with this schedule. Rejecting notifies them with your reason.
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Pitch metadata summary (legacy student requests) */}
+      {meta && meta.bookingType !== 'EXTERNAL_EVENT' && (
         <div style={s.infoPanel}>
           <div style={s.sectionLabel}>Booking Pitch Details</div>
           <div style={{ display: 'grid', gap: 7 }}>
@@ -1102,7 +1150,7 @@ const s = {
 
   detailRow: { display: 'grid', gridTemplateColumns: '170px 1fr', gap: 4, padding: '11px 0', borderTop: `1px solid ${palette.slate100}` } as const,
   detailLabel: { font: '700 12.5px Inter, sans-serif', color: palette.slate500 } as const,
-  detailValue: { fontSize: 14.5, color: palette.navy900 } as const,
+  detailValue: { fontSize: 14.5, color: palette.navy900, whiteSpace: 'pre-line' } as const,
   detailTile: { background: palette.slate50, border: `1px solid ${palette.slate300}`, borderRadius: 12, padding: '11px 14px' } as const,
   sectionLabel: { font: '700 11.5px Inter, sans-serif', color: palette.slate500, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 } as const,
   infoPanel: { margin: '16px 0', padding: '14px 16px', background: palette.white, border: `1px solid ${palette.slate300}`, borderRadius: 14 } as const,
