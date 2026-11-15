@@ -29,6 +29,13 @@ const schema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   EMAIL_FROM: z.string().default('BUKC Sports <noreply@bukc-sports.dev>'),
+
+  // Feature 13 — AI assistant "Coach". Optional: the server starts without a
+  // key and the assistant answers "not set up yet". Keys live only in .env.
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default('gemini-3.5-flash-lite'),
+  GEMINI_FALLBACK_MODEL: z.string().default('gemini-3.5-flash-lite'),
+  ASSISTANT_ENABLED: z.enum(['true', 'false']).default('true'),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -44,6 +51,9 @@ if (config.EMAIL_PROVIDER === 'smtp' && (!config.SMTP_HOST || !config.SMTP_USER 
   console.error('EMAIL_PROVIDER=smtp requires SMTP_HOST, SMTP_USER, and SMTP_PASS to be set.');
   process.exit(1);
 }
+/** Coach is usable only when switched on AND a key is configured. */
+export const assistantConfigured = config.ASSISTANT_ENABLED === 'true' && !!config.GEMINI_API_KEY?.trim();
+
 export const isProd = config.NODE_ENV === 'production';
 export const isTest = config.NODE_ENV === 'test';
 

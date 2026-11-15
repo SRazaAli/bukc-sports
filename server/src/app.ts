@@ -22,6 +22,7 @@ import { dashboardRouter } from './features/dashboard/router.js';
 import { dashboardInsightsRouter } from './features/dashboard/insights.js';
 import { messagesRouter } from './features/messages/router.js';
 import { healthCheckRouter } from './features/healthcheck/router.js';
+import { assistantRouter } from './features/assistant/router.js';
 
 export function createApp() {
   const app = express();
@@ -62,6 +63,7 @@ export function createApp() {
   app.use('/api/dashboard', dashboardRouter); // Feature 12
   app.use('/api/dashboard-insights', dashboardInsightsRouter); // redesigned dashboard: read-only trends
   app.use('/api/messages', messagesRouter);   // chat with the Coordinator desk
+  app.use('/api/assistant', assistantRouter); // Feature 13 — Coach, the student AI assistant
   // ...
 
   // Error handler must be last

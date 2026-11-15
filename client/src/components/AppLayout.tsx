@@ -30,6 +30,7 @@ import { getNavItems, groupNavItems, isItemActive, ROLE_LABEL } from './navigati
 import { useInAppHistory, clearInAppHistory } from './useInAppHistory.js';
 import { BackStackProvider, useBackStackRegistry } from './backStack.js';
 import { useUnreadMessages } from './useUnreadMessages.js';
+import { CoachAssistant, clearCoachChat } from '../features/assistant/CoachAssistant.js';
 
 const COLLAPSE_KEY = 'bukc:sidebarCollapsed';
 function readCollapsed(): boolean {
@@ -89,6 +90,7 @@ export default function AppLayout() {
   async function onSignOut() {
     setSigningOut(true);
     clearInAppHistory();
+    clearCoachChat();
     try { await logout(); } finally { navigate('/'); }
   }
 
@@ -180,6 +182,8 @@ export default function AppLayout() {
           </div>
           <Outlet />
           <LateReturnAlert enabled={user?.role === 'STUDENT'} pathname={pathname} />
+          {/* Feature 13 — Coach, the student AI assistant (students only, every page) */}
+          {user.role === 'STUDENT' && <CoachAssistant key={user.userId} userId={user.userId} pathname={pathname} />}
         </main>
        </BackStackProvider>
       </AppShellContext.Provider>
