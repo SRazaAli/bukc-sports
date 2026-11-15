@@ -31,6 +31,7 @@ import CalendarScreen from './features/venue/CalendarScreen.js';
 import ConflictDetectionScreen from './features/venue/ConflictDetectionScreen.js';
 import UsageHistoryScreen from './features/history/UsageHistoryScreen.js';
 import DashboardScreen from './features/dashboard/DashboardScreen.js';
+import CoordinatorDashboardScreen from './features/coordinator-dashboard/CoordinatorDashboardScreen.js';
 import OfflineFallbackScreen from './features/offline/OfflineFallbackScreen.js';
 import MessagesScreen from './features/messages/MessagesScreen.js';
 import EquipmentHealthCheckScreen from './features/healthcheck/EquipmentHealthCheckScreen.js';
@@ -78,6 +79,15 @@ export default function App() {
             element={
               <RequireRole roles={['SUPER_ADMIN', 'COORDINATOR']}>
                 <DashboardScreen />
+              </RequireRole>
+            }
+          />
+
+          <Route
+            path="/coordinator-dashboard"
+            element={
+              <RequireRole roles={['COORDINATOR']}>
+                <CoordinatorDashboardScreen />
               </RequireRole>
             }
           />

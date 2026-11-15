@@ -45,6 +45,8 @@ export function getNavItems(role: UserRole): NavItem[] {
     push({ key: 'manage-accounts', label: 'Manage Accounts', to: '/admin/accounts', section: 'Account', icon: <PeopleIcon /> });
   }
   if (role === 'COORDINATOR') {
+    // Equipment health scans + inventory levels, with CSV downloads.
+    push({ key: 'coordinator-dashboard', label: 'Dashboard', to: '/coordinator-dashboard', section: 'Account', icon: <DashboardIcon /> });
     push({ key: 'view-accounts', label: 'View Accounts', to: '/admin/accounts', section: 'Account', icon: <EyeIcon /> });
   }
   if (role === 'SUPER_ADMIN' || role === 'COORDINATOR') {
