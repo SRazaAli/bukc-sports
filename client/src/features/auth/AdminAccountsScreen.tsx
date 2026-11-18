@@ -1201,7 +1201,7 @@ const s = {
   main: { flex: 1, position: 'relative', zIndex: 1, padding: '20px 24px 48px', width: '100%', maxWidth: 1040, margin: '0 auto', boxSizing: 'border-box' } as const,
   /* Frosted glassmorphism shell around everything below the header — hero
      title, tabs, banners, and every panel sit inside this one translucent
-     panel so the whole screen reads as a single "surface" floating over the
+     panel so the whole screen reads as a single "surface" floating over the 
      dark page, rather than separate opaque cards scattered directly on the
      navy background (same treatment as Usage History). */
   glassPanel: {
