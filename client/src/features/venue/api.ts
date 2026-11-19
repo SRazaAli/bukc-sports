@@ -90,7 +90,19 @@ export const updateVenue = (id: number, input: Partial<VenueFormInput> & { avail
 export const deleteVenue = (id: number) =>
   api<{ message: string }>(`/api/venue/venues/${id}`, { method: 'DELETE' });
 
-export type BookingMetadata =
+// External request (current rules). University ID is free text — no format.
+export interface ExternalMember { fullName: string; universityName: string; universityId: string }
+export interface ExternalTeam { teamName: string; members: ExternalMember[] }
+export interface ExternalEventMetadata {
+  bookingType: 'EXTERNAL_EVENT';
+  sport: string;
+  numberOfTeams: number;
+  teams: ExternalTeam[];
+  specialRequirements?: string;
+}
+
+// Legacy student pitches (read-only now — kept so old bookings still render).
+export type LegacyBookingMetadata =
   | {
       bookingType: 'INTER_UNIVERSITY';
       sport: string; eventFormat: string; matchFormat: string;
@@ -108,9 +120,11 @@ export type BookingMetadata =
       organizingEntity: string; specialRequirements?: string;
     };
 
+export type BookingMetadata = ExternalEventMetadata | LegacyBookingMetadata;
+
 export const submitBooking = (input: {
   venueId: number; estimatedParticipants: number; sessions: SessionInput[];
-  metadata: BookingMetadata;
+  metadata: ExternalEventMetadata;
 }) => api<{ booking: { bookingId: string } }>('/api/venue/bookings', { method: 'POST', body: input });
 
 // VENUE-28/29: Coordinator initiates a recurring academic event, same shape, no requester.
@@ -122,6 +136,17 @@ export const listMyBookings = () => api<{ bookings: MyBooking[] }>('/api/venue/b
 export const getBooking = (id: string) => api<BookingDetail>(`/api/venue/bookings/${id}`);
 
 export const listQueue = () => api<{ queue: QueueBooking[] }>('/api/venue/queue');
+
+/** Coordinator: requests they forwarded, with the Super Admin's outcome. */
+export interface ForwardedBooking {
+  booking_id: string; origin: string; booking_type: string | null; purpose: string; estimated_participants: number;
+  status: 'FORWARDED' | 'APPROVED' | 'REJECTED' | 'EXPIRED' | 'COMPLETED' | string;
+  forwarded_at: string; decided_at: string | null; rejection_reason: string | null; feasibility_note: string | null;
+  venue_id: number; venue_name: string; requester_name: string | null; requester_email: string | null;
+  forwarded_by_name: string | null;
+  sessionCount: number; firstStart: string | null; lastEnd: string | null;
+}
+export const listForwarded = () => api<{ bookings: ForwardedBooking[] }>('/api/venue/forwarded');
 export const forwardBooking = (id: string, note?: string) =>
   api<{ message: string }>(`/api/venue/bookings/${id}/forward`, { method: 'POST', body: { note } });
 
@@ -274,3 +299,7 @@ export const cancelSession = (sessionId: string, reason: string) =>
 // CONF-13: soft resolution — marks NEEDS_RESCHEDULING, releases the slot.
 export const markSessionNeedsRescheduling = (sessionId: string, reason: string) =>
   api<{ message: string }>(`/api/venue/sessions/${sessionId}/reschedule`, { method: 'POST', body: { reason } });
+
+// ── Sidebar badge (unread venue notifications for the signed-in role) ──
+export const getVenueBadge = () => api<{ count: number }>('/api/venue/badge');
+export const markVenueBadgeSeen = () => api<{ ok: boolean }>('/api/venue/badge/seen', { method: 'POST' });

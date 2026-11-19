@@ -14,6 +14,14 @@
  *           schedule + equipment changes + rich-text note) before sending.
  *           Also: Forward or Reject.
  *
+ * EXTERNAL requests (current rules): Details → Conflict Check → Forward. No
+ * equipment step, no alternative-schedule proposal, no Reject / Send Back — the
+ * Coordinator checks conflicts and forwards; only the Super Admin approves or
+ * rejects (with a reason). Any conflict found is attached to the forward note.
+ * "Forwarded Requests" on the main page shows each forwarded request's outcome
+ * (the requester is notified automatically: schedule on approval, reason on
+ * rejection).
+ *
  * Re-themed to the site's navy + glassmorphism language (same header, page
  * background, glow blobs, frosted glass shell, light soft-gradient cards and
  * #1C398E accent as Accounts / Conflict Detection / Venue Approvals).
@@ -25,10 +33,10 @@ import { useEffect, useState, useCallback, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.js';
 import {
-  listQueue, forwardBooking, rejectBooking, getBookingFull, listVenues,
+  listQueue, listForwarded, forwardBooking, rejectBooking, getBookingFull, listVenues,
   initiateAcademicEvent, planAllocation, sendBackToRequester,
   checkEquipmentForSessions, queryConflicts, listCalendar, getArticleAvailability,
-  type QueueBooking, type BookingDetailFull, type Venue, type CalendarSession,
+  type QueueBooking, type ForwardedBooking, type BookingDetailFull, type Venue, type CalendarSession,
   type ApprovedSession, type EquipmentAvailRow, type ArticleAvailGroup, type ArticleAvailEntry,
   type VenueAvailabilityStatus,
 } from './api.js';
@@ -45,6 +53,18 @@ function fmtDT(iso: string) { return new Date(iso).toLocaleString('en-PK', { day
 
 type ProposedSession = { sessionNo: number; startAt: string; endAt: string };
 const EXPIRED_PAGE_SIZE = 10;
+
+// Forwarded-request outcome labels/colours.
+const FWD_LABEL: Record<string, string> = {
+  FORWARDED: 'With Super Admin', APPROVED: 'Approved', REJECTED: 'Rejected', EXPIRED: 'Expired', COMPLETED: 'Completed',
+};
+const FWD_STYLE: Record<string, React.CSSProperties> = {
+  FORWARDED: { background: '#FDF1E3', color: '#9A6412' },
+  APPROVED: { background: '#E6F4EC', color: '#1F7A45' },
+  COMPLETED: { background: '#E6F4EC', color: '#1F7A45' },
+  REJECTED: { background: '#FDECEC', color: '#B3352B' },
+  EXPIRED: { background: '#E2E8F0', color: '#62748E' },
+};
 
 /* ---------- theme (same values as AdminAccountsScreen / ConflictDetectionScreen `palette`) ---------- */
 const palette = {
@@ -78,6 +98,8 @@ export default function VenueQueueScreen() {
   const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
   const [queue, setQueue] = useState<QueueBooking[] | null>(null);
+  const [forwarded, setForwarded] = useState<ForwardedBooking[] | null>(null);
+  const [forwardedFilter, setForwardedFilter] = useState<'ALL' | 'FORWARDED' | 'APPROVED' | 'REJECTED'>('ALL');
   const [selected, setSelected] = useState<QueueBooking | null>(null);
   const [showAcademic, setShowAcademic] = useState(false);
   const [venues, setVenues] = useState<Venue[]>([]);
@@ -92,8 +114,8 @@ export default function VenueQueueScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [q, v] = await Promise.all([listQueue(), listVenues()]);
-      setQueue(q.queue); setVenues(v.venues);
+      const [q, v, f] = await Promise.all([listQueue(), listVenues(), listForwarded()]);
+      setQueue(q.queue); setVenues(v.venues); setForwarded(f.bookings);
     } catch (e) { setError(errMsg(e)); }
     finally { setVenuesLoaded(true); }
   }, []);
@@ -168,7 +190,7 @@ export default function VenueQueueScreen() {
       ) : undefined}>
       {!showAcademic && (
         <p style={{ ...s.muted, margin: '0 0 16px' }}>
-          Recurring annual events — same review pipeline, no student requester. Venues available for events are listed below.
+          Recurring annual events — same review pipeline, no external requester. Venues available for events are listed below.
         </p>
       )}
       {!venuesLoaded ? <SkeletonRows rows={3} /> : venues.length === 0 ? (
@@ -231,8 +253,8 @@ export default function VenueQueueScreen() {
             <h1 style={s.heroTitle}>Venue Queue</h1>
             <p style={s.heroSubtitle}>
               {showAcademic
-                ? 'Put a recurring academic event on the calendar. It goes through the same review pipeline as student requests.'
-                : 'Track pending booking requests and upcoming academic calendar events.'}
+                ? 'Put a recurring academic event on the calendar. It goes through the same review pipeline as external requests.'
+                : 'Review external booking requests, check for conflicts and forward them to the Super Admin. Track the outcome of everything you have forwarded.'}
             </p>
           </div>
 
@@ -303,6 +325,7 @@ export default function VenueQueueScreen() {
             <>
               <div style={s.statRow}>
                 <StatCard label="Pending requests" value={pendingQueue?.length ?? 0} accent={palette.accent} icon={<InboxIcon />} />
+                <StatCard label="With Super Admin" value={forwarded?.filter((f) => f.status === 'FORWARDED').length ?? 0} accent="#9A6412" icon={<SendIcon />} />
                 <StatCard label="Academic events" value={academicCount} accent="#6B21A8" icon={<CalendarIcon />} />
                 <StatCard label="Expired (last 30 days)" value={expiredQueue.length} accent="#B3352B" icon={<ClockIcon size={17} />} />
                 <StatCard label="Venues available" value={availableVenues} accent="#1F7A45" icon={<CheckCircleIcon />} />
@@ -375,6 +398,75 @@ export default function VenueQueueScreen() {
                       <div style={s.tableFoot}>Showing {filteredQueue.length}{term ? ` of ${pendingQueue!.length}` : ''} request{filteredQueue.length !== 1 ? 's' : ''}</div>
                     </>
                   )}
+              </Panel>
+
+              {/* ── Forwarded requests: Super Admin's outcome ── */}
+              <Panel title="Forwarded Requests — Status" icon={<SendIcon />}
+                action={
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {(['ALL', 'FORWARDED', 'APPROVED', 'REJECTED'] as const).map((f) => (
+                      <button key={f} type="button" className="vq-btn"
+                        style={{ ...s.filterChip, ...(forwardedFilter === f ? s.filterChipActive : null) }}
+                        onClick={() => setForwardedFilter(f)}>
+                        {f === 'ALL' ? 'All' : FWD_LABEL[f]}
+                      </button>
+                    ))}
+                  </div>
+                }>
+                {forwarded === null ? <SkeletonRows rows={2} /> : (() => {
+                  const rows = forwardedFilter === 'ALL' ? forwarded : forwarded.filter((f) => f.status === forwardedFilter);
+                  if (forwarded.length === 0) return <EmptyState icon={<SendIcon />} text="Nothing forwarded in the last 30 days. Requests you forward to the Super Admin appear here with their outcome." />;
+                  if (rows.length === 0) return <EmptyState icon={<SearchIcon />} text="No forwarded requests with this status." action={{ label: 'Show all', onClick: () => setForwardedFilter('ALL') }} />;
+                  return (
+                    <>
+                      <div className="vq-table-wrap" style={s.tableWrap}>
+                        <table style={s.table}>
+                          <thead><tr>
+                            <th style={s.th}>Requester</th><th style={s.th}>Venue</th><th style={s.th}>Sessions</th>
+                            <th style={s.th}>Status</th><th className="vq-hide-mobile" style={s.th}>Outcome</th>
+                          </tr></thead>
+                          <tbody>
+                            {rows.map((f) => (
+                              <tr key={f.booking_id} className="vq-row">
+                                <td style={s.td}>
+                                  <div style={s.nameText}>{f.requester_name ?? 'BUKC Sports Dept.'}</div>
+                                  <div style={s.originText}>{f.purpose}</div>
+                                </td>
+                                <td style={s.td}>{f.venue_name}</td>
+                                <td style={s.td}>
+                                  {f.firstStart ? (
+                                    <>
+                                      <span style={{ display: 'block' }}>{f.sessionCount > 1 ? `${f.sessionCount} sessions` : fmtShortDate(f.firstStart)}</span>
+                                      <span style={{ display: 'block', color: palette.slate500, fontSize: 12.5 }}>
+                                        {f.sessionCount > 1 ? `from ${fmtShortDate(f.firstStart)}` : `${fmtTime(f.firstStart)}${f.lastEnd ? ` – ${fmtTime(f.lastEnd)}` : ''}`}
+                                      </span>
+                                    </>
+                                  ) : '—'}
+                                </td>
+                                <td style={s.td}>
+                                  <span style={{ ...s.badge, ...(FWD_STYLE[f.status] ?? FWD_STYLE.FORWARDED) }}>{FWD_LABEL[f.status] ?? f.status}</span>
+                                  <div style={{ ...s.subText, marginTop: 4 }}>
+                                    {f.decided_at ? `Decided ${fmtDT(f.decided_at)}` : `Forwarded ${fmtDT(f.forwarded_at)}`}
+                                  </div>
+                                </td>
+                                <td className="vq-hide-mobile" style={{ ...s.td, maxWidth: 280, fontSize: 13 }}>
+                                  {f.status === 'APPROVED' || f.status === 'COMPLETED'
+                                    ? <span style={{ color: '#1F7A45' }}>Requester notified with the confirmed schedule.</span>
+                                    : f.status === 'REJECTED'
+                                      ? <span style={{ color: '#8F2323' }}><strong>Reason:</strong> {f.rejection_reason ?? '—'}<br /><span style={{ color: palette.slate500 }}>Requester notified with this reason.</span></span>
+                                      : f.status === 'EXPIRED'
+                                        ? <span style={{ color: palette.slate500 }}>No decision before the first session.</span>
+                                        : <span style={{ color: palette.slate500 }}>Waiting for the Super Admin's decision.</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={s.tableFoot}>Showing {rows.length} of {forwarded.length} forwarded request{forwarded.length !== 1 ? 's' : ''} · decided requests stay here for 30 days</div>
+                    </>
+                  );
+                })()}
               </Panel>
 
               {expiredQueue.length > 0 && (() => {
@@ -555,7 +647,11 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
   const [detail, setDetail] = useState<BookingDetailFull | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(true);
   // Go back from step 2–4 returns to the previous step (step 1 → back to the queue).
-  useBackStep(step > 1, () => setStep((n) => (n > 1 ? n - 1 : n) as StepN), 1);
+  // External requests skip the equipment step (3).
+  const skipsEquipment = detail?.booking_type === 'EXTERNAL_EVENT';
+  const prevStep = (n: StepN): StepN => (n === 4 && skipsEquipment ? 2 : n > 1 ? n - 1 : n) as StepN;
+  const nextStepN = (n: StepN): StepN => (n === 2 && skipsEquipment ? 4 : Math.min(4, n + 1)) as StepN;
+  useBackStep(step > 1, () => setStep((n) => prevStep(n)), 1);
 
   // ── Step 2 persistent state ──
   const [conflictChecked, setConflictChecked] = useState(false);
@@ -652,12 +748,14 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
   });
   const equipStep3Pass = equipmentSupport === 'SELF' || (equipChecked && !hasSelectionMismatch);
 
+  const isExternal = detail.booking_type === 'EXTERNAL_EVENT';
   const STEPS = [
     { n: 1, label: 'Booking Details', pass: true },
     { n: 2, label: 'Conflict Check', pass: conflictChecked },
     { n: 3, label: 'Equipment', pass: equipStep3Pass },
-    { n: 4, label: 'Decision', pass: true },
-  ];
+    { n: 4, label: isExternal ? 'Forward' : 'Decision', pass: true },
+  ].filter((st) => !(isExternal && st.n === 3));
+  const stepIdx = Math.max(0, STEPS.findIndex((st) => st.n === step));
 
   return (
     <Panel title={`Review — ${requesterName}`} icon={<EyeIcon />}>
@@ -667,7 +765,7 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
           <div key={s.n} style={{ display: 'flex', alignItems: 'center', flex: i < STEPS.length - 1 ? 1 : 0 }}>
             <div className="vq-step-dot" data-done={step > s.n ? '1' : '0'} style={{ width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '700 13px Inter, sans-serif', flexShrink: 0, background: step > s.n ? '#1F7A45' : step === s.n ? '#1C398E' : '#E2E8F0', boxShadow: step === s.n ? '0 0 0 4px #DBEAFE' : 'none', color: step >= s.n ? '#fff' : '#8a949f', cursor: step > s.n ? 'pointer' : 'default' }}
               onClick={() => { if (step > s.n) setStep(s.n as StepN); }}>
-              {step > s.n ? '✓' : s.n}
+              {step > s.n ? '✓' : i + 1}
             </div>
             <span style={{ fontSize: 12, marginLeft: 6, color: step === s.n ? '#1C398E' : '#8a949f', fontWeight: step === s.n ? 700 : 400, whiteSpace: 'nowrap', flexShrink: 0 }}>{s.label}</span>
             {i < STEPS.length - 1 && <div style={{ flex: 1, height: 2, background: step > s.n ? '#1f8a4c' : '#e5e7eb', margin: '0 8px' }} />}
@@ -691,6 +789,7 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
           onProposedSessionsChange={setProposedSessions}
           onProposalRowsChange={setProposalRows}
           onShowProposalEditorChange={setShowProposalEditor}
+          allowProposal={!isExternal}
           onError={onError}
         />
       )}
@@ -723,6 +822,9 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
           selectedArticles={selectedArticles}
           articleGroups={articleGroups}
           requesterName={requesterName}
+          isExternal={isExternal}
+          stepNo={stepIdx + 1}
+          conflictCount={Object.values(sessionConflicts).filter((c) => c.length > 0).length}
           onDone={onDone}
           onError={onError}
           onBack={onBack}
@@ -730,13 +832,13 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24, paddingTop: 16, borderTop: '1px solid #CAD5E2' }}>
-        <button style={ghostBtn} onClick={step === 1 ? onBack : () => setStep((s) => (s - 1) as StepN)}>
+        <button style={ghostBtn} onClick={step === 1 ? onBack : () => setStep((s) => prevStep(s))}>
           {step === 1 ? '← Back to queue' : '← Previous'}
         </button>
         {step < 4 && (
           <button
-            style={{ ...primaryBtn, opacity: STEPS[step - 1]!.pass ? 1 : 0.4, cursor: STEPS[step - 1]!.pass ? 'pointer' : 'not-allowed' }}
-            disabled={!STEPS[step - 1]!.pass}
+            style={{ ...primaryBtn, opacity: STEPS[stepIdx]!.pass ? 1 : 0.4, cursor: STEPS[stepIdx]!.pass ? 'pointer' : 'not-allowed' }}
+            disabled={!STEPS[stepIdx]!.pass}
             onClick={async () => {
               // Auto-save equipment plan when leaving step 3
               if (step === 3 && equipmentSupport !== 'SELF' && requestedEquipment.length > 0) {
@@ -752,7 +854,7 @@ function ReviewPanel({ item, onBack, onDone, onError }: {
                 }));
                 try { await planAllocation(detail.booking_id, allocations, selArticlesArr); } catch { /* non-fatal */ }
               }
-              setStep((s) => (s + 1) as StepN);
+              setStep((s) => nextStepN(s));
             }}>
             Next →
           </button>
@@ -773,7 +875,17 @@ function Step1Details({ detail, meta }: { detail: BookingDetailFull; meta: Recor
     ...(detail.requester_email ? [['Email', detail.requester_email] as [string, string]] : []),
   ];
 
-  if (meta) {
+  const externalTeams = type === 'EXTERNAL_EVENT'
+    ? ((meta?.teams as Array<{ teamName: string; members: Array<{ fullName: string; universityName: string; universityId: string }> }> | undefined) ?? [])
+    : null;
+
+  if (meta && externalTeams) {
+    rows.push(['Booking type', 'External request']);
+    rows.push(['Sport', String(meta.sport ?? '—')]);
+    rows.push(['Number of teams', String(externalTeams.length)]);
+    rows.push(['Teams', externalTeams.map((t) => `${t.teamName} (${t.members.length})`).join(' · ')]);
+    if (meta.specialRequirements) rows.push(['Special requirements', String(meta.specialRequirements)]);
+  } else if (meta) {
     rows.push(['Booking type', type === 'INTER_UNIVERSITY' ? 'Inter-University Competition' : 'Internal Competition']);
     rows.push(['Sport', String(meta.sport ?? '—')]);
     rows.push(['Event format', `${String(meta.eventFormat ?? '—').replace('_', ' ')} · ${String(meta.matchFormat ?? '—').replace('_', ' ')}`]);
@@ -814,7 +926,25 @@ function Step1Details({ detail, meta }: { detail: BookingDetailFull; meta: Recor
           </div>
         ))}
       </div>
-      <span style={sectionLabel}>Sessions ({detail.sessions.length})</span>
+      {externalTeams && externalTeams.map((t, ti) => (
+        <div key={ti} style={{ marginBottom: 18 }}>
+          <span style={sectionLabel}>Team {ti + 1} — {t.teamName} ({t.members.length} member{t.members.length === 1 ? '' : 's'})</span>
+          <table style={{ ...tbl, marginTop: 8 }}>
+            <thead><tr><th style={th}>#</th><th style={th}>Name</th><th style={th}>University</th><th style={th}>University ID</th></tr></thead>
+            <tbody>
+              {t.members.map((m, mi) => (
+                <tr key={mi}>
+                  <td style={td}>{mi + 1}</td>
+                  <td style={td}>{m.fullName}</td>
+                  <td style={td}>{m.universityName}</td>
+                  <td style={{ ...td, fontFamily: 'ui-monospace, monospace', fontSize: 13 }}>{m.universityId}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+      <span style={sectionLabel}>Date &amp; time — {detail.sessions.length} session{detail.sessions.length === 1 ? '' : 's'}</span>
       <table style={{ ...tbl, marginTop: 8 }}>
         <thead><tr><th style={th}>#</th><th style={th}>Date</th><th style={th}>Time</th></tr></thead>
         <tbody>
@@ -832,7 +962,7 @@ function Step1Details({ detail, meta }: { detail: BookingDetailFull; meta: Recor
 }
 
 // ── Step 2: Conflict Check (stateless — all state passed from parent) ────────
-function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessionConflicts, calendarSessions, proposedSessions, proposalRows, showProposalEditor, onConflictChecked, onProposedSessionsChange, onProposalRowsChange, onShowProposalEditorChange, onError }: {
+function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessionConflicts, calendarSessions, proposedSessions, proposalRows, showProposalEditor, onConflictChecked, onProposedSessionsChange, onProposalRowsChange, onShowProposalEditorChange, allowProposal = true, onError }: {
   detail: BookingDetailFull;
   effectiveSessions: BookingDetailFull['sessions'];
   conflictChecked: boolean;
@@ -845,6 +975,8 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
   onProposedSessionsChange: (s: ProposedSession[] | null) => void;
   onProposalRowsChange: (rows: SessionRow[]) => void;
   onShowProposalEditorChange: (v: boolean) => void;
+  /** External requests: no alternative schedule — the Coordinator only checks and forwards. */
+  allowProposal?: boolean;
   onError: (m: string) => void;
 }) {
   const [checking, setChecking] = useState(false);
@@ -877,7 +1009,7 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
         perSession[s.request_session_id] = conflictRes.sessions.filter((a) => sS < new Date(a.ends_at) && sE > new Date(a.starts_at));
       }
       onConflictChecked(perSession, calRes.sessions);
-      if (conflictRes.sessions.length > 0) onShowProposalEditorChange(true);
+      if (allowProposal && conflictRes.sessions.length > 0) onShowProposalEditorChange(true);
     } catch (e) { onError(errMsg(e)); } finally { setChecking(false); }
   }
 
@@ -895,7 +1027,9 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
       <h3 style={stepTitle}>Step 2 — Conflict Check</h3>
       <p style={{ margin: '0 0 16px', fontSize: 14, color: '#5c6773' }}>
         Compare proposed sessions against all approved bookings at <strong>{detail.venue_name}</strong>.
-        Run the check to proceed. If conflicts are found, propose an alternative schedule below.
+        {allowProposal
+          ? ' Run the check to proceed. If conflicts are found, propose an alternative schedule below.'
+          : ' Run the check to proceed. Conflicts don\'t stop you forwarding — they are attached to the request so the Super Admin can decide.'}
       </p>
 
       <button style={primaryBtn} disabled={checking} onClick={runCheck}>
@@ -938,7 +1072,7 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
           })}
 
           {/* Propose alternative schedule */}
-          <div style={{ marginTop: 16 }}>
+          {allowProposal && <div style={{ marginTop: 16 }}>
             {!showProposalEditor && (
               <button style={{ ...ghostBtn, fontSize: 13 }} onClick={() => onShowProposalEditorChange(true)}>
                 {hasConflicts ? 'Propose an alternative schedule' : 'Propose an alternative schedule anyway…'}
@@ -968,7 +1102,7 @@ function Step2ConflictCheck({ detail, effectiveSessions, conflictChecked, sessio
                 </div>
               </div>
             )}
-          </div>
+          </div>}
         </div>
       )}
 
@@ -1177,7 +1311,7 @@ function Step3Equipment({ bookingId, effectiveSessions, requestedEquipment, equi
 }
 
 
-function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEquipment, selectedArticles, articleGroups, requesterName, onDone, onError, onBack }: {
+function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEquipment, selectedArticles, articleGroups, requesterName, isExternal = false, stepNo = 4, conflictCount = 0, onDone, onError, onBack }: {
   item: QueueBooking;
   detail: BookingDetailFull;
   proposedSessions: ProposedSession[] | null;
@@ -1186,6 +1320,10 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
   selectedArticles: Record<number, string[]>;
   articleGroups: ArticleAvailGroup[];
   requesterName: string;
+  /** External request: Forward only (Super Admin approves / rejects). */
+  isExternal?: boolean;
+  stepNo?: number;
+  conflictCount?: number;
   onDone: (m: string) => void;
   onError: (m: string) => void;
   onBack: () => void;
@@ -1212,7 +1350,12 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
 
   async function forward() {
     setBusy(true);
-    try { await forwardBooking(item.booking_id, feasNote || undefined); onDone('Forwarded to Super Admin.'); }
+    try {
+      await forwardBooking(item.booking_id, feasNote || undefined);
+      onDone(isExternal
+        ? 'Forwarded to the Super Admin. Track the outcome under Forwarded Requests — the requester is notified automatically.'
+        : 'Forwarded to Super Admin.');
+    }
     catch (e) { onError(errMsg(e)); } finally { setBusy(false); }
   }
   async function reject() {
@@ -1234,7 +1377,14 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
 
   return (
     <div>
-      <h3 style={stepTitle}>Step 4 — Decision</h3>
+      <h3 style={stepTitle}>Step {stepNo} — {isExternal ? 'Forward to Super Admin' : 'Decision'}</h3>
+      {isExternal && (
+        <div style={{ ...(conflictCount > 0 ? box.err : box.ok), marginBottom: 16 }}>
+          {conflictCount > 0
+            ? `${conflictCount} session${conflictCount === 1 ? '' : 's'} conflict with approved bookings. You can still forward — the conflict will be attached to your note so the Super Admin can reject it with a reason.`
+            : 'Conflict check clear. Forward this request to the Super Admin for approval.'}
+        </div>
+      )}
 
       {/* Review summary */}
       <div style={{ background: '#f7f9fb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 18px', marginBottom: 20 }}>
@@ -1273,9 +1423,9 @@ function Step4Decision({ item, detail, proposedSessions, equipQty, requestedEqui
             <textarea style={{ ...textarea, width: '100%' }} rows={3} value={feasNote} onChange={(e) => setFeasNote(e.target.value)} placeholder="e.g. Conflict check clear. Equipment plan saved. Recommend approval." />
           </div>
           <div style={actionRow}>
-            <button style={acceptBtn} disabled={busy} onClick={forward}>Forward to Super Admin</button>
-            <button style={rejectBtn} onClick={() => setMode('reject')}>Reject…</button>
-            <button style={warnBtn} onClick={() => setMode('sendback')}>Send Back to {requesterName}…</button>
+            <button style={acceptBtn} disabled={busy} onClick={forward}>{busy ? 'Forwarding…' : 'Forward to Super Admin'}</button>
+            {!isExternal && <button style={rejectBtn} onClick={() => setMode('reject')}>Reject…</button>}
+            {!isExternal && item.origin !== 'ACADEMIC' && <button style={warnBtn} onClick={() => setMode('sendback')}>Send Back to {requesterName}…</button>}
             <button style={ghostBtn} onClick={onBack}>← Back to queue</button>
           </div>
         </div>
@@ -1706,6 +1856,8 @@ const s = {
   linkBtn: { display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', font: '700 13px Inter, sans-serif', color: palette.accent, cursor: 'pointer', padding: '4px 8px' } as const,
   rowChevron: { display: 'inline-flex', verticalAlign: 'middle', color: palette.slate400, marginLeft: 12 } as const,
 
+  filterChip: { border: `1px solid ${palette.slate300}`, background: palette.white, color: palette.slate500, borderRadius: 999, padding: '5px 12px', font: '600 12.5px Inter, sans-serif', cursor: 'pointer' } as const,
+  filterChipActive: { background: palette.accent, borderColor: palette.accent, color: '#fff' } as const,
   statRow: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 22 } as const,
   statCard: { display: 'flex', alignItems: 'center', gap: 12, background: palette.slate50, border: `1px solid ${palette.slate300}`, borderRadius: 14, padding: '12px 14px' } as const,
   statIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, borderRadius: 10 } as const,

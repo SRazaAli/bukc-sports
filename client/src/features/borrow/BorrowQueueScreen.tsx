@@ -10,6 +10,11 @@
  *      their university card. The coordinator searches the student, types the
  *      enrollment number printed on the card (must match the account) and
  *      picks the articles. The server re-checks both rules.
+ *   3. Submitted — the lent request stays under "On loan" until the student
+ *      hands everything back at the desk. The coordinator presses Submitted:
+ *      Usage History records Completed — Earlier (well before the end),
+ *      Completed (last 10 min of the window) or Completed — Late (after it).
+ *   No lending on Saturdays/Sundays or once the window has ended.
  */
 import { useEffect, useState, useCallback } from 'react';
 import { Navigate } from 'react-router-dom';
@@ -24,7 +29,8 @@ import {
 } from './api.js';
 import {
   getDeskOverview, lendWithCard, normalizeEnrollment, notifyBorrowBadgesChanged,
-  type DeskOverview, type ReadyGroup,
+  listOnLoan, markSubmitted, previewOutcome, OUTCOME_LABEL,
+  type DeskOverview, type ReadyGroup, type OnLoanGroup,
 } from './deskApi.js';
 import { listTypes, type EquipmentType } from '../inventory/api.js';
 import { ApiRequestError } from '../../lib/api.js';
@@ -120,11 +126,14 @@ export default function BorrowQueueScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showWalkin, setShowWalkin] = useState(false);
+  const [onLoan, setOnLoan] = useState<OnLoanGroup[] | null>(null);
+  const [confirmSubmit, setConfirmSubmit] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [q, d] = await Promise.all([listQueue(), getDeskOverview()]);
-      setQueue(q.queue); setDesk(d);
+      const [q, d, l] = await Promise.all([listQueue(), getDeskOverview(), listOnLoan()]);
+      setQueue(q.queue); setDesk(d); setOnLoan(l.loans);
     } catch (e) { setError(errMsg(e)); }
   }, []);
   useEffect(() => {
@@ -151,6 +160,18 @@ export default function BorrowQueueScreen() {
   const shownPending = groups.filter((g) => matches(search, g.studentName, g.studentEmail, enrollmentOf(g.studentId)));
   const ready = desk?.ready ?? [];
   const shownReady = ready.filter((g) => matches(search, g.studentName, g.studentEmail, g.enrollmentNo));
+  const loans = onLoan ?? [];
+  const shownLoans = loans.filter((g) => matches(search, g.borrowerName, g.borrowerEmail ?? '', g.enrollmentNo ?? g.guestIdNumber));
+
+  async function handleSubmitted(g: OnLoanGroup) {
+    setSubmitting(g.key);
+    try {
+      const r = await markSubmitted(g.txnIds);
+      setConfirmSubmit(null);
+      flash.ok(`Marked as submitted for ${g.borrowerName} — recorded as ${OUTCOME_LABEL[r.outcome] ?? r.outcome} in Usage History.`);
+    } catch (e) { flash.err(errMsg(e)); }
+    finally { setSubmitting(null); }
+  }
 
   // Keep selection in sync after reload
   const syncedGroup = selectedGroup
@@ -251,6 +272,78 @@ export default function BorrowQueueScreen() {
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              )}
+            </Panel>
+
+            <Panel title={`On loan — Awaiting submission${loans.length ? ` (${loans.length})` : ''}`}>
+              {onLoan === null ? (
+                <p style={muted}>Loading…</p>
+              ) : shownLoans.length === 0 ? (
+                <p style={muted}>{loans.length === 0 ? 'Nothing on loan right now.' : 'No loan matches your search.'}</p>
+              ) : (
+                <table style={table}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Student</th>
+                      <th style={th}>Items</th>
+                      <th style={th}>Borrow window</th>
+                      <th style={th} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shownLoans.map((g) => {
+                      const late = g.overdue;
+                      const confirming = confirmSubmit === g.key;
+                      const outcome = previewOutcome(g.returnAt);
+                      const outcomeColor = outcome === 'COMPLETED_LATE' ? '#9A6412' : outcome === 'COMPLETED_EARLY' ? '#1D4ED8' : '#15803d';
+                      return (
+                        <tr key={g.key}>
+                          <td style={td}>
+                            <span style={sName}>{g.borrowerName}</span>
+                            <span style={sEmail}>
+                              {g.isGuest ? `Guest · ID ${g.guestIdNumber ?? '—'}` : (g.enrollmentNo ?? g.borrowerEmail ?? '')}
+                              {!g.isGuest && g.department ? ` · ${g.department}` : ''}
+                            </span>
+                          </td>
+                          <td style={td}>
+                            {g.items.length > 1 && <span style={countBadge}>{g.items.length}</span>}
+                            <span style={itemNames}>{g.items.map((i) => i.equipmentTypeName).join(', ')}</span>
+                            {g.items.some((i) => i.barcodes) && (
+                              <span style={{ display: 'block', color: '#6b7280', fontSize: 12, marginTop: 2 }}>
+                                {g.items.map((i) => i.barcodes).filter(Boolean).join(', ')}
+                              </span>
+                            )}
+                          </td>
+                          <td style={td}>
+                            {fmtDate(g.startAt)}
+                            {late ? <span style={lateTag}>Late</span> : <span style={todayTag}>On loan</span>}<br />
+                            <span style={{ color: '#6b7280', fontSize: 12 }}>{fmtTime(g.startAt)} – {fmtTime(g.returnAt)}</span>
+                          </td>
+                          <td style={{ ...td, textAlign: 'right', maxWidth: 260 }}>
+                            {!confirming ? (
+                              <button style={submittedBtn} onClick={() => setConfirmSubmit(g.key)}
+                                title="The student has handed the equipment back at the desk">
+                                Submitted
+                              </button>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                                <span style={{ fontSize: 12, color: outcomeColor, fontWeight: 600 }}>
+                                  Will be recorded as {OUTCOME_LABEL[outcome]}
+                                </span>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <button style={submittedBtn} disabled={submitting === g.key} onClick={() => handleSubmitted(g)}>
+                                    {submitting === g.key ? 'Saving…' : 'Confirm'}
+                                  </button>
+                                  <button style={cancelBtn} disabled={submitting === g.key} onClick={() => setConfirmSubmit(null)}>Cancel</button>
+                                </div>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -1119,3 +1212,5 @@ const resolveBtn: React.CSSProperties = { background: NAVY.accent, color: '#fff'
 const resolvedCard: React.CSSProperties = { marginTop: 8, padding: '10px 14px', borderRadius: 7, background: '#f0fdf4', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: 2 };
 const resolvedName: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: '#065f46' };
 const resolvedDetail: React.CSSProperties = { fontSize: 12, color: '#047857' };
+const submittedBtn: React.CSSProperties = { background: '#1F7A45', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
+const lateTag: React.CSSProperties = { display: 'inline-block', marginLeft: 6, background: '#FDF1E3', color: '#9A6412', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700 };

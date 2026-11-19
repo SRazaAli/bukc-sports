@@ -20,7 +20,7 @@ export interface NavItem {
   /** Other route prefixes that belong to this item (keeps it highlighted on sub-pages). */
   alsoActiveOn?: string[];
   /** Shows a live unread-count badge next to the label. */
-  badge?: 'messages' | 'borrowQueue' | 'myBorrowRequests' | 'equipmentAlerts';
+  badge?: 'messages' | 'borrowQueue' | 'myBorrowRequests' | 'equipmentAlerts' | 'venue';
 }
 
 export const SECTION_ORDER: NavSection[] = ['Account', 'Equipment', 'Venues', 'Records'];
@@ -45,6 +45,8 @@ export function getNavItems(role: UserRole): NavItem[] {
     push({ key: 'manage-accounts', label: 'Manage Accounts', to: '/admin/accounts', section: 'Account', icon: <PeopleIcon /> });
   }
   if (role === 'COORDINATOR') {
+    // Equipment health scans + inventory levels, with CSV downloads.
+    push({ key: 'coordinator-dashboard', label: 'Dashboard', to: '/coordinator-dashboard', section: 'Account', icon: <DashboardIcon /> });
     push({ key: 'view-accounts', label: 'View Accounts', to: '/admin/accounts', section: 'Account', icon: <EyeIcon /> });
   }
   if (role === 'SUPER_ADMIN' || role === 'COORDINATOR') {
@@ -71,15 +73,16 @@ export function getNavItems(role: UserRole): NavItem[] {
   if (role === 'SUPER_ADMIN' || role === 'COORDINATOR') {
     push({ key: 'active-borrows', label: 'Active Borrows', to: '/active-borrows', section: 'Equipment', icon: <ClipboardIcon /> });
   }
-  if (role === 'STUDENT' || role === 'EXTERNAL') {
-    push({ key: 'book-venue', label: 'Book a Venue', to: '/book-venue', section: 'Venues', icon: <PinIcon /> });
+  // Venue booking is for external users only (BUKC students can't book a venue).
+  if (role === 'EXTERNAL') {
+    push({ key: 'book-venue', label: 'Book a Venue', to: '/book-venue', section: 'Venues', icon: <PinIcon />, badge: 'venue' });
   }
   if (role === 'COORDINATOR') {
-    push({ key: 'venue-queue', label: 'Venue Queue', to: '/venue-queue', section: 'Venues', icon: <QueueIcon /> });
+    push({ key: 'venue-queue', label: 'Venue Queue', to: '/venue-queue', section: 'Venues', icon: <QueueIcon />, badge: 'venue' });
     push({ key: 'equipment-alerts', label: 'Equipment Alerts', to: '/equipment-alerts', section: 'Equipment', icon: <BellIcon />, badge: 'equipmentAlerts' });
   }
   if (role === 'SUPER_ADMIN') {
-    push({ key: 'venue-approvals', label: 'Venue Approvals', to: '/venue-approvals', section: 'Venues', icon: <ShieldCheckIcon /> });
+    push({ key: 'venue-approvals', label: 'Venue Approvals', to: '/venue-approvals', section: 'Venues', icon: <ShieldCheckIcon />, badge: 'venue' });
   }
   if (role === 'SUPER_ADMIN' || role === 'COORDINATOR') {
     push({ key: 'conflict-detection', label: 'Conflict Detection', to: '/conflict-detection', section: 'Venues', icon: <AlertIcon /> });
@@ -101,6 +104,13 @@ export function groupNavItems(items: NavItem[]): Array<{ section: NavSection; it
     .map((section) => ({ section, items: items.filter((i) => i.section === section) }))
     .filter((g) => g.items.length > 0);
 }
+
+/** The page whose sidebar link carries the venue badge, per role. */
+export const VENUE_BADGE_PAGE: Partial<Record<string, string>> = {
+  EXTERNAL: '/book-venue',
+  COORDINATOR: '/venue-queue',
+  SUPER_ADMIN: '/venue-approvals',
+};
 
 export function isItemActive(item: NavItem, pathname: string): boolean {
   if (pathname === item.to || pathname.startsWith(item.to + '/')) return true;

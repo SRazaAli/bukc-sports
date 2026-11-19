@@ -41,6 +41,7 @@ import { sql } from 'kysely';
 import { db, isPgError, type ConditionLabel } from '../../db/index.js';
 import { AppError, badRequest, notFound, conflict } from '../../middleware/errors.js';
 import type { FallbackBookingInput, FallbackBorrowInput, FallbackReturnInput } from './validators.js';
+import { returnOutcome } from '../borrow/returnOutcome.js';
 
 function mapDbError(e: unknown): AppError {
   if (isPgError(e)) {
@@ -450,8 +451,7 @@ export async function enterFallbackReturn(
           .where('borrow_txn_id', '=', input.borrowTxnId)
           .execute();
       } else {
-        finalStatus = label === 'DAMAGED' ? 'COMPLETED_DAMAGED'
-          : isLate ? 'COMPLETED_LATE' : 'COMPLETED';
+        finalStatus = returnOutcome(returnedAt, txn.agreed_return_at, label === 'DAMAGED');
 
         // ck_completed_ret requires actual_return_at IS NOT NULL when status LIKE 'COMPLETED%'.
         await trx.updateTable('borrow_transaction')

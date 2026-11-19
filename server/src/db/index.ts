@@ -218,7 +218,7 @@ export interface VArticleAvailability {
 // ── Borrowing domain (Feature 3) ──
 export type BorrowPath = 'PLATFORM' | 'WALK_IN';
 export type BorrowRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'EXPIRED';
-export type BorrowTxnStatus = 'ACTIVE' | 'OVERDUE' | 'INCOMPLETE' | 'COMPLETED' | 'COMPLETED_LATE' | 'COMPLETED_DAMAGED';
+export type BorrowTxnStatus = 'ACTIVE' | 'OVERDUE' | 'INCOMPLETE' | 'COMPLETED' | 'COMPLETED_EARLY' | 'COMPLETED_LATE' | 'COMPLETED_DAMAGED';
 export type NotificationType =
   | 'ACCOUNT_VERIFIED' | 'BOOKING_APPROVED' | 'BOOKING_REJECTED' | 'BOOKING_CANCELLED'
   | 'BOOKING_POSTPONED' | 'BOOKING_RESCHEDULED' | 'EQUIPMENT_SHORTFALL'
@@ -357,7 +357,7 @@ export interface VenueSportTable {
   sport_category_id: number;
 }
 
-export type BookingEventType = 'INTER_UNIVERSITY' | 'INTERNAL';
+export type BookingEventType = 'INTER_UNIVERSITY' | 'INTERNAL' | 'EXTERNAL_EVENT';
 
 export interface BookingTable {
   booking_id: Generated<string>;

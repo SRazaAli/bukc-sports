@@ -68,6 +68,19 @@ function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+/** Sat/Sun — equipment is not lent on weekends. */
+function isWeekend(date: string) {
+  const d = new Date(`${date}T12:00:00`).getDay();
+  return d === 0 || d === 6;
+}
+/** Today if it's a weekday with time left before closing, otherwise the next weekday. */
+function firstBorrowableDate() {
+  const d = new Date();
+  const lateToday = d.getHours() * 60 + d.getMinutes() >= CLOSE_HH * 60 - 5;
+  if (lateToday) d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 function nowMinTime(date: string) {
   const today = todayStr();
   if (date !== today) return `${String(OPEN_HH).padStart(2, '0')}:00`;
@@ -91,7 +104,7 @@ export default function EquipmentBorrowScreen() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   // Form
-  const [date, setDate] = useState(todayStr);
+  const [date, setDate] = useState(firstBorrowableDate);
   const [startTime, setStartTime] = useState(smartStart);
   const [endTime, setEndTime] = useState(() => smartEnd(smartStart(), 480));
   const [submitting, setSubmitting] = useState(false);
@@ -157,6 +170,18 @@ export default function EquipmentBorrowScreen() {
     };
     const requestedStartAt = toISO(date, startTime);
     const requestedReturnAt = toISO(date, endTime);
+
+    // Weekdays only, and not a time that has already passed.
+    if (isWeekend(date)) {
+      setFormError('Equipment is not lent on Saturdays or Sundays. Pick a weekday (Mon–Fri).');
+      setSubmitting(false);
+      return;
+    }
+    if (new Date(requestedStartAt).getTime() <= Date.now()) {
+      setFormError('That start time has already passed. Pick a later time or another day.');
+      setSubmitting(false);
+      return;
+    }
 
     // Validate duration client-side before hitting the server
     const durationMin = (new Date(requestedReturnAt).getTime() - new Date(requestedStartAt).getTime()) / 60_000;
@@ -340,7 +365,9 @@ export default function EquipmentBorrowScreen() {
                           const newStart = nowMinTime(newDate);
                           setStartTime(newStart);
                           setEndTime(smartEnd(newStart, effectiveMaxMinutes));
+                          setFormError(newDate && isWeekend(newDate) ? 'Equipment is not lent on Saturdays or Sundays. Pick a weekday (Mon–Fri).' : null);
                         }} required />
+                        <span style={{ fontSize: 12, color: '#62748E', marginTop: 4 }}>Weekdays only (Mon–Fri), 8:00 am – 5:00 pm</span>
                       </div>
                       <div style={field}>
                         <label style={fieldLabel}>Start time</label>

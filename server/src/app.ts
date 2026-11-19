@@ -20,6 +20,7 @@ import { historyRouter } from './features/history/router.js';
 import { offlineRouter } from './features/offline/router.js';
 import { dashboardRouter } from './features/dashboard/router.js';
 import { dashboardInsightsRouter } from './features/dashboard/insights.js';
+import { coordinatorDashboardRouter } from './features/coordinator-dashboard/router.js';
 import { messagesRouter } from './features/messages/router.js';
 import { healthCheckRouter } from './features/healthcheck/router.js';
 import { assistantRouter } from './features/assistant/router.js';
@@ -62,6 +63,7 @@ export function createApp() {
   app.use('/api/offline', offlineRouter);   // Feature 11
   app.use('/api/dashboard', dashboardRouter); // Feature 12
   app.use('/api/dashboard-insights', dashboardInsightsRouter); // redesigned dashboard: read-only trends
+  app.use('/api/coordinator-dashboard', coordinatorDashboardRouter); // equipment health scans + inventory levels, CSV exports
   app.use('/api/messages', messagesRouter);   // chat with the Coordinator desk
   app.use('/api/assistant', assistantRouter); // Feature 13 — Coach, the student AI assistant
   // ...

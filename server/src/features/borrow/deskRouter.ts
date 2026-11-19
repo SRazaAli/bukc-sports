@@ -7,6 +7,8 @@
  *   GET  /overview               coordinator: approved requests ready to collect + enrollment lookup
  *   POST /groups/:groupId/lend   coordinator: lend after checking the university card (requested day only)
  *   GET  /active                 staff: live active borrows with enrollment no. and borrow window
+ *   GET  /on-loan                coordinator: Borrow Queue "On loan" list (lent, not yet submitted)
+ *   POST /submitted              coordinator: student handed everything back → Completed / Completed late
  *   GET  /mine/history           student: full borrow history
  *   POST /mine/seen              student: clear the "approved" badge
  *   GET  /mine/late              student: loans past their return time (Late submission pop-up)
@@ -45,6 +47,18 @@ borrowDeskRouter.post('/groups/:groupId/lend', ...coordinatorOnly, asyncHandler(
   const articlesPerType = Object.fromEntries(Object.entries(r.data.articlesPerType).map(([k, v]) => [Number(k), v]));
   const result = await desk.lendWithCard(groupId, { idCardEnrollmentNo: r.data.idCardEnrollmentNo, articlesPerType }, req.user!.userId);
   res.status(201).json({ transactions: result.borrowTxnIds });
+}));
+
+const submittedSchema = z.object({ txnIds: z.array(z.string().uuid()).min(1).max(50) });
+
+borrowDeskRouter.get('/on-loan', ...coordinatorOnly, asyncHandler(async (_req, res) => {
+  res.json(await desk.listOnLoan());
+}));
+
+borrowDeskRouter.post('/submitted', ...coordinatorOnly, asyncHandler(async (req, res) => {
+  const r = submittedSchema.safeParse(req.body);
+  if (!r.success) throw badRequest(r.error.issues.map((i) => i.message).join('; '));
+  res.json(await desk.markSubmitted(r.data.txnIds, req.user!.userId));
 }));
 
 borrowDeskRouter.get('/active', ...staffRead, asyncHandler(async (_req, res) => {

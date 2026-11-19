@@ -18,7 +18,8 @@ import { countEquipmentAlerts } from '../venue/equipmentAlerts.js';
 import { sql } from 'kysely';
 import { db } from '../../db/index.js';
 import { AppError, badRequest, conflict, notFound } from '../../middleware/errors.js';
-import { approveGroup, checkOverdueBorrows, lendPlatformGroup } from './service.js';
+import { approveGroup, checkOverdueBorrows, lendPlatformGroup, returnArticles } from './service.js';
+import { isWeekendKarachi } from './returnOutcome.js';
 
 const TZ = 'Asia/Karachi';
 
@@ -42,6 +43,10 @@ function karachiTime(d: Date): string {
 export function lendWindow(start: Date, end: Date, now = new Date()) {
   const today = karachiDay(now);
   const day = karachiDay(start);
+  if (isWeekendKarachi(start)) {
+    return { lendable: false, reason: 'WEEKEND' as const,
+      message: `${karachiLabel(start)} is a weekend — equipment is not lent on Saturdays or Sundays. Reject it or ask the student to request a weekday.` };
+  }
   if (today < day) {
     return { lendable: false, reason: 'TOO_EARLY' as const,
       message: `This request is for ${karachiLabel(start)}. It can be lent on that day when the student brings their university card.` };
@@ -144,7 +149,7 @@ export async function lendWithCard(groupId: string, input: {
   const start = new Date(Math.min(...open.map((r) => new Date(r.requested_start_at).getTime())));
   const end = new Date(Math.max(...open.map((r) => new Date(r.requested_return_at).getTime())));
   const w = lendWindow(start, end);
-  if (!w.lendable) throw conflict(w.message!, w.reason === 'TOO_EARLY' ? 'LEND_TOO_EARLY' : 'WINDOW_PASSED');
+  if (!w.lendable) throw conflict(w.message!, w.reason === 'TOO_EARLY' ? 'LEND_TOO_EARLY' : w.reason === 'WEEKEND' ? 'WEEKEND' : 'WINDOW_PASSED');
 
   // 3) approve if still pending (same stock check + student notification as the Approve button)
   if (open.some((r) => r.status === 'PENDING')) await approveGroup(groupId, coordinatorId);
@@ -184,6 +189,91 @@ export async function listActiveDetailed() {
   return { transactions: r.rows, now: new Date().toISOString() };
 }
 
+// ── coordinator: Borrow Queue "On loan" list + Submitted ──
+// Lent requests stay on the Borrow Queue until the Coordinator presses
+// "Submitted" (the student has handed everything back at the desk).
+
+export async function listOnLoan() {
+  await checkOverdueBorrows();
+  const r = await sql<{
+    borrow_txn_id: string; request_group_id: string | null; status: string; path: string;
+    agreed_start_at: Date; agreed_return_at: Date; actual_start_at: Date; equipment_type_name: string;
+    borrower_name: string | null; borrower_email: string | null; enrollment_no: string | null; department: string | null;
+    guest_name: string | null; guest_id_number: string | null; barcodes: string | null;
+  }>`
+    SELECT bt.borrow_txn_id, br.request_group_id, bt.status::text AS status, bt.path::text AS path,
+           bt.agreed_start_at, bt.agreed_return_at, bt.actual_start_at, et.name AS equipment_type_name,
+           u.full_name AS borrower_name, u.email AS borrower_email, sp.enrollment_no, sp.department,
+           g.full_name AS guest_name, g.id_number AS guest_id_number,
+           (SELECT string_agg(a.barcode, ', ' ORDER BY a.barcode) FROM borrow_transaction_article bta
+              JOIN article a ON a.article_id = bta.article_id
+             WHERE bta.borrow_txn_id = bt.borrow_txn_id AND bta.returned_at IS NULL) AS barcodes
+      FROM borrow_transaction bt
+      JOIN equipment_type et ON et.equipment_type_id = bt.equipment_type_id
+      LEFT JOIN borrow_request br ON br.borrow_request_id = bt.borrow_request_id
+      LEFT JOIN app_user u ON u.user_id = bt.borrower_user_id
+      LEFT JOIN student_profile sp ON sp.user_id = bt.borrower_user_id
+      LEFT JOIN guest_borrower g ON g.guest_borrower_id = bt.guest_borrower_id
+     WHERE bt.status IN ('ACTIVE', 'OVERDUE', 'INCOMPLETE')
+     ORDER BY bt.agreed_return_at`.execute(db);
+
+  // One row per logical request (kit = several transactions); walk-ins stand alone.
+  const groups = new Map<string, {
+    key: string; txnIds: string[]; borrowerName: string; borrowerEmail: string | null; enrollmentNo: string | null;
+    department: string | null; isGuest: boolean; guestIdNumber: string | null; path: string;
+    startAt: Date; returnAt: Date; items: Array<{ equipmentTypeName: string; barcodes: string | null }>; overdue: boolean;
+  }>();
+  for (const t of r.rows) {
+    const key = t.request_group_id ?? t.borrow_txn_id;
+    const g = groups.get(key) ?? {
+      key, txnIds: [], borrowerName: t.borrower_name ?? t.guest_name ?? 'Unknown borrower', borrowerEmail: t.borrower_email,
+      enrollmentNo: t.enrollment_no, department: t.department, isGuest: !t.borrower_name && !!t.guest_name,
+      guestIdNumber: t.guest_id_number, path: t.path, startAt: t.agreed_start_at, returnAt: t.agreed_return_at, items: [], overdue: false,
+    };
+    g.txnIds.push(t.borrow_txn_id);
+    g.items.push({ equipmentTypeName: t.equipment_type_name, barcodes: t.barcodes });
+    if (t.agreed_start_at < g.startAt) g.startAt = t.agreed_start_at;
+    if (t.agreed_return_at > g.returnAt) g.returnAt = t.agreed_return_at;
+    if (t.status === 'OVERDUE') g.overdue = true;
+    groups.set(key, g);
+  }
+  const now = new Date();
+  return {
+    loans: [...groups.values()].map((g) => ({ ...g, overdue: g.overdue || g.returnAt < now, windowEnded: g.returnAt <= now })),
+    now: now.toISOString(),
+  };
+}
+
+/**
+ * "Submitted": the student has handed everything back to the Coordinator.
+ * Closes every transaction of the request — early → COMPLETED_EARLY, last
+ * 10 min of the window → COMPLETED, after the window → COMPLETED_LATE — and
+ * writes it to Usage History.
+ */
+export async function markSubmitted(txnIds: string[], coordinatorId: string) {
+  const txns = await db.selectFrom('borrow_transaction')
+    .select(['borrow_txn_id', 'status', 'agreed_return_at'])
+    .where('borrow_txn_id', 'in', txnIds).execute();
+  if (txns.length !== txnIds.length) throw notFound('One or more loans were not found.');
+  const open = txns.filter((t) => ['ACTIVE', 'OVERDUE', 'INCOMPLETE'].includes(t.status));
+  if (open.length === 0) throw conflict('This loan has already been closed.', 'ALREADY_SUBMITTED');
+
+  const results: Array<{ borrowTxnId: string; status: string }> = [];
+  for (const t of open) {
+    const outstanding = await db.selectFrom('borrow_transaction_article').select('article_id')
+      .where('borrow_txn_id', '=', t.borrow_txn_id).where('returned_at', 'is', null).execute();
+    if (outstanding.length === 0) continue;
+    const r = await returnArticles(t.borrow_txn_id,
+      { articleIds: outstanding.map((a) => a.article_id), mode: 'dismiss' }, coordinatorId, { source: 'SUBMITTED' });
+    results.push({ borrowTxnId: t.borrow_txn_id, status: r.status });
+  }
+  // A kit's transactions share one window, so they share one outcome.
+  const order = ['COMPLETED_DAMAGED', 'COMPLETED_LATE', 'COMPLETED', 'COMPLETED_EARLY'];
+  const outcome = (order.find((o) => results.some((r) => r.status === o)) ?? 'COMPLETED') as
+    'COMPLETED' | 'COMPLETED_EARLY' | 'COMPLETED_LATE' | 'COMPLETED_DAMAGED';
+  return { outcome, transactions: results };
+}
+
 // ── student: full history ──
 
 export async function myHistory(studentId: string) {
@@ -211,7 +301,8 @@ export async function myHistory(studentId: string) {
       let stage: string;
       if (x.txn_status) {
         if (x.actual_return_at) {
-          stage = x.agreed_return_at && new Date(x.actual_return_at) > new Date(x.agreed_return_at) ? 'RETURNED_LATE' : 'RETURNED';
+          stage = x.txn_status === 'COMPLETED_LATE' || (x.agreed_return_at && new Date(x.actual_return_at) > new Date(x.agreed_return_at))
+            ? 'RETURNED_LATE' : x.txn_status === 'COMPLETED_EARLY' ? 'RETURNED_EARLY' : 'RETURNED';
         } else if (x.txn_status === 'OVERDUE' || (x.agreed_return_at && new Date(x.agreed_return_at).getTime() < now)) {
           stage = 'OVERDUE';
         } else if (x.txn_status === 'INCOMPLETE') {

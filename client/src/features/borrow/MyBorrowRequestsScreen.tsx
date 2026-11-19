@@ -30,13 +30,14 @@ const STAGE: Record<HistoryStage, { label: string; fg: string; bg: string; group
   OVERDUE: { label: 'Late — return now', fg: '#B91C1C', bg: '#FEE2E2', group: 'active' },
   PARTLY_RETURNED: { label: 'Partly returned', fg: '#9A3412', bg: '#FFEDD5', group: 'active' },
   RETURNED: { label: 'Returned', fg: '#334155', bg: '#DCE3EE', group: 'history' },
+  RETURNED_EARLY: { label: 'Returned early', fg: '#1F7A45', bg: '#E6F4EC', group: 'history' },
   RETURNED_LATE: { label: 'Returned late', fg: '#9A3412', bg: '#FFEDD5', group: 'history' },
   NOT_COLLECTED: { label: 'Not collected', fg: '#475569', bg: '#DCE3EE', group: 'history' },
   REJECTED: { label: 'Rejected', fg: '#B91C1C', bg: '#FEE2E2', group: 'history' },
   CANCELLED: { label: 'Cancelled', fg: '#475569', bg: '#DCE3EE', group: 'history' },
   EXPIRED: { label: 'Expired', fg: '#475569', bg: '#DCE3EE', group: 'history' },
 };
-const URGENCY: HistoryStage[] = ['OVERDUE', 'PARTLY_RETURNED', 'ON_LOAN', 'READY_TO_COLLECT', 'PENDING', 'RETURNED_LATE', 'RETURNED', 'NOT_COLLECTED', 'REJECTED', 'EXPIRED', 'CANCELLED'];
+const URGENCY: HistoryStage[] = ['OVERDUE', 'PARTLY_RETURNED', 'ON_LOAN', 'READY_TO_COLLECT', 'PENDING', 'RETURNED_LATE', 'RETURNED', 'RETURNED_EARLY', 'NOT_COLLECTED', 'REJECTED', 'EXPIRED', 'CANCELLED'];
 
 type Filter = 'all' | 'active' | 'history';
 
@@ -89,7 +90,7 @@ export default function MyBorrowRequestsScreen() {
     { label: 'Ready to collect', n: count(['READY_TO_COLLECT']), color: '#16A34A' },
     { label: 'On loan', n: count(['ON_LOAN', 'PARTLY_RETURNED']), color: '#2F6BFF' },
     { label: 'Late', n: count(['OVERDUE']), color: '#E5484D' },
-    { label: 'Completed', n: count(['RETURNED', 'RETURNED_LATE']), color: '#7C5CFC' },
+    { label: 'Completed', n: count(['RETURNED', 'RETURNED_EARLY', 'RETURNED_LATE']), color: '#7C5CFC' },
   ];
 
   return (

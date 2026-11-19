@@ -26,10 +26,11 @@ import { useBorrowBadges } from './useBorrowBadges.js';
 import { LateReturnAlert } from './LateReturnAlert.js';
 import { useAuth } from '../lib/auth.js';
 import { AppShellContext } from './AppShellContext.js';
-import { getNavItems, groupNavItems, isItemActive, ROLE_LABEL } from './navigation.js';
+import { getNavItems, groupNavItems, isItemActive, ROLE_LABEL, VENUE_BADGE_PAGE } from './navigation.js';
 import { useInAppHistory, clearInAppHistory } from './useInAppHistory.js';
 import { BackStackProvider, useBackStackRegistry } from './backStack.js';
 import { useUnreadMessages } from './useUnreadMessages.js';
+import { useVenueBadge } from './useVenueBadge.js';
 import { CoachAssistant, clearCoachChat } from '../features/assistant/CoachAssistant.js';
 
 const COLLAPSE_KEY = 'bukc:sidebarCollapsed';
@@ -54,6 +55,8 @@ export default function AppLayout() {
   const { previous, goBack: historyBack } = useInAppHistory();
   const { registry, hasStep, stepBack } = useBackStackRegistry();
   const unreadMessages = useUnreadMessages(!!user, pathname);
+  const venuePage = user ? VENUE_BADGE_PAGE[user.role] ?? null : null;
+  const venueBadge = useVenueBadge(!!venuePage, pathname, venuePage);
   const borrowBadges = useBorrowBadges(user?.role === 'COORDINATOR' || user?.role === 'STUDENT', pathname);
 
   // Close the mobile drawer whenever the page changes.
@@ -141,17 +144,23 @@ export default function AppLayout() {
                   const badge = item.badge === 'messages' ? unreadMessages
                     : item.badge === 'borrowQueue' ? borrowBadges.borrowQueue
                     : item.badge === 'myBorrowRequests' ? borrowBadges.myBorrowRequests
-                    : item.badge === 'equipmentAlerts' ? borrowBadges.equipmentAlerts : 0;
-                  const badgeWord = item.badge === 'messages' ? 'unread' : item.badge === 'borrowQueue' ? 'pending' : item.badge === 'equipmentAlerts' ? 'need attention' : 'new';
+                    : item.badge === 'equipmentAlerts' ? borrowBadges.equipmentAlerts
+                    : item.badge === 'venue' ? venueBadge : 0;
+                  const badgeWord = item.badge === 'messages' ? 'unread' : item.badge === 'borrowQueue' ? 'pending' : item.badge === 'equipmentAlerts' ? 'need attention' : item.badge === 'venue' ? 'new update' : 'new';
                   const badgeText = badge > 99 ? '99+' : String(badge);
+                  // Venue updates show a plain red dot (no number).
+                  const dotOnly = item.badge === 'venue';
+                  const tipText = dotOnly ? 'new update' : `${badgeText} ${badgeWord}`;
                   return (
                     <li key={item.key}>
                       <Link to={item.to} className={`sb-link${active ? ' is-active' : ''}`} aria-current={active ? 'page' : undefined}
-                        data-tip={badge > 0 ? `${item.label} (${badgeText} ${badgeWord})` : item.label}
-                        aria-label={badge > 0 ? `${item.label}, ${badgeText} ${badgeWord}` : undefined}>
+                        data-tip={badge > 0 ? `${item.label} (${tipText})` : item.label}
+                        aria-label={badge > 0 ? `${item.label}, ${tipText}` : undefined}>
                         <span className="sb-icon">{item.icon}</span>
                         <span className="sb-label">{item.label}</span>
-                        {badge > 0 && <span className="sb-badge" aria-hidden>{badgeText}</span>}
+                        {badge > 0 && (dotOnly
+                          ? <span className="sb-badge sb-dot" aria-hidden />
+                          : <span className="sb-badge" aria-hidden>{badgeText}</span>)}
                       </Link>
                     </li>
                   );
@@ -279,6 +288,8 @@ function ShellStyles() {
         box-shadow: 0 0 0 2px ${C.sbBg}, 0 4px 10px -4px rgba(229,72,77,.8);
         animation: sbBadgeIn .25s ease;
       }
+      /* Dot-only variant (venue updates): red dot, no number */
+      .sb-badge.sb-dot { min-width: 0; width: 10px; height: 10px; padding: 0; }
       @keyframes sbBadgeIn { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
       .sb-footer { padding: 12px; border-top: 1px solid ${C.line}; }
@@ -297,6 +308,7 @@ function ShellStyles() {
       .is-collapsed .sb-group:first-child .sb-section { margin-top: 4px; }
       .is-collapsed .sb-link { justify-content: center; padding: 11px 0; }
       .is-collapsed .sb-badge { position: absolute; top: 3px; right: 9px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 10.5px; }
+      .is-collapsed .sb-badge.sb-dot { top: 7px; right: 13px; min-width: 0; width: 9px; height: 9px; padding: 0; }
       /* hover tooltip with the page name */
       .is-collapsed .sb-link::after {
         content: attr(data-tip); position: fixed; left: calc(var(--sb-w) + 8px); transform: translateY(2px);
@@ -346,6 +358,7 @@ function ShellStyles() {
         .is-collapsed .sb-section { height: auto; padding: 10px 10px 6px; margin: 0; background: none; color: ${C.dim}; }
         .is-collapsed .sb-link { justify-content: flex-start; padding: 10px 12px; }
         .is-collapsed .sb-badge { position: static; min-width: 21px; height: 21px; padding: 0 6px; font-size: 11.5px; }
+        .is-collapsed .sb-badge.sb-dot { min-width: 0; width: 10px; height: 10px; padding: 0; }
         .is-collapsed .sb-link::after { display: none; }
         .sb-mobile-toggle {
           display: inline-flex; position: fixed; top: 12px; left: 12px; z-index: 40; width: 44px; height: 44px;

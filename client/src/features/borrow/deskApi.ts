@@ -10,7 +10,7 @@ export interface ReadyGroup {
   enrollmentNo: string | null; department: string | null; approvedAt: string | null;
   startAt: string; returnAt: string;
   items: Array<{ borrowRequestId: string; equipmentTypeId: number; equipmentTypeName: string; lendingUnit: 'SINGLE' | 'PAIR'; availableUnits: number }>;
-  lendable: boolean; reason: 'TOO_EARLY' | 'WINDOW_PASSED' | null; message: string | null;
+  lendable: boolean; reason: 'TOO_EARLY' | 'WINDOW_PASSED' | 'WEEKEND' | null; message: string | null;
 }
 export interface DeskOverview { ready: ReadyGroup[]; pendingEnrollments: Record<string, string | null>; now: string }
 
@@ -24,7 +24,7 @@ export interface ActiveLoan {
 
 export type HistoryStage =
   | 'PENDING' | 'READY_TO_COLLECT' | 'NOT_COLLECTED' | 'ON_LOAN' | 'OVERDUE' | 'PARTLY_RETURNED'
-  | 'RETURNED' | 'RETURNED_LATE' | 'REJECTED' | 'CANCELLED' | 'EXPIRED';
+  | 'RETURNED' | 'RETURNED_EARLY' | 'RETURNED_LATE' | 'REJECTED' | 'CANCELLED' | 'EXPIRED';
 export interface HistoryRow {
   borrow_request_id: string; request_group_id: string; status: string; stage: HistoryStage;
   requested_start_at: string; requested_return_at: string; submitted_at: string; decided_at: string | null;
@@ -32,6 +32,18 @@ export interface HistoryRow {
   txn_status: string | null; actual_start_at: string | null; agreed_return_at: string | null; actual_return_at: string | null; barcodes: string | null;
 }
 export interface LateLoan { borrow_txn_id: string; equipment_type_name: string; agreed_return_at: string; barcodes: string | null }
+
+/** Borrow Queue "On loan": lent, waiting for the Coordinator to press Submitted. */
+export interface OnLoanGroup {
+  key: string; txnIds: string[]; borrowerName: string; borrowerEmail: string | null; enrollmentNo: string | null;
+  department: string | null; isGuest: boolean; guestIdNumber: string | null; path: string;
+  startAt: string; returnAt: string; items: Array<{ equipmentTypeName: string; barcodes: string | null }>;
+  overdue: boolean; windowEnded: boolean;
+}
+export const listOnLoan = () => api<{ loans: OnLoanGroup[]; now: string }>('/api/borrow-desk/on-loan');
+export const markSubmitted = (txnIds: string[]) =>
+  api<{ outcome: 'COMPLETED' | 'COMPLETED_EARLY' | 'COMPLETED_LATE' | 'COMPLETED_DAMAGED'; transactions: Array<{ borrowTxnId: string; status: string }> }>(
+    '/api/borrow-desk/submitted', { method: 'POST', body: { txnIds } });
 
 export const getBadges = () => api<{ borrowQueue?: number; myBorrowRequests?: number; equipmentAlerts?: number }>('/api/borrow-desk/badges');
 export const getDeskOverview = () => api<DeskOverview>('/api/borrow-desk/overview');
@@ -62,3 +74,18 @@ export function formatDuration(ms: number): string {
   if (m > 0) return `${m}m`;
   return `${s}s`;
 }
+
+/**
+ * Same rule as the server (returnOutcome.ts): back after the window → Late;
+ * in the last 10 minutes → Completed; earlier → Completed — Earlier.
+ */
+export const ON_TIME_BAND_MINUTES = 10;
+export function previewOutcome(returnAt: string, now = Date.now()): 'COMPLETED' | 'COMPLETED_EARLY' | 'COMPLETED_LATE' {
+  const end = new Date(returnAt).getTime();
+  if (now > end) return 'COMPLETED_LATE';
+  if (now < end - ON_TIME_BAND_MINUTES * 60_000) return 'COMPLETED_EARLY';
+  return 'COMPLETED';
+}
+export const OUTCOME_LABEL: Record<string, string> = {
+  COMPLETED: 'Completed', COMPLETED_EARLY: 'Completed — Earlier', COMPLETED_LATE: 'Completed — Late', COMPLETED_DAMAGED: 'Completed — Damaged',
+};

@@ -106,6 +106,37 @@ const internalMetaSchema = z.object({
   specialRequirements: z.string().max(500).optional(),
 });
 
+// ── External request metadata (current rules — externals are the only requesters) ──
+// University ID is free text on purpose: every university uses its own format.
+const externalMemberSchema = z.object({
+  fullName: z.string().trim().min(2, 'Member name must be at least 2 characters.').max(100),
+  universityName: z.string().trim().min(2, 'University name is required.').max(150),
+  universityId: z.string().trim().min(1, 'University ID is required.').max(50),
+});
+const externalTeamSchema = z.object({
+  teamName: z.string().trim().min(1, 'Team name is required.').max(120),
+  members: z.array(externalMemberSchema).min(1, 'Each team needs at least one member.').max(30),
+});
+const externalEventMetaSchema = z.object({
+  bookingType: z.literal('EXTERNAL_EVENT'),
+  sport: z.string().trim().min(1).max(80),
+  numberOfTeams: z.number().int().min(1).max(16),
+  teams: z.array(externalTeamSchema).min(1).max(16),
+  specialRequirements: z.string().max(500).optional(),
+}).superRefine((v, ctx) => {
+  if (v.teams.length !== v.numberOfTeams) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['teams'], message: `Expected details for ${v.numberOfTeams} team(s), got ${v.teams.length}.` });
+  }
+  const seen = new Set<string>();
+  v.teams.forEach((t, i) => {
+    const key = t.teamName.replace(/\s+/g, '').toLowerCase();
+    if (seen.has(key)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['teams', i, 'teamName'], message: 'Team names must be different.' });
+    seen.add(key);
+  });
+});
+
+// Legacy student pitches are kept in the union only so old rows still type-check
+// when read back; the submit route accepts EXTERNAL_EVENT only.
 const bookingMetaSchema = z.discriminatedUnion('bookingType', [
   interUniversityMetaSchema,
   internalMetaSchema,
@@ -115,7 +146,7 @@ export const submitBookingSchema = z.object({
   venueId: z.number().int().positive(),
   estimatedParticipants: z.number().int().positive(),
   sessions: z.array(sessionSchema).min(1).max(30),
-  metadata: bookingMetaSchema,
+  metadata: externalEventMetaSchema,
 });
 
 export const academicEventSchema = z.object({
@@ -151,5 +182,6 @@ export const selfManageAllocationSchema = z.object({
 });
 
 export type BookingMetadata = z.infer<typeof bookingMetaSchema>;
+export type ExternalEventMeta = z.infer<typeof externalEventMetaSchema>;
 export type InterUniversityMeta = z.infer<typeof interUniversityMetaSchema>;
 export type InternalMeta = z.infer<typeof internalMetaSchema>;

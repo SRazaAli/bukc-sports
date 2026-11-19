@@ -155,6 +155,7 @@ export default function UsageHistoryScreen() {
 // ─────────────────────────────────────────────────────────────────────────────
 const OUTCOMES: Record<string, { label: string; color: string; bg: string }> = {
   COMPLETED: { label: 'Completed', color: '#1F7A45', bg: '#E6F4EC' },
+  COMPLETED_EARLY: { label: 'Completed — Earlier', color: '#1D4ED8', bg: '#DBEAFE' },
   COMPLETED_LATE: { label: 'Completed — Late', color: '#9A6412', bg: '#FDF1E3' },
   COMPLETED_DAMAGED: { label: 'Completed — Damaged', color: '#8F2323', bg: '#FDECEC' },
   CANCELLED: { label: 'Cancelled', color: '#4A5A66', bg: '#ECEFF2' },
@@ -239,6 +240,7 @@ function TransactionHistoryTab({ isStaff, userRole }: { isStaff: boolean; userRo
             <select value={outcome} onChange={(e) => setOutcome(e.target.value)} style={s.input}>
               <option value="">All</option>
               <option value="COMPLETED">Completed</option>
+              <option value="COMPLETED_EARLY">Completed — Earlier</option>
               <option value="COMPLETED_LATE">Completed — Late</option>
               <option value="COMPLETED_DAMAGED">Completed — Damaged</option>
               <option value="CANCELLED">Cancelled</option>

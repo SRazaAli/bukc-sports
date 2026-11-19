@@ -2,7 +2,7 @@
 
 This is the only source Coach uses for **rules and procedures**. Live facts (stock, free slots,
 the student's own requests and bookings) come from tools, never from this file.
-Every rule here was checked against the code and confirmed by the team on 14 Nov 2026.
+Every rule here was checked against the code and confirmed by the team on 14 Nov 2026 (venue rules updated 15 Nov 2026: students can no longer book a venue; borrow rules updated 16 Nov 2026: weekdays only, requests in advance allowed, early returns recorded).
 If you change a rule in the app, update this file in the same commit.
 
 All dates and times are campus time (Asia/Karachi).
@@ -17,7 +17,6 @@ All dates and times are campus time (Asia/Karachi).
 | **Messages** | Chat with the Coordinator desk |
 | **Equipment Availability** | See what's available, start a borrow request, request a full kit, open My Borrows |
 | **My Borrow Requests** | All your borrow requests and loans with their current stage |
-| **Book a Venue** | Request a venue and see your booking requests |
 | **Calendar** | Approved bookings and university events by venue and date |
 | **Usage History** | Your permanent record of finished borrows and venue sessions |
 
@@ -52,107 +51,63 @@ All dates and times are campus time (Asia/Karachi).
 
 **Who and when**
 1. Only students can borrow through the portal.
-2. A borrow starts and ends on the **same day**.
-3. The date must be today or later. The start time must be **no later than 5:00 pm** and not in the past.
-4. Each item has a **maximum borrow time** set by staff, up to 24 hours. When several items are borrowed together, the **shortest** limit applies to all of them.
+2. **You can request in advance.** Pick **today or any later weekday** (e.g. tomorrow, next Tuesday). You don't have to wait for the day itself.
+3. The borrow window (start and return time) must be **on one day**: you collect and return on the **same day** you picked. "Same day" is about the window, not about when you submit the request.
+4. **Weekdays only (Monday to Friday).** Equipment is not lent on Saturdays or Sundays.
+5. Times are between **8:00 am and 5:00 pm**: the start time is **no later than 5:00 pm**, and a start time that has **already passed** can't be picked.
+6. Each item has a **maximum borrow time** set by staff, up to 24 hours. When several items are borrowed together, the **shortest** limit applies to all of them.
 
 **Submitting a request**
 
-5. You can have only **one pending request** at a time. Items submitted together count as one request.
-6. You can't request an item that has **0 available** or that has been retired.
-7. After a request is **rejected**, there is a **cooldown** before you can submit again (currently **30 minutes**). The tool reports the exact time left. The cooldown **does not apply to kit requests**.
-8. **Kit request:** you can request all items of one sport in one go, only when the kit is fully Available. The per-item maximum borrow time **does not apply** to kit requests.
-9. If you still have equipment out, **return it before borrowing again**.
-10. Students **can't cancel** a borrow request in the app. To cancel, message the Coordinator.
+7. You can have only **one pending request** at a time. Items submitted together count as one request.
+8. You can't request an item that has **0 available** or that has been retired.
+9. After a request is **rejected**, there is a **cooldown** before you can submit again (currently **30 minutes**). The tool reports the exact time left. The cooldown **does not apply to kit requests**.
+10. **Kit request:** you can request all items of one sport in one go, only when the kit is fully Available. The per-item maximum borrow time **does not apply** to kit requests.
+11. If you still have equipment out, **return it before borrowing again**.
+12. Students **can't cancel** a borrow request in the app. To cancel, message the Coordinator.
 
 **Approval and collection**
 
-11. The Coordinator approves or rejects. A rejection always comes with a reason.
-12. If nobody reviews the request before its start time, it becomes **Expired** and you are notified. You can submit a new one.
-13. Once approved, collect it **on the requested day, before your return time**, at the sports office. Bring your **university card**. The Coordinator checks the card's enrollment number against your account and keeps the card until you return the equipment.
-14. If an approved request isn't collected before its return time, it shows as **Not collected**. You need a new request.
-15. Paired items are handed out and returned **as a pair**.
+13. The Coordinator approves or rejects. A rejection always comes with a reason.
+14. If nobody reviews the request before its start time, it becomes **Expired** and you are notified. You can submit a new one.
+15. Once approved, collect it **on the requested day, before your return time**, at the sports office. Bring your **university card**. The Coordinator checks the card's enrollment number against your account and keeps the card until you return the equipment.
+16. If an approved request isn't collected before its return time, it shows as **Not collected**. You need a new request.
+17. Paired items are handed out and returned **as a pair**.
 
 **Returning**
 
-16. **All items** must come back to close the loan. If only some come back, it shows as **Partly returned**.
-17. Staff record the condition as Good, Worn, or Damaged.
-18. There is **no grace period**. Returning at any time after the agreed return time counts as **late**.
-19. If an item comes back late **and** damaged, it is recorded as **damaged** only.
-20. When the return time passes, the loan becomes **Overdue**. You get a "Late submission" alert and the Coordinator is notified.
-21. Late and damaged returns stay on your record permanently. Three or more late returns flag you to staff. There is **no automatic penalty**.
+18. **All items** must come back to close the loan. If only some come back, it shows as **Partly returned**.
+19. Staff record the condition as Good, Worn, or Damaged.
+20. There is **no grace period**. Returning at any time after the agreed return time counts as **late**.
+21. If an item comes back late **and** damaged, it is recorded as **damaged** only.
+22. When the return time passes, the loan becomes **Overdue**. You get a "Late submission" alert and the Coordinator is notified.
+23. Late and damaged returns stay on your record permanently. Three or more late returns flag you to staff. There is **no automatic penalty**.
 
 **Borrowing Activity (reputation)**
 
-22. Never look up or state the student's own numbers. Point them to **My Profile → Borrowing Activity**, which shows:
+24. Never look up or state the student's own numbers. Point them to **My Profile → Borrowing Activity**, which shows:
     - **Total borrows**: completed loans
     - **Late returns**: loans returned after the agreed time
     - **Damaged returns**: loans where an item came back damaged
 
-**Borrow request stages a student may see:** Pending, Ready to collect (approved), On loan, Overdue, Partly returned, Returned, Returned late, Not collected, Rejected, Expired, Cancelled.
+**Borrow request stages a student may see:** Pending, Ready to collect (approved), On loan, Overdue, Partly returned, Returned, Returned early, Returned late, Not collected, Rejected, Expired, Cancelled.
+
+**How a finished borrow is recorded in Usage History**
+- Returned in the **last 10 minutes** of the window (e.g. 3:50–4:00 pm for a 3–4 pm borrow) → **Completed**
+- Returned **earlier** than that (e.g. 3:30 pm) → **Completed — Earlier**. Returning early is fine and is not a penalty.
+- Returned **after** the return time → **Completed — Late**
+- Any item damaged → **Completed — Damaged**
 
 ---
 
-## 4. Venue booking
+## 4. Venues (students can't book)
 
-**Venues**
-1. Venue details come from the venue tool: name, indoor/outdoor, location, surface, and status.
-2. If a venue is **Under maintenance** or **Closed**, say so, and add that the Coordinator may not approve a booking there.
-
-**What a booking contains**
-
-3. One venue and **1 to 30 sessions**. A single match is one session. A tournament can have several.
-4. There are two booking types:
-   - **Inter-University:** sport, event format (Single match or Tournament), match format (Friendly, League, Knockout or Round robin), the BUKC team (team name, optional captain, 1–30 players with enrollment numbers), and the visiting university, its city, team name, and 1–30 players.
-   - **Internal:** Team A (BUKC players with enrollment numbers) vs Team B (1–30 players), plus the organising entity.
-5. Both types need an estimated number of participants and an equipment choice:
-   - **Self**: you bring your own
-   - **University**: you list items and quantities
-
-   Special requirements are optional, up to 500 characters.
-6. **Participants: at least 6 for indoor venues and at least 10 for outdoor venues.**
-
-**Timing**
-
-7. Venue bookings are **Monday to Friday only**. Never suggest a Saturday or Sunday, and don't offer a booking link for one.
-8. Each session must be **between 9:00 am and 6:00 pm on a single day**. It must start in the future and end after it starts.
-9. Sessions in the same request can't overlap each other.
-10. Advice, not a rule: request **at least a day or two ahead**. Approval needs both the Coordinator and the Super Admin, and a request that isn't approved before its first session expires.
-
-**Clashes**
-
-11. A session can't overlap an **approved** session at that venue, or a time **held by another open request** (pending, forwarded, sent back, or awaiting a shortfall reply). **Never say who holds a slot.**
-12. University **academic events** created by the Coordinator also occupy venues.
-13. For "is it free?" questions, use the free-slot tool. The Calendar shows only approved bookings and events, not pending holds.
-
-**One booking at a time**
-
-14. You can't submit a new booking while you have one **Pending** or **Forwarded**, or an **Approved** booking that still has upcoming sessions.
-15. A booking that is **Sent back**, or waiting for your **equipment shortfall** reply, does **not** stop you submitting another one.
-
-**Approval flow**
-
-16. You submit, then the **Coordinator** reviews it. The Coordinator can:
-    - **forward** it to the Super Admin
-    - **reject** it, with a reason
-    - **send it back** to you with a note or a proposed new schedule
-17. The **Super Admin** gives the final approval or rejection, or returns it to the Coordinator for another look.
-18. **Sent back:** you either **accept** or **decline**.
-    - Accept: it goes back to Pending, using the proposed schedule if one was given.
-    - Decline: it becomes Rejected.
-19. **Equipment shortfall:** the university can't supply everything you asked for. You either:
-    - confirm you'll bring the missing items yourself (it goes back to Pending), or
-    - decline (it becomes Rejected).
-20. Approval is **all-or-nothing**. If any session's slot was taken in the meantime, the whole request is rejected.
-21. A Pending or Forwarded request whose first session has already started becomes **Expired**.
-
-**After approval**
-
-22. Staff can **cancel** a session (with a reason, and you're notified) or mark it as **needing rescheduling**.
-23. Each session is marked **completed automatically** when its end time passes. The booking completes when all its sessions are done.
-24. Students **can't cancel** a booking in the app, at any stage. To cancel, message the Coordinator.
-
-**Booking statuses:** Pending, Forwarded, Sent back, Shortfall pending, Approved, Rejected, Cancelled, Completed, Expired.
+1. **Students can't book a venue.** There is no Book a Venue page for students. Venue booking is only for **external users** (people from other universities and organisations with an External account).
+2. If a student wants a venue for a match, practice or event, say they can't request it in the portal and suggest **messaging the Coordinator** in Messages.
+3. Students can still look at venues: venue details come from the venue tool (name, indoor/outdoor, location, surface, status). If a venue is **Under maintenance** or **Closed**, say so.
+4. For "is it free?" questions, use the free-slot tool. Never say who holds a slot.
+5. Venue hours for bookings are **Monday to Friday, 9:00 am to 6:00 pm**. University **academic events** created by the Coordinator also occupy venues.
+6. How an external booking is decided (only if asked): the external submits the request, the **Coordinator** reviews it and checks for clashes, then forwards it to the **Super Admin**, who approves or rejects it with a reason.
 
 ---
 
@@ -165,11 +120,10 @@ All dates and times are campus time (Asia/Karachi).
 
 ## 6. Usage history, notifications, messages
 
-1. **Usage History** is a permanent record of your own finished borrows and completed venue sessions, including late or damaged outcomes. You can only see your own.
+1. **Usage History** is a permanent record of your own finished borrows, including late or damaged outcomes. You can only see your own.
 2. **Notifications** appear in-app, and some are also sent by email. They cover:
    - borrow request approved, rejected or expired
    - loan overdue
-   - booking approved, rejected, sent back, equipment shortfall, cancelled or rescheduled
 
    The bell shows unread notifications, and you can mark them as read.
 3. **Messages:** students can message the **Coordinator desk** only, not the Super Admin or other students. Use this for anything Coach can't answer, and for cancellations.

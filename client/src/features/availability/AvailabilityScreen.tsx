@@ -344,7 +344,7 @@ function EqStyles() {
   );
 }
 
-/* ---------- styles ---------- */
+/* ---------- Styles---------- */
 const CARD_BG = 'linear-gradient(145deg, #F8FAFF 0%, #EAF0FC 100%)';
 const CARD_SHADOW = '0 12px 30px -22px rgba(3,22,54,.85)';
 
